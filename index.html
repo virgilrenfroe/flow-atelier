@@ -154,7 +154,19 @@
     font-family: var(--font-display); font-weight: 700; letter-spacing: -0.04em;
     font-size: clamp(4rem, 18vw, 11rem); color: rgba(242,235,224,0.04);
     pointer-events: none; white-space: nowrap; user-select: none; z-index: 1;
+    max-width: 92vw; text-align: center; line-height: 1.05;
+    transition: opacity 0.2s ease, font-size 0.2s ease, color 0.2s ease;
   }
+  .mask-hint.lyrics {
+    white-space: normal;
+    color: rgba(242,235,224,0.72);
+    text-shadow: 0 2px 28px rgba(5,6,10,0.75), 0 0 48px rgba(240,194,75,0.16);
+    letter-spacing: -0.03em;
+    font-weight: 650;
+  }
+  .mask-hint.lyrics.short { font-size: clamp(3.2rem, 14vw, 8rem); }
+  .mask-hint.lyrics.mid { font-size: clamp(1.6rem, 6.5vw, 3.6rem); white-space: normal; }
+  .mask-hint.lyrics.long { font-size: clamp(1.15rem, 4.2vw, 2.2rem); white-space: normal; }
 
   /* Corridor panel embed: denser chrome, full-bleed canvas */
   body.embed .topbar { top: 8px; left: 8px; right: 8px; }
@@ -165,8 +177,11 @@
   body.embed .audio-panel { top: 52px; right: 8px; transform: scale(0.92); transform-origin: top right; }
   body.embed .gesture-hint { font-size: 12px; padding: 12px 14px; }
   body.embed .mask-hint { font-size: clamp(2.4rem, 14vw, 6rem); }
+  body.embed .mask-hint.lyrics.short { font-size: clamp(2rem, 11vw, 4.5rem); }
+  body.embed .mask-hint.lyrics.mid { font-size: clamp(1.1rem, 5vw, 2.2rem); }
+  body.embed .mask-hint.lyrics.long { font-size: clamp(0.95rem, 3.6vw, 1.55rem); }
 
-  .lyric-line {
+  .lyric-line { display: none !important; /* lyrics live in #maskHint */
     position: absolute; left: 50%; bottom: 18%;
     transform: translateX(-50%);
     z-index: 4; pointer-events: none;
@@ -633,7 +648,16 @@ function rebuildMask() {
     maskCtx.font = `700 ${size}px "Bricolage Grotesque", system-ui, sans-serif`;
     maskCtx.textAlign = 'center';
     maskCtx.textBaseline = 'middle';
-    maskCtx.fillText('MELODY', W * 0.5, H * 0.48);
+    const maskWord = (audioPlaying && lyricIdx >= 0 && LYRIC_CUES[lyricIdx])
+      ? LYRIC_CUES[lyricIdx].text
+      : 'MELODY';
+    // scale down for long lyric lines so the swarm still reads
+    const mw = maskCtx.measureText(maskWord).width || 1;
+    if (mw > W * 0.88) {
+      const s = (W * 0.88) / mw;
+      maskCtx.font = `700 ${Math.max(24, size * s)}px "Bricolage Grotesque", system-ui, sans-serif`;
+    }
+    maskCtx.fillText(maskWord, W * 0.5, H * 0.48);
 
   } else if (maskKind === 1) {
     // Concentric rings / glyph
@@ -671,7 +695,7 @@ function rebuildMask() {
   }
   maskData = maskCtx.getImageData(0, 0, W, H);
   document.getElementById('h-mask').textContent = MASK_NAMES[maskKind];
-  document.getElementById('maskHint').style.opacity = maskKind === 0 ? '1' : '0';
+  document.getElementById('maskHint').style.opacity = (audioPlaying || maskKind === 0) ? '1' : '0';
 }
 
 /* ── Circle packing ────────────────────────────────────────────────── */
@@ -1358,18 +1382,41 @@ function lyricAt(t) {
   return i;
 }
 function updateLyrics() {
-  const el = document.getElementById('lyricLine');
+  const el = document.getElementById('maskHint');
   if (!el) return;
   if (!audioPlaying || !mediaEl) {
-    if (lyricIdx !== -1) { lyricIdx = -1; el.textContent = ''; el.classList.remove('on'); }
+    if (el.classList.contains('lyrics') || lyricIdx !== -1) {
+      lyricIdx = -1;
+      el.textContent = 'MELODY';
+      el.classList.remove('lyrics', 'short', 'mid', 'long');
+      // restore mask-mode visibility rule
+      el.style.opacity = (typeof maskKind !== 'undefined' && maskKind === 0) ? '1' : '0';
+    }
     return;
   }
   const i = lyricAt(mediaEl.currentTime || 0);
+  el.style.opacity = '1'; // lyrics always visible while song plays
   if (i === lyricIdx) return;
   lyricIdx = i;
-  if (i < 0) { el.textContent = ''; el.classList.remove('on'); return; }
-  el.textContent = LYRIC_CUES[i].text;
-  el.classList.add('on');
+  if (i < 0) {
+    // hold last line between gaps; if none yet, soft empty
+    if (!el.classList.contains('lyrics')) {
+      el.textContent = '';
+      el.classList.add('lyrics', 'mid');
+    }
+    return;
+  }
+  const text = LYRIC_CUES[i].text;
+  el.textContent = text;
+  el.classList.add('lyrics');
+  el.classList.remove('short', 'mid', 'long');
+  const n = text.length;
+  if (n <= 8) el.classList.add('short');
+  else if (n <= 36) el.classList.add('mid');
+  else el.classList.add('long');
+  if (typeof maskKind !== 'undefined' && maskKind === 0 && typeof rebuildMask === 'function') {
+    try { rebuildMask(); } catch (_) {}
+  }
 }
 
 /* ── Audio UI wire ─────────────────────────────────────────────────── */
