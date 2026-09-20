@@ -6,7 +6,20 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
-<title>Noctuary — flow atelier</title>
+<title>Flow</title>
+<meta name="description" content="Drop a song — the field follows bass, volume, and beats." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://flow-atelier.up.railway.app/" />
+<meta property="og:title" content="Flow" />
+<meta property="og:description" content="Drop a song — the field follows bass, volume, and beats." />
+<meta property="og:image" content="https://flow-atelier.up.railway.app/og.jpg?v=4" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:type" content="image/jpeg" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Flow" />
+<meta name="twitter:description" content="Drop a song — the field follows bass, volume, and beats." />
+<meta name="twitter:image" content="https://flow-atelier.up.railway.app/og.jpg?v=4" />
 <style>
   :root {
     --font-display: "Bricolage Grotesque", system-ui, sans-serif;
@@ -171,13 +184,65 @@
   .mask-hint.lyrics.mid { font-size: clamp(1.2rem, 5.5vmin, 2.4rem); }
   .mask-hint.lyrics.long { font-size: clamp(0.95rem, 4vmin, 1.7rem); white-space: normal; }
 
+
+  /* Quiet chrome: keep controls, shrink non-essentials */
+  .topbar { top: 10px; left: 10px; right: 10px; gap: 6px; opacity: 0.72; }
+  .topbar:hover, .topbar:focus-within { opacity: 0.95; }
+  .pills { gap: 4px; transform: scale(0.82); transform-origin: top right; }
+  .pill { padding: 5px 8px; font-size: 9px; letter-spacing: 0.08em; }
+  .pill kbd { font-size: 8px; margin-left: 3px; }
+
+  .hud {
+    left: 10px; bottom: 10px;
+    min-width: 0; width: auto; max-width: 160px;
+    padding: 6px 8px; border-radius: 10px;
+    font-size: 8px; letter-spacing: 0.04em; line-height: 1.45;
+    opacity: 0.42; transform: scale(0.88); transform-origin: bottom left;
+  }
+  .hud:hover { opacity: 0.75; }
+  .hud .r { gap: 8px; }
+
+  .modes {
+    bottom: 10px; gap: 3px; max-width: min(640px, 70vw);
+    opacity: 0.55; transform: translateX(-50%) scale(0.78); transform-origin: bottom center;
+  }
+  .modes:hover, .modes:focus-within { opacity: 0.92; }
+  .mode-chip { padding: 4px 7px; font-size: 8px; letter-spacing: 0.06em; }
+
+  .audio-rail {
+    right: 10px; top: 44px; gap: 5px;
+    max-width: min(168px, 28vw);
+    opacity: 0.7; transform: scale(0.82); transform-origin: top right;
+  }
+  .audio-rail:hover, .audio-rail:focus-within { opacity: 0.95; }
+  /* Keep play + your-song readable; shrink meters/keys/toggles more */
+  .audio-rail .song-label { font-size: 7px; opacity: 0.75; }
+  .audio-rail .meter {
+    grid-template-columns: 28px 1fr 22px; gap: 4px;
+    font-size: 8px; padding: 4px 6px; border-radius: 8px;
+  }
+  .audio-rail .meter .bar { height: 4px; }
+  .audio-toggles { gap: 3px; opacity: 0.75; }
+  .audio-toggles .chip { padding: 3px 6px; font-size: 7px; }
+  .midi-keys { opacity: 0.65; }
+  .midi-keys button { width: 20px; height: 20px; font-size: 8px; border-radius: 4px; }
+  .song-row { gap: 4px; }
+  .song-row .pill { font-size: 9px; padding: 5px 8px; }
+
+  .note { font-size: 9px; opacity: 0.28; right: 10px; bottom: 10px; max-width: 200px; }
+  .gesture-hint { font-size: 12px; padding: 10px 14px; }
+
+  body.embed .audio-rail { top: 40px; right: 6px; transform: scale(0.72); }
+  body.embed .modes { transform: translateX(-50%) scale(0.7); max-width: 55vw; }
+  body.embed .hud { transform: scale(0.8); opacity: 0.35; }
+
   /* Corridor panel embed: denser chrome, full-bleed canvas */
   body.embed .topbar { top: 8px; left: 8px; right: 8px; }
   body.embed .pills { gap: 4px; }
   body.embed .pill { padding: 7px 9px; font-size: 9px; }
   body.embed .hud { bottom: 8px; left: 8px; font-size: 9px; max-width: 42vw; }
   body.embed .modes { bottom: 8px; right: 8px; max-width: 48vw; }
-  body.embed .audio-panel { top: 52px; right: 8px; transform: scale(0.92); transform-origin: top right; }
+  body.embed .audio-rail { top: 40px; right: 6px; transform: scale(0.72); transform-origin: top right; }
   body.embed .gesture-hint { font-size: 12px; padding: 12px 14px; }
   body.embed .mask-hint { width: min(36vmin, 48%); max-width: min(36vmin, 48%); }
   body.embed .mask-hint.lyrics.short { font-size: clamp(1.2rem, 6.5vmin, 2.4rem); }
@@ -250,7 +315,7 @@
         <button type="button" data-semi="11">B</button>
       </div>
     </div>
-    <div class="modes" id="mode-chips" aria-label="Atelier modes"></div>
+    <div class="modes" id="mode-chips" aria-label="Modes"></div>
     
   </div>
   <div class="gesture-hint" id="gestureHint" role="button" tabindex="0">
@@ -993,7 +1058,7 @@ function exportSVG() {
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
-  <title>Noctuary flow atelier · ${mode} · streamlines</title>
+  <title>Noctuary flow · ${mode} · streamlines</title>
   <rect width="100%" height="100%" fill="#f2ebe0"/>
   <!-- continuous streamline paths for pen plotter -->
   ${paths.join('\n  ')}
@@ -1002,7 +1067,7 @@ function exportSVG() {
   const blob = new Blob([svg], { type: 'image/svg+xml' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `noctuary-flow-atelier-${mode}.svg`;
+  a.download = `noctuary-flow-${mode}.svg`;
   a.click();
   URL.revokeObjectURL(a.href);
   document.getElementById('btn-export').classList.add('on');
@@ -1135,7 +1200,7 @@ function step(dt) {
       p.life -= dt;
       if (p.life <= 0) Object.assign(p, spawnOne({ edge: true }));
     } else {
-      // Soft wrap for density in other modes too (atelier always densifies)
+      // Soft wrap for density in other modes too (always densifies)
       let wrapped = false;
       if (p.x > W) { p.x = 0; wrapped = true; }
       else if (p.x < 0) { p.x = W; wrapped = true; }
