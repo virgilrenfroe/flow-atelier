@@ -149,24 +149,27 @@
     letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 6px; }
   .gesture-hint.hidden { display: none; }
 
+  /* Anchor matches Mask Swarm ring center (canvas H*0.48, R=0.22*min) */
   .mask-hint {
-    position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%);
+    position: absolute; left: 50%; top: 48%; transform: translate(-50%, -50%);
     font-family: var(--font-display); font-weight: 700; letter-spacing: -0.04em;
     font-size: clamp(4rem, 18vw, 11rem); color: rgba(242,235,224,0.04);
     pointer-events: none; white-space: nowrap; user-select: none; z-index: 1;
-    max-width: 92vw; text-align: center; line-height: 1.05;
+    width: min(40vmin, 42vw); max-width: min(40vmin, 42vw);
+    text-align: center; line-height: 1.05;
     transition: opacity 0.2s ease, font-size 0.2s ease, color 0.2s ease;
   }
   .mask-hint.lyrics {
-    white-space: normal;
-    color: rgba(242,235,224,0.72);
+    white-space: nowrap;
+    color: rgba(242,235,224,0.82);
     text-shadow: 0 2px 28px rgba(5,6,10,0.75), 0 0 48px rgba(240,194,75,0.16);
     letter-spacing: -0.03em;
     font-weight: 650;
   }
-  .mask-hint.lyrics.short { font-size: clamp(3.6rem, 16vw, 9rem); } /* word karaoke */
-  .mask-hint.lyrics.mid { font-size: clamp(1.6rem, 6.5vw, 3.6rem); white-space: normal; }
-  .mask-hint.lyrics.long { font-size: clamp(1.15rem, 4.2vw, 2.2rem); white-space: normal; }
+  /* Size words to sit inside the swarm circle */
+  .mask-hint.lyrics.short { font-size: clamp(1.6rem, 8vmin, 3.6rem); }
+  .mask-hint.lyrics.mid { font-size: clamp(1.2rem, 5.5vmin, 2.4rem); }
+  .mask-hint.lyrics.long { font-size: clamp(0.95rem, 4vmin, 1.7rem); white-space: normal; }
 
   /* Corridor panel embed: denser chrome, full-bleed canvas */
   body.embed .topbar { top: 8px; left: 8px; right: 8px; }
@@ -176,10 +179,21 @@
   body.embed .modes { bottom: 8px; right: 8px; max-width: 48vw; }
   body.embed .audio-panel { top: 52px; right: 8px; transform: scale(0.92); transform-origin: top right; }
   body.embed .gesture-hint { font-size: 12px; padding: 12px 14px; }
-  body.embed .mask-hint { font-size: clamp(2.4rem, 14vw, 6rem); }
-  body.embed .mask-hint.lyrics.short { font-size: clamp(2rem, 11vw, 4.5rem); }
-  body.embed .mask-hint.lyrics.mid { font-size: clamp(1.1rem, 5vw, 2.2rem); }
-  body.embed .mask-hint.lyrics.long { font-size: clamp(0.95rem, 3.6vw, 1.55rem); }
+  body.embed .mask-hint { width: min(36vmin, 48%); max-width: min(36vmin, 48%); }
+  body.embed .mask-hint.lyrics.short { font-size: clamp(1.2rem, 6.5vmin, 2.4rem); }
+  body.embed .mask-hint.lyrics.mid { font-size: clamp(1rem, 4.5vmin, 1.7rem); }
+  body.embed .mask-hint.lyrics.long { font-size: clamp(0.85rem, 3.5vmin, 1.3rem); }
+
+  .song-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .song-row input[type=file] { display: none; }
+  body.drag-audio .layer::after {
+    content: "Drop an audio file";
+    position: fixed; inset: 0; z-index: 40;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(5,6,10,0.72); color: var(--accent);
+    font-family: var(--font-display); font-size: clamp(1.4rem, 4vw, 2.4rem);
+    font-weight: 650; letter-spacing: -0.02em; pointer-events: none;
+  }
 
 </style>
 </head>
@@ -209,8 +223,12 @@
       <div class="r"><span>steer</span><strong id="h-steer">—</strong></div>
     </div>
     <div class="audio-rail" id="audioRail">
-      <div class="song-label">A Song with a Hole in It · Virgil Renfroe</div>
-      <button class="pill" type="button" id="btn-song" title="Play / pause corridor song (A)">Song <kbd>A</kbd></button>
+      <div class="song-label" id="songLabel">A Song with a Hole in It</div>
+      <div class="song-row">
+        <button class="pill" type="button" id="btn-song" title="Play / pause (A)">Play <kbd>A</kbd></button>
+        <button class="pill" type="button" id="btn-load" title="Load your own audio">Your song</button>
+        <input type="file" id="file-audio" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,audio/mpeg,audio/wav" />
+      </div>
       <div class="meter bass"><span>bass</span><div class="bar"><i id="m-bass"></i></div><span id="v-bass">0</span></div>
       <div class="meter mid"><span>mid</span><div class="bar"><i id="m-mid"></i></div><span id="v-mid">0</span></div>
       <div class="meter high"><span>high</span><div class="bar"><i id="m-high"></i></div><span id="v-high">0</span></div>
@@ -236,8 +254,8 @@
     
   </div>
   <div class="gesture-hint" id="gestureHint" role="button" tabindex="0">
-    <strong>Click to unlock audio</strong>
-    Tap to play the corridor song. Meters should jump with the beat — particles speed up on loud parts, bass kicks the field.
+    <strong>Click to play · or drop your song</strong>
+    Play the default track, or use Your song / drag in an mp3. The field follows bass, volume, and beats.
   </div>
 
 <script>
@@ -297,14 +315,16 @@ const VIOLET = [138, 123, 184];
 const PAPER = [242, 235, 224];
 
 
-/* ── Audio (corridor song) + MIDI steer ────────────────────────────── */
-const SONG_URL = './demo-assets/audio/corridor-song.mp3';
+/* ── Audio (default track or user upload) + MIDI steer ─────────────── */
+let songUrl = './demo-assets/audio/corridor-song.mp3';
+let songLabelText = 'A Song with a Hole in It';
+let customTrack = false; // user upload → flow field only (no locked lyrics)
+let objectUrl = null;
 const audioFx = { scale: true, vel: true, color: true, beat: true, steer: true };
 const bands = { bass: 0, mid: 0, high: 0, vol: 0, onset: 0 };
 const bandFloor = { bass: 0.08, mid: 0.08, high: 0.08, vol: 0.08 };
 const bandCeil = { bass: 0.35, mid: 0.35, high: 0.35, vol: 0.4 };
 function normBand(key, raw) {
-  // Adaptive AGC so meters dance mid-range instead of pegging
   const f = bandFloor[key], c = bandCeil[key];
   bandFloor[key] = f * 0.995 + raw * 0.005;
   bandCeil[key] = Math.max(bandFloor[key] + 0.06, c * 0.992 + raw * 0.008);
@@ -314,9 +334,9 @@ function normBand(key, raw) {
 let audioCtx = null, analyser = null, audioData = null, audioSrc = null, mediaEl = null;
 let audioReady = false, audioPlaying = false;
 let prevBass = 0, beatCooldown = 0;
-let steerAngle = 0; // radians baseline from MIDI / keys
-let steerHeld = 0;  // 0..1 intensity
-let noiseZoom = 1;  // bass → zoom (higher bass = more chaotic / zoomed-out = lower freq scale)
+let steerAngle = 0;
+let steerHeld = 0;
+let noiseZoom = 1;
 
 function setMeter(id, v) {
   const pct = Math.max(0, Math.min(100, (v * 100) | 0));
@@ -326,34 +346,93 @@ function setMeter(id, v) {
   if (lab) lab.textContent = String(Math.round(v * 99));
 }
 
+function updateSongChrome() {
+  const lab = document.getElementById('songLabel');
+  if (lab) lab.textContent = songLabelText + (customTrack ? ' · your track' : '');
+  const btn = document.getElementById('btn-song');
+  if (btn && !audioPlaying) btn.innerHTML = 'Play <kbd>A</kbd>';
+}
+
+function wireMediaEnded() {
+  if (!mediaEl) return;
+  mediaEl.addEventListener('ended', () => {
+    audioPlaying = false;
+    const sb = document.getElementById('btn-song');
+    if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
+    document.getElementById('h-audio').textContent = 'ended';
+    notifyCorridorSong(false);
+  });
+}
+
 async function ensureAudio() {
-  if (audioReady) return true;
+  if (audioReady && mediaEl) return true;
   try {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    mediaEl = new Audio(SONG_URL);
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!analyser) {
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.45;
+      audioData = new Uint8Array(analyser.frequencyBinCount);
+      analyser.connect(audioCtx.destination);
+    }
+    mediaEl = new Audio(songUrl);
     mediaEl.crossOrigin = 'anonymous';
     mediaEl.loop = true;
     mediaEl.preload = 'auto';
     audioSrc = audioCtx.createMediaElementSource(mediaEl);
-    analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 2048;
-    analyser.smoothingTimeConstant = 0.45;
-    audioData = new Uint8Array(analyser.frequencyBinCount);
     audioSrc.connect(analyser);
-    analyser.connect(audioCtx.destination);
     audioReady = true;
-    mediaEl.addEventListener('ended', () => {
-      audioPlaying = false;
-      document.getElementById('btn-song').classList.remove('on');
-      document.getElementById('h-audio').textContent = 'ended';
-      notifyCorridorSong(false);
-    });
+    wireMediaEnded();
     document.getElementById('h-audio').textContent = 'ready';
+    updateSongChrome();
     return true;
   } catch (err) {
     console.warn('audio init failed', err);
     document.getElementById('h-audio').textContent = 'fail';
     return false;
+  }
+}
+
+async function loadUserFile(file) {
+  if (!file) return;
+  if (!file.type.startsWith('audio/') && !/\.(mp3|wav|m4a|ogg|flac|aac)$/i.test(file.name)) {
+    document.getElementById('h-audio').textContent = 'not audio';
+    return;
+  }
+  try {
+    if (mediaEl) { try { mediaEl.pause(); } catch (_) {} }
+    if (audioSrc) { try { audioSrc.disconnect(); } catch (_) {} }
+    audioSrc = null;
+    mediaEl = null;
+    audioReady = false;
+    audioPlaying = false;
+    if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    objectUrl = URL.createObjectURL(file);
+    songUrl = objectUrl;
+    songLabelText = file.name.replace(/\.[^.]+$/, '') || file.name;
+    customTrack = true;
+    lyricIdx = -1;
+    const hintEl = document.getElementById('maskHint');
+    if (hintEl) { hintEl.textContent = ''; hintEl.classList.remove('lyrics', 'short', 'mid', 'long'); }
+    const sb = document.getElementById('btn-song');
+    if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
+    updateSongChrome();
+    const ok = await ensureAudio();
+    if (!ok) return;
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    const hint = document.getElementById('gestureHint');
+    if (hint) hint.classList.add('hidden');
+    await mediaEl.play();
+    audioPlaying = true;
+    if (paused) setPaused(false);
+    if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
+    document.getElementById('h-audio').textContent = 'live';
+    notifyCorridorSong(true);
+    Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
+    syncAudioChips();
+  } catch (err) {
+    console.warn(err);
+    document.getElementById('h-audio').textContent = 'blocked';
   }
 }
 
@@ -371,7 +450,8 @@ async function toggleSong() {
   if (audioPlaying) {
     mediaEl.pause();
     audioPlaying = false;
-    document.getElementById('btn-song').classList.remove('on');
+    const sb = document.getElementById('btn-song');
+    if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
     document.getElementById('h-audio').textContent = 'paused';
     notifyCorridorSong(false);
   } else {
@@ -379,7 +459,8 @@ async function toggleSong() {
       await mediaEl.play();
       audioPlaying = true;
       if (paused) setPaused(false);
-      document.getElementById('btn-song').classList.add('on');
+      const sb = document.getElementById('btn-song');
+      if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
       document.getElementById('h-audio').textContent = 'live';
       notifyCorridorSong(true);
       // Arm music fx but stay on current mode (Mask Swarm by default)
@@ -513,7 +594,9 @@ function setupMidi() {
 let modeIdx = 0;
 let showVectors = false;
 let paused = false;
-let maskKind = 0; // 0 text, 1 ring, 2 blot
+let maskKind = 0; // 0 text/ring swarm, 1 rings, 2 blot
+/** Mask Swarm circle — keep lyrics locked to this center */
+const MASK_RING = { cx: 0.5, cy: 0.48, r: 0.22 };
 const MASK_NAMES = ['text', 'ring', 'blot'];
 
 const canvas = document.getElementById('stage');
@@ -628,7 +711,7 @@ function rebuildMask() {
     // Soft ring keeps mask-swarm mode useful without doubling the word on screen
     maskCtx.lineWidth = Math.max(10, Math.min(W, H) * 0.03);
     maskCtx.beginPath();
-    maskCtx.arc(W * 0.5, H * 0.48, Math.min(W, H) * 0.22, 0, Math.PI * 2);
+    maskCtx.arc(W * MASK_RING.cx, H * MASK_RING.cy, Math.min(W, H) * MASK_RING.r, 0, Math.PI * 2);
     maskCtx.stroke();
 
   } else if (maskKind === 1) {
@@ -1124,6 +1207,12 @@ function render() {
   if (reduceMotion && showVectors) drawVectors();
 }
 
+function syncMaskHintPos() {
+  const el = document.getElementById('maskHint');
+  if (!el) return;
+  el.style.left = (MASK_RING.cx * 100) + '%';
+  el.style.top = (MASK_RING.cy * 100) + '%';
+}
 function resize() {
   dpr = Math.min(devicePixelRatio || 1, 2);
   W = Math.floor(innerWidth * dpr);
@@ -1132,6 +1221,7 @@ function resize() {
   canvas.height = H;
   canvas.style.width = innerWidth + 'px';
   canvas.style.height = innerHeight + 'px';
+  syncMaskHintPos();
   rebuildMask();
   resetParticles();
 }
@@ -2319,6 +2409,14 @@ function lyricAt(t) {
 function updateLyrics() {
   const el = document.getElementById('maskHint');
   if (!el) return;
+  if (customTrack) {
+    if (el.classList.contains('lyrics') || lyricIdx !== -1) {
+      lyricIdx = -1;
+      el.textContent = '';
+      el.classList.remove('lyrics', 'short', 'mid', 'long');
+    }
+    return;
+  }
   if (!audioPlaying || !mediaEl) {
     if (el.classList.contains('lyrics') || lyricIdx !== -1) {
       lyricIdx = -1;
@@ -2346,6 +2444,32 @@ function updateLyrics() {
 
 /* ── Audio UI wire ─────────────────────────────────────────────────── */
 document.getElementById('btn-song').addEventListener('click', () => toggleSong());
+document.getElementById('btn-load').addEventListener('click', () => document.getElementById('file-audio').click());
+document.getElementById('file-audio').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) loadUserFile(f);
+  e.target.value = '';
+});
+// Drag-drop anywhere
+['dragenter', 'dragover'].forEach((ev) => {
+  window.addEventListener(ev, (e) => {
+    if (![...e.dataTransfer.types].includes('Files')) return;
+    e.preventDefault();
+    document.body.classList.add('drag-audio');
+  });
+});
+['dragleave', 'drop'].forEach((ev) => {
+  window.addEventListener(ev, (e) => {
+    if (ev === 'drop') e.preventDefault();
+    document.body.classList.remove('drag-audio');
+  });
+});
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  document.body.classList.remove('drag-audio');
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (f) loadUserFile(f);
+});
 document.getElementById('gestureHint').addEventListener('click', () => toggleSong());
 document.getElementById('gestureHint').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { toggleSong(); e.preventDefault(); }
