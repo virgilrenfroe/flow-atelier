@@ -186,7 +186,7 @@
 <body>
   <script>if (new URLSearchParams(location.search).has('embed')) document.body.classList.add('embed');</script>
   <canvas id="stage"></canvas>
-  <div class="mask-hint" id="maskHint" aria-hidden="true">MELODY</div>
+  <div class="mask-hint" id="maskHint" aria-hidden="true"></div>
   <div class="layer">
     <div class="topbar">
       <div class="pills">
@@ -621,20 +621,16 @@ function rebuildMask() {
 
   if (maskKind === 0) {
     // Text layer
-    const size = Math.min(W, H) * 0.22; // MELODY is wider than NOCT
+    const size = Math.min(W, H) * 0.22; // text-mask ring (was word glyph)
     maskCtx.font = `700 ${size}px "Bricolage Grotesque", system-ui, sans-serif`;
     maskCtx.textAlign = 'center';
     maskCtx.textBaseline = 'middle';
-    const maskWord = (audioPlaying && lyricIdx >= 0 && LYRIC_CUES[lyricIdx])
-      ? LYRIC_CUES[lyricIdx].text
-      : 'MELODY';
-    // scale down for long lyric lines so the swarm still reads
-    const mw = maskCtx.measureText(maskWord).width || 1;
-    if (mw > W * 0.88) {
-      const s = (W * 0.88) / mw;
-      maskCtx.font = `700 ${Math.max(24, size * s)}px "Bricolage Grotesque", system-ui, sans-serif`;
-    }
-    maskCtx.fillText(maskWord, W * 0.5, H * 0.48);
+    // No lyric glyphs on the mask canvas — words live only in #maskHint
+    // Soft ring keeps mask-swarm mode useful without doubling the word on screen
+    maskCtx.lineWidth = Math.max(10, Math.min(W, H) * 0.03);
+    maskCtx.beginPath();
+    maskCtx.arc(W * 0.5, H * 0.48, Math.min(W, H) * 0.22, 0, Math.PI * 2);
+    maskCtx.stroke();
 
   } else if (maskKind === 1) {
     // Concentric rings / glyph
@@ -2303,7 +2299,7 @@ function updateLyrics() {
   if (!audioPlaying || !mediaEl) {
     if (el.classList.contains('lyrics') || lyricIdx !== -1) {
       lyricIdx = -1;
-      el.textContent = 'MELODY';
+      el.textContent = '';
       el.classList.remove('lyrics', 'short', 'mid', 'long');
       el.style.opacity = (typeof maskKind !== 'undefined' && maskKind === 0) ? '1' : '0';
     }
@@ -2314,7 +2310,7 @@ function updateLyrics() {
   if (i === lyricIdx) return;
   lyricIdx = i;
   if (i < 0) {
-    el.textContent = 'MELODY';
+    el.textContent = '';
     el.classList.remove('lyrics', 'short', 'mid', 'long');
     return;
   }
@@ -2322,9 +2318,7 @@ function updateLyrics() {
   el.textContent = text;
   el.classList.add('lyrics', 'short');
   el.classList.remove('mid', 'long');
-  if (typeof maskKind !== 'undefined' && maskKind === 0 && typeof rebuildMask === 'function') {
-    try { rebuildMask(); } catch (_) {}
-  }
+  // mask canvas stays ring/noise — do not rebuild with lyric glyphs
 }
 
 /* ── Audio UI wire ─────────────────────────────────────────────────── */
