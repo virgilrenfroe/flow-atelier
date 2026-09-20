@@ -164,7 +164,7 @@
     letter-spacing: -0.03em;
     font-weight: 650;
   }
-  .mask-hint.lyrics.short { font-size: clamp(3.2rem, 14vw, 8rem); }
+  .mask-hint.lyrics.short { font-size: clamp(3.6rem, 16vw, 9rem); } /* word karaoke */
   .mask-hint.lyrics.mid { font-size: clamp(1.6rem, 6.5vw, 3.6rem); white-space: normal; }
   .mask-hint.lyrics.long { font-size: clamp(1.15rem, 4.2vw, 2.2rem); white-space: normal; }
 
@@ -1188,103 +1188,783 @@ function frame(now) {
 const LYRIC_CUES = [
   {
     "start": 45.98,
+    "end": 46.9,
+    "text": "Here"
+  },
+  {
+    "start": 46.9,
+    "end": 47.66,
+    "text": "is"
+  },
+  {
+    "start": 47.66,
+    "end": 48.0,
+    "text": "a"
+  },
+  {
+    "start": 48.0,
+    "end": 48.62,
+    "text": "song"
+  },
+  {
+    "start": 48.62,
+    "end": 49.12,
+    "text": "but"
+  },
+  {
+    "start": 49.12,
+    "end": 49.54,
+    "text": "it's"
+  },
+  {
+    "start": 49.54,
+    "end": 49.82,
+    "text": "got"
+  },
+  {
+    "start": 49.82,
+    "end": 50.14,
+    "text": "a"
+  },
+  {
+    "start": 50.14,
+    "end": 50.44,
+    "text": "hole"
+  },
+  {
+    "start": 50.44,
+    "end": 50.7,
+    "text": "in"
+  },
+  {
+    "start": 50.7,
     "end": 51.4,
-    "text": "Here is a song but it's got a hole in it"
+    "text": "it"
   },
   {
     "start": 54.52,
+    "end": 55.56,
+    "text": "I"
+  },
+  {
+    "start": 55.56,
+    "end": 56.26,
+    "text": "had"
+  },
+  {
+    "start": 56.26,
+    "end": 56.74,
+    "text": "hoped"
+  },
+  {
+    "start": 56.74,
+    "end": 57.38,
+    "text": "that"
+  },
+  {
+    "start": 57.38,
+    "end": 57.7,
+    "text": "I"
+  },
+  {
+    "start": 57.7,
+    "end": 58.12,
+    "text": "could"
+  },
+  {
+    "start": 58.12,
+    "end": 58.7,
+    "text": "patch"
+  },
+  {
+    "start": 58.7,
+    "end": 58.96,
+    "text": "it"
+  },
+  {
+    "start": 58.96,
     "end": 59.48,
-    "text": "I had hoped that I could patch it up"
+    "text": "up"
   },
   {
     "start": 62.08,
+    "end": 63.12,
+    "text": "With"
+  },
+  {
+    "start": 63.12,
+    "end": 63.48,
+    "text": "the"
+  },
+  {
+    "start": 63.48,
+    "end": 63.98,
+    "text": "suture"
+  },
+  {
+    "start": 63.98,
+    "end": 64.42,
+    "text": "of"
+  },
+  {
+    "start": 64.42,
+    "end": 65.0,
+    "text": "melody"
+  },
+  {
+    "start": 65.0,
+    "end": 65.56,
+    "text": "glued"
+  },
+  {
+    "start": 65.56,
+    "end": 66.08,
+    "text": "to"
+  },
+  {
+    "start": 66.08,
+    "end": 66.92,
+    "text": "metallic"
+  },
+  {
+    "start": 66.92,
     "end": 67.8,
-    "text": "With the suture of melody glued to metallic strings"
+    "text": "strings"
   },
   {
     "start": 71.4,
+    "end": 71.92,
+    "text": "I"
+  },
+  {
+    "start": 71.92,
+    "end": 72.24,
+    "text": "had"
+  },
+  {
+    "start": 72.24,
+    "end": 73.12,
+    "text": "hoped"
+  },
+  {
+    "start": 73.12,
+    "end": 73.54,
+    "text": "that"
+  },
+  {
+    "start": 73.54,
+    "end": 73.86,
+    "text": "I"
+  },
+  {
+    "start": 73.86,
+    "end": 74.16,
+    "text": "could"
+  },
+  {
+    "start": 74.16,
+    "end": 74.54,
+    "text": "make"
+  },
+  {
+    "start": 74.54,
+    "end": 74.72,
+    "text": "it"
+  },
+  {
+    "start": 74.72,
     "end": 75.42,
-    "text": "I had hoped that I could make it perfect"
+    "text": "perfect"
   },
   {
     "start": 77.88,
-    "end": 88.42,
-    "text": "cause I know you like for things to be perfect"
+    "end": 79.28,
+    "text": "Cause"
+  },
+  {
+    "start": 79.28,
+    "end": 79.7,
+    "text": "I"
+  },
+  {
+    "start": 79.7,
+    "end": 80.14,
+    "text": "know"
+  },
+  {
+    "start": 80.14,
+    "end": 83.1,
+    "text": "you"
+  },
+  {
+    "start": 83.1,
+    "end": 83.41,
+    "text": "like"
+  },
+  {
+    "start": 83.41,
+    "end": 83.56,
+    "text": "for"
+  },
+  {
+    "start": 83.58,
+    "end": 84.9,
+    "text": "things"
+  },
+  {
+    "start": 84.9,
+    "end": 87.52,
+    "text": "to"
+  },
+  {
+    "start": 87.52,
+    "end": 88.0,
+    "text": "be"
+  },
+  {
+    "start": 88.0,
+    "end": 88.7,
+    "text": "perfect"
   },
   {
     "start": 88.94,
+    "end": 90.22,
+    "text": "To"
+  },
+  {
+    "start": 90.22,
+    "end": 92.14,
+    "text": "fit"
+  },
+  {
+    "start": 92.14,
     "end": 93.6,
-    "text": "To fit perfectly"
+    "text": "perfectly"
   },
   {
     "start": 97.04,
+    "end": 98.44,
+    "text": "Perfect"
+  },
+  {
+    "start": 98.44,
     "end": 99.78,
-    "text": "Perfect like"
+    "text": "like"
   },
   {
     "start": 107.92,
+    "end": 108.72,
+    "text": "But"
+  },
+  {
+    "start": 108.72,
+    "end": 109.32,
+    "text": "everything"
+  },
+  {
+    "start": 109.32,
+    "end": 109.66,
+    "text": "I"
+  },
+  {
+    "start": 109.66,
+    "end": 110.06,
+    "text": "tried"
+  },
+  {
+    "start": 110.06,
+    "end": 110.44,
+    "text": "just"
+  },
+  {
+    "start": 110.44,
+    "end": 110.86,
+    "text": "made"
+  },
+  {
+    "start": 110.86,
+    "end": 111.32,
+    "text": "the"
+  },
+  {
+    "start": 111.32,
+    "end": 111.66,
+    "text": "hole"
+  },
+  {
+    "start": 111.66,
     "end": 112.42,
-    "text": "But everything I tried just made the hole bigger"
+    "text": "bigger"
   },
   {
     "start": 115.92,
+    "end": 116.72,
+    "text": "And"
+  },
+  {
+    "start": 116.72,
+    "end": 117.18,
+    "text": "soon"
+  },
+  {
+    "start": 117.18,
+    "end": 117.58,
+    "text": "there"
+  },
+  {
+    "start": 117.58,
+    "end": 117.86,
+    "text": "was"
+  },
+  {
+    "start": 117.86,
+    "end": 118.44,
+    "text": "nothing"
+  },
+  {
+    "start": 118.44,
+    "end": 118.88,
+    "text": "that"
+  },
+  {
+    "start": 118.88,
+    "end": 119.22,
+    "text": "did"
+  },
+  {
+    "start": 119.22,
+    "end": 119.56,
+    "text": "not"
+  },
+  {
+    "start": 119.56,
+    "end": 120.0,
+    "text": "fall"
+  },
+  {
+    "start": 120.0,
+    "end": 120.44,
+    "text": "into"
+  },
+  {
+    "start": 120.44,
     "end": 121.14,
-    "text": "And soon there was nothing that did not fall into it"
+    "text": "it"
   },
   {
     "start": 124.54,
+    "end": 125.34,
+    "text": "First"
+  },
+  {
+    "start": 125.34,
+    "end": 125.64,
+    "text": "it"
+  },
+  {
+    "start": 125.64,
+    "end": 125.86,
+    "text": "was"
+  },
+  {
+    "start": 125.86,
+    "end": 126.24,
+    "text": "my"
+  },
+  {
+    "start": 126.24,
+    "end": 126.9,
+    "text": "fingers"
+  },
+  {
+    "start": 126.9,
+    "end": 127.2,
+    "text": "and"
+  },
+  {
+    "start": 127.2,
+    "end": 127.54,
+    "text": "then"
+  },
+  {
+    "start": 127.54,
+    "end": 127.74,
+    "text": "it"
+  },
+  {
+    "start": 127.74,
+    "end": 127.96,
+    "text": "was"
+  },
+  {
+    "start": 127.96,
+    "end": 128.32,
+    "text": "my"
+  },
+  {
+    "start": 128.32,
     "end": 129.14,
-    "text": "First it was my fingers and then it was my hands"
+    "text": "hands"
   },
   {
     "start": 131.94,
-    "end": 142.1,
-    "text": "And then it was my eyes opening in the dark of a hole"
+    "end": 133.26,
+    "text": "And"
   },
   {
-    "start": 144.14,
+    "start": 133.26,
+    "end": 133.62,
+    "text": "then"
+  },
+  {
+    "start": 133.62,
+    "end": 133.88,
+    "text": "it"
+  },
+  {
+    "start": 133.88,
+    "end": 134.16,
+    "text": "was"
+  },
+  {
+    "start": 134.16,
+    "end": 134.58,
+    "text": "my"
+  },
+  {
+    "start": 134.58,
+    "end": 135.42,
+    "text": "eyes"
+  },
+  {
+    "start": 135.42,
+    "end": 136.14,
+    "text": "opening"
+  },
+  {
+    "start": 136.14,
+    "end": 136.68,
+    "text": "in"
+  },
+  {
+    "start": 136.68,
+    "end": 136.86,
+    "text": "the"
+  },
+  {
+    "start": 136.86,
+    "end": 139.88,
+    "text": "dark"
+  },
+  {
+    "start": 139.88,
+    "end": 140.86,
+    "text": "of"
+  },
+  {
+    "start": 140.86,
+    "end": 141.06,
+    "text": "a"
+  },
+  {
+    "start": 141.06,
+    "end": 142.1,
+    "text": "hole"
+  },
+  {
+    "start": 143.76,
+    "end": 144.42,
+    "text": "Deep"
+  },
+  {
+    "start": 144.42,
+    "end": 145.08,
+    "text": "down"
+  },
+  {
+    "start": 145.08,
+    "end": 145.44,
+    "text": "a"
+  },
+  {
+    "start": 145.44,
+    "end": 146.76,
+    "text": "song"
+  },
+  {
+    "start": 146.76,
+    "end": 148.48,
+    "text": "that"
+  },
+  {
+    "start": 148.48,
+    "end": 149.04,
+    "text": "hardly"
+  },
+  {
+    "start": 149.04,
+    "end": 149.62,
+    "text": "gets"
+  },
+  {
+    "start": 149.62,
     "end": 151.06,
-    "text": "Deep down a song that hardly gets sung"
+    "text": "sung"
   },
   {
     "start": 152.06,
+    "end": 152.58,
+    "text": "Where"
+  },
+  {
+    "start": 152.58,
+    "end": 153.08,
+    "text": "I"
+  },
+  {
+    "start": 153.08,
+    "end": 153.96,
+    "text": "disappear"
+  },
+  {
+    "start": 153.96,
+    "end": 157.04,
+    "text": "until"
+  },
+  {
+    "start": 157.04,
     "end": 159.46,
-    "text": "Where I disappear until now"
+    "text": "now"
   },
   {
     "start": 164.96,
+    "end": 165.92,
+    "text": "Yeah,"
+  },
+  {
+    "start": 166.0,
+    "end": 166.46,
+    "text": "here"
+  },
+  {
+    "start": 166.46,
+    "end": 166.74,
+    "text": "is"
+  },
+  {
+    "start": 166.74,
+    "end": 167.04,
+    "text": "a"
+  },
+  {
+    "start": 167.04,
+    "end": 167.7,
+    "text": "song"
+  },
+  {
+    "start": 167.7,
+    "end": 168.3,
+    "text": "but"
+  },
+  {
+    "start": 168.3,
+    "end": 168.64,
+    "text": "it's"
+  },
+  {
+    "start": 168.64,
+    "end": 169.0,
+    "text": "got"
+  },
+  {
+    "start": 169.0,
+    "end": 169.26,
+    "text": "a"
+  },
+  {
+    "start": 169.26,
+    "end": 169.56,
+    "text": "hole"
+  },
+  {
+    "start": 169.56,
+    "end": 169.82,
+    "text": "in"
+  },
+  {
+    "start": 169.82,
     "end": 171.38,
-    "text": "Yeah, here is a song but it's got a hole in it"
+    "text": "it"
   },
   {
     "start": 173.7,
+    "end": 174.66,
+    "text": "I"
+  },
+  {
+    "start": 174.66,
+    "end": 175.02,
+    "text": "had"
+  },
+  {
+    "start": 175.02,
+    "end": 175.92,
+    "text": "hoped"
+  },
+  {
+    "start": 175.92,
+    "end": 176.48,
+    "text": "that"
+  },
+  {
+    "start": 176.48,
+    "end": 176.84,
+    "text": "I"
+  },
+  {
+    "start": 176.84,
+    "end": 177.28,
+    "text": "could"
+  },
+  {
+    "start": 177.28,
+    "end": 177.84,
+    "text": "patch"
+  },
+  {
+    "start": 177.84,
+    "end": 178.06,
+    "text": "it"
+  },
+  {
+    "start": 178.06,
     "end": 178.54,
-    "text": "I had hoped that I could patch it up"
+    "text": "up"
   },
   {
     "start": 181.06,
+    "end": 182.3,
+    "text": "With"
+  },
+  {
+    "start": 182.3,
+    "end": 182.54,
+    "text": "the"
+  },
+  {
+    "start": 182.54,
+    "end": 183.16,
+    "text": "suture"
+  },
+  {
+    "start": 183.16,
+    "end": 183.52,
+    "text": "of"
+  },
+  {
+    "start": 183.52,
+    "end": 184.22,
+    "text": "melody"
+  },
+  {
+    "start": 184.22,
+    "end": 184.66,
+    "text": "glued"
+  },
+  {
+    "start": 184.66,
+    "end": 185.22,
+    "text": "to"
+  },
+  {
+    "start": 185.22,
+    "end": 186.06,
+    "text": "metallic"
+  },
+  {
+    "start": 186.06,
     "end": 186.92,
-    "text": "With the suture of melody glued to metallic strings"
+    "text": "strings"
   },
   {
     "start": 189.66,
+    "end": 191.06,
+    "text": "I"
+  },
+  {
+    "start": 191.06,
+    "end": 191.56,
+    "text": "had"
+  },
+  {
+    "start": 191.56,
+    "end": 192.26,
+    "text": "hoped"
+  },
+  {
+    "start": 192.26,
+    "end": 192.66,
+    "text": "that"
+  },
+  {
+    "start": 192.66,
+    "end": 193.02,
+    "text": "I"
+  },
+  {
+    "start": 193.02,
+    "end": 193.3,
+    "text": "could"
+  },
+  {
+    "start": 193.3,
+    "end": 193.68,
+    "text": "make"
+  },
+  {
+    "start": 193.68,
+    "end": 193.86,
+    "text": "it"
+  },
+  {
+    "start": 193.86,
     "end": 194.78,
-    "text": "I had hoped that I could make it perfect"
+    "text": "perfect"
   },
   {
     "start": 197.04,
+    "end": 198.44,
+    "text": "So"
+  },
+  {
+    "start": 198.44,
     "end": 199.76,
-    "text": "So perfect"
+    "text": "perfect"
   },
   {
     "start": 201.06,
-    "end": 204.0,
-    "text": "So perfect"
+    "end": 202.46,
+    "text": "So"
   },
   {
-    "start": 206.06,
+    "start": 202.46,
+    "end": 204.0,
+    "text": "perfect"
+  },
+  {
+    "start": 205.94,
+    "end": 206.64,
+    "text": "To"
+  },
+  {
+    "start": 206.64,
+    "end": 207.08,
+    "text": "fit"
+  },
+  {
+    "start": 207.08,
     "end": 208.04,
-    "text": "To fit perfectly"
+    "text": "perfectly"
   },
   {
     "start": 211.82,
@@ -1293,43 +1973,313 @@ const LYRIC_CUES = [
   },
   {
     "start": 214.1,
+    "end": 215.08,
+    "text": "So"
+  },
+  {
+    "start": 215.08,
     "end": 216.06,
-    "text": "So perfect"
+    "text": "perfect"
   },
   {
     "start": 222.72,
+    "end": 223.7,
+    "text": "But"
+  },
+  {
+    "start": 223.7,
+    "end": 224.2,
+    "text": "everything"
+  },
+  {
+    "start": 224.2,
+    "end": 224.68,
+    "text": "I"
+  },
+  {
+    "start": 224.68,
+    "end": 225.12,
+    "text": "tried"
+  },
+  {
+    "start": 225.12,
+    "end": 225.46,
+    "text": "just"
+  },
+  {
+    "start": 225.46,
+    "end": 225.92,
+    "text": "made"
+  },
+  {
+    "start": 225.92,
+    "end": 226.34,
+    "text": "the"
+  },
+  {
+    "start": 226.34,
+    "end": 226.7,
+    "text": "hole"
+  },
+  {
+    "start": 226.7,
     "end": 227.46,
-    "text": "But everything I tried just made the hole bigger"
+    "text": "bigger"
   },
   {
     "start": 230.96,
+    "end": 231.8,
+    "text": "And"
+  },
+  {
+    "start": 231.8,
+    "end": 232.2,
+    "text": "soon"
+  },
+  {
+    "start": 232.2,
+    "end": 232.56,
+    "text": "there"
+  },
+  {
+    "start": 232.56,
+    "end": 232.86,
+    "text": "was"
+  },
+  {
+    "start": 232.86,
+    "end": 233.48,
+    "text": "nothing"
+  },
+  {
+    "start": 233.48,
+    "end": 233.9,
+    "text": "that"
+  },
+  {
+    "start": 233.9,
+    "end": 234.22,
+    "text": "did"
+  },
+  {
+    "start": 234.22,
+    "end": 234.56,
+    "text": "not"
+  },
+  {
+    "start": 234.56,
+    "end": 235.04,
+    "text": "fall"
+  },
+  {
+    "start": 235.04,
+    "end": 235.44,
+    "text": "into"
+  },
+  {
+    "start": 235.44,
     "end": 236.56,
-    "text": "And soon there was nothing that did not fall into it"
+    "text": "it"
   },
   {
     "start": 239.58,
+    "end": 240.42,
+    "text": "First"
+  },
+  {
+    "start": 240.42,
+    "end": 240.78,
+    "text": "it"
+  },
+  {
+    "start": 240.78,
+    "end": 240.98,
+    "text": "was"
+  },
+  {
+    "start": 240.98,
+    "end": 241.44,
+    "text": "my"
+  },
+  {
+    "start": 241.44,
+    "end": 242.12,
+    "text": "arms"
+  },
+  {
+    "start": 242.12,
+    "end": 242.54,
+    "text": "and"
+  },
+  {
+    "start": 242.54,
+    "end": 242.82,
+    "text": "then"
+  },
+  {
+    "start": 242.82,
+    "end": 242.82,
+    "text": "it"
+  },
+  {
+    "start": 242.82,
+    "end": 243.1,
+    "text": "was"
+  },
+  {
+    "start": 243.1,
+    "end": 243.68,
+    "text": "my"
+  },
+  {
+    "start": 243.68,
     "end": 244.22,
-    "text": "First it was my arms and then it was my hands"
+    "text": "hands"
   },
   {
     "start": 247.24,
+    "end": 248.26,
+    "text": "And"
+  },
+  {
+    "start": 248.26,
+    "end": 248.64,
+    "text": "then"
+  },
+  {
+    "start": 248.64,
+    "end": 248.9,
+    "text": "it"
+  },
+  {
+    "start": 248.9,
+    "end": 249.18,
+    "text": "was"
+  },
+  {
+    "start": 249.18,
+    "end": 249.6,
+    "text": "my"
+  },
+  {
+    "start": 249.6,
+    "end": 250.02,
+    "text": "heart"
+  },
+  {
+    "start": 250.02,
+    "end": 250.34,
+    "text": "and"
+  },
+  {
+    "start": 250.34,
+    "end": 250.78,
+    "text": "my"
+  },
+  {
+    "start": 250.78,
+    "end": 251.48,
+    "text": "eyes"
+  },
+  {
+    "start": 251.48,
+    "end": 252.1,
+    "text": "opening"
+  },
+  {
+    "start": 252.1,
+    "end": 255.26,
+    "text": "in"
+  },
+  {
+    "start": 255.26,
     "end": 255.44,
-    "text": "And then it was my heart and my eyes opening"
+    "text": "the"
   },
   {
     "start": 255.44,
-    "end": 258.14,
-    "text": "in the dark of a hole"
+    "end": 255.84,
+    "text": "dark"
   },
   {
-    "start": 259.22,
+    "start": 255.84,
+    "end": 256.1,
+    "text": "of"
+  },
+  {
+    "start": 256.1,
+    "end": 256.36,
+    "text": "a"
+  },
+  {
+    "start": 256.36,
+    "end": 258.14,
+    "text": "hole"
+  },
+  {
+    "start": 258.93,
+    "end": 259.44,
+    "text": "Deep"
+  },
+  {
+    "start": 259.44,
+    "end": 260.18,
+    "text": "down"
+  },
+  {
+    "start": 260.18,
+    "end": 260.52,
+    "text": "a"
+  },
+  {
+    "start": 260.52,
+    "end": 261.96,
+    "text": "song"
+  },
+  {
+    "start": 261.96,
+    "end": 263.48,
+    "text": "that"
+  },
+  {
+    "start": 263.48,
+    "end": 264.08,
+    "text": "hardly"
+  },
+  {
+    "start": 264.08,
+    "end": 264.66,
+    "text": "gets"
+  },
+  {
+    "start": 264.66,
     "end": 266.14,
-    "text": "Deep down a song that hardly gets sung"
+    "text": "sung"
   },
   {
     "start": 266.14,
+    "end": 267.7,
+    "text": "Where"
+  },
+  {
+    "start": 267.7,
+    "end": 268.14,
+    "text": "I"
+  },
+  {
+    "start": 268.14,
+    "end": 269.1,
+    "text": "disappear"
+  },
+  {
+    "start": 269.1,
+    "end": 271.92,
+    "text": "until"
+  },
+  {
+    "start": 271.92,
     "end": 273.04,
-    "text": "Where I disappear until now"
+    "text": "now"
   }
 ];
 let lyricIdx = -1;
@@ -1337,10 +2287,14 @@ function lyricAt(t) {
   let i = -1;
   for (let k = 0; k < LYRIC_CUES.length; k++) {
     const c = LYRIC_CUES[k];
-    const next = LYRIC_CUES[k + 1];
-    const end = next ? Math.min(c.end, next.start - 0.04) : c.end;
-    if (t >= c.start && t < end + 0.35) i = k;
+    if (t >= c.start - 0.02) i = k;
+    else break;
   }
+  if (i < 0) return -1;
+  const c = LYRIC_CUES[i];
+  const next = LYRIC_CUES[i + 1];
+  const hold = next ? Math.min(c.end + 0.12, next.start) : c.end + 0.35;
+  if (t > hold + 0.45) return -1;
   return i;
 }
 function updateLyrics() {
@@ -1351,32 +2305,23 @@ function updateLyrics() {
       lyricIdx = -1;
       el.textContent = 'MELODY';
       el.classList.remove('lyrics', 'short', 'mid', 'long');
-      // restore mask-mode visibility rule
       el.style.opacity = (typeof maskKind !== 'undefined' && maskKind === 0) ? '1' : '0';
     }
     return;
   }
   const i = lyricAt(mediaEl.currentTime || 0);
-  el.style.opacity = '1'; // lyrics always visible while song plays
+  el.style.opacity = '1';
   if (i === lyricIdx) return;
   lyricIdx = i;
   if (i < 0) {
-    // Before first lyric: keep MELODY. Between later gaps: hold last line.
-    if (!el.classList.contains('lyrics')) {
-      el.textContent = 'MELODY';
-      el.classList.remove('short', 'mid', 'long');
-      return;
-    }
+    el.textContent = 'MELODY';
+    el.classList.remove('lyrics', 'short', 'mid', 'long');
     return;
   }
   const text = LYRIC_CUES[i].text;
   el.textContent = text;
-  el.classList.add('lyrics');
-  el.classList.remove('short', 'mid', 'long');
-  const n = text.length;
-  if (n <= 8) el.classList.add('short');
-  else if (n <= 36) el.classList.add('mid');
-  else el.classList.add('long');
+  el.classList.add('lyrics', 'short');
+  el.classList.remove('mid', 'long');
   if (typeof maskKind !== 'undefined' && maskKind === 0 && typeof rebuildMask === 'function') {
     try { rebuildMask(); } catch (_) {}
   }
