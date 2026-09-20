@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<title>Noctuary — flow atelier</title>
+<style>
+  :root {
+    --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+    --font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "Space Mono", ui-monospace, monospace;
+    --ink: #05060a;
+    --paper: #f2ebe0;
+    --mute: rgba(242,235,224,0.62);
+    --line: rgba(242,235,224,0.18);
+    --accent: #f0c24b;
+    --violet: #8a7bb8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper);
+    font-family: var(--font-sans); }
+  canvas#stage { display: block; width: 100%; height: 100%; position: fixed; inset: 0; z-index: 0; }
+  .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+  .topbar {
+    position: absolute; top: 16px; left: 16px; right: 16px;
+    display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; flex-wrap: wrap;
+  }
+  .brand {
+    font-family: var(--font-sans);
+    font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+    padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.5); backdrop-filter: blur(12px); pointer-events: auto;
+  }
+  .pills { display: flex; gap: 7px; flex-wrap: wrap; justify-content: flex-end; pointer-events: auto; }
+  .pill {
+    appearance: none; border: 1px solid var(--line); background: rgba(5,6,10,0.55);
+    color: var(--paper); border-radius: 999px; padding: 9px 13px; font: inherit;
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; cursor: pointer;
+    backdrop-filter: blur(12px);
+  }
+  .pill:hover, .pill.on { border-color: rgba(240,194,75,0.5); color: var(--accent); }
+  .pill kbd {
+    font-family: var(--font-mono); font-size: 10px; opacity: 0.55;
+    margin-left: 5px; letter-spacing: 0.04em; text-transform: none;
+  }
+  .hero {
+    position: absolute; left: 5vw; top: 11vh; max-width: min(560px, 78vw);
+  }
+  .hero .stack {
+    font-family: var(--font-display); font-optical-sizing: auto;
+    font-weight: 650; line-height: 0.9; letter-spacing: -0.035em;
+    font-size: clamp(2.2rem, 6vw, 4.4rem); margin: 0;
+  }
+  .hero .stack span { display: block; color: rgba(242,235,224,0.26); }
+  .hero .stack span.focus { color: var(--paper); }
+  .teach {
+    margin: 14px 0 0; max-width: 44ch; padding: 11px 13px; border-radius: 12px;
+    border: 1px solid rgba(138,123,184,0.35); background: rgba(5,6,10,0.52);
+    backdrop-filter: blur(12px); font-size: 13px; line-height: 1.5; color: var(--mute);
+  }
+  .teach strong { color: var(--accent); font-weight: 600; display: block; margin-bottom: 4px;
+    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .hud {
+    position: absolute; left: 16px; bottom: 16px;
+    min-width: 200px; padding: 11px 13px; border-radius: 14px;
+    border: 1px solid var(--line); background: rgba(5,6,10,0.55);
+    backdrop-filter: blur(14px); font-family: var(--font-mono);
+    font-size: 11px; letter-spacing: 0.06em; line-height: 1.65;
+    opacity: 0.9; pointer-events: none;
+  }
+  .hud .r { display: flex; justify-content: space-between; gap: 14px; color: var(--mute); }
+  .hud .r strong { color: var(--paper); font-weight: 400; }
+  .note {
+    position: absolute; right: 16px; bottom: 16px; font-size: 11px; opacity: 0.42;
+    max-width: 280px; text-align: right; line-height: 1.45;
+  }
+  .modes {
+    position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+    display: flex; gap: 5px; flex-wrap: wrap; justify-content: center;
+    max-width: min(920px, 96vw); pointer-events: auto;
+  }
+  .mode-chip {
+    appearance: none; border: 1px solid var(--line); background: rgba(5,6,10,0.55);
+    color: var(--mute); border-radius: 999px; padding: 7px 11px; font: inherit;
+    font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+    backdrop-filter: blur(12px);
+  }
+  .mode-chip.on { border-color: rgba(240,194,75,0.55); color: var(--accent); }
+  .mode-chip:hover { color: var(--paper); }
+
+  .audio-rail {
+    position: absolute; right: 16px; top: 58px;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: auto; max-width: min(280px, 42vw);
+  }
+  .audio-rail .pill { width: 100%; text-align: left; }
+  .audio-toggles { display: flex; flex-wrap: wrap; gap: 5px; }
+  .audio-toggles .chip {
+    appearance: none; border: 1px solid var(--line); background: rgba(5,6,10,0.55);
+    color: var(--mute); border-radius: 999px; padding: 6px 10px; font: inherit;
+    font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer;
+    backdrop-filter: blur(10px);
+  }
+  .audio-toggles .chip.on { border-color: rgba(240,194,75,0.55); color: var(--accent); }
+  .meter {
+    display: grid; grid-template-columns: 36px 1fr 28px; gap: 6px; align-items: center;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; color: var(--mute);
+    padding: 8px 10px; border-radius: 12px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.55); backdrop-filter: blur(12px);
+  }
+  .meter .bar {
+    height: 6px; border-radius: 3px; background: rgba(242,235,224,0.12); overflow: hidden;
+  }
+  .meter .bar > i {
+    display: block; height: 100%; width: 0%; background: var(--accent);
+    transition: width 0.05s linear;
+  }
+  .meter.bass .bar > i { background: #e07060; }
+  .meter.mid .bar > i { background: var(--accent); }
+  .meter.high .bar > i { background: #6a9fd8; }
+  .meter.vol .bar > i { background: var(--violet); }
+  .song-label {
+    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: rgba(242,235,224,0.4); line-height: 1.35;
+    padding: 0 4px;
+  }
+  .midi-keys {
+    display: flex; gap: 3px; flex-wrap: wrap; margin-top: 2px;
+  }
+  .midi-keys button {
+    appearance: none; width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid var(--line); background: rgba(5,6,10,0.55);
+    color: var(--mute); font-family: var(--font-mono); font-size: 10px; cursor: pointer;
+  }
+  .midi-keys button.on, .midi-keys button:active {
+    border-color: rgba(240,194,75,0.6); color: var(--accent); background: rgba(20,24,36,0.8);
+  }
+  .gesture-hint {
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
+    padding: 14px 18px; border-radius: 14px; border: 1px solid rgba(240,194,75,0.35);
+    background: rgba(5,6,10,0.72); backdrop-filter: blur(14px);
+    font-size: 13px; color: var(--mute); text-align: center; pointer-events: auto;
+    cursor: pointer; z-index: 5; max-width: 36ch; line-height: 1.45;
+  }
+  .gesture-hint strong { display: block; color: var(--accent); font-size: 11px;
+    letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 6px; }
+  .gesture-hint.hidden { display: none; }
+
+  .mask-hint {
+    position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%);
+    font-family: var(--font-display); font-weight: 700; letter-spacing: -0.04em;
+    font-size: clamp(4rem, 18vw, 11rem); color: rgba(242,235,224,0.04);
+    pointer-events: none; white-space: nowrap; user-select: none; z-index: 1;
+  }
+</style>
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div class="mask-hint" id="maskHint" aria-hidden="true">MELODY</div>
+  <div class="layer">
+    <div class="topbar">
+      <div class="pills">
+        <button class="pill" type="button" id="btn-mode" title="Cycle mode (M)">Mode <kbd>M</kbd></button>
+        <button class="pill" type="button" id="btn-vec" title="Toggle vectors (V)">Vectors <kbd>V</kbd></button>
+        <button class="pill" type="button" id="btn-mask" title="Cycle mask source (T)">Mask <kbd>T</kbd></button>
+        <button class="pill" type="button" id="btn-export" title="Export streamlines SVG (E)">SVG <kbd>E</kbd></button>
+        <button class="pill" type="button" id="btn-reset" title="Reset (R)">Reset <kbd>R</kbd></button>
+        <button class="pill" type="button" id="btn-pause" title="Pause (Space)">Pause <kbd>␣</kbd></button>
+      </div>
+    </div>
+    <div class="hud">
+      <div class="r"><span>mode</span><strong id="h-mode">mask</strong></div>
+      <div class="r"><span>particles</span><strong id="h-n">—</strong></div>
+      <div class="r"><span>fps</span><strong id="h-fps">—</strong></div>
+      <div class="r"><span>mask</span><strong id="h-mask">text</strong></div>
+      <div class="r"><span>vectors</span><strong id="h-vec">off</strong></div>
+      <div class="r"><span>motion</span><strong id="h-m">live</strong></div>
+      <div class="r"><span>audio</span><strong id="h-audio">idle</strong></div>
+      <div class="r"><span>steer</span><strong id="h-steer">—</strong></div>
+    </div>
+    <div class="audio-rail" id="audioRail">
+      <div class="song-label">A Song with a Hole in It · Virgil Renfroe</div>
+      <button class="pill" type="button" id="btn-song" title="Play / pause corridor song (A)">Song <kbd>A</kbd></button>
+      <div class="meter bass"><span>bass</span><div class="bar"><i id="m-bass"></i></div><span id="v-bass">0</span></div>
+      <div class="meter mid"><span>mid</span><div class="bar"><i id="m-mid"></i></div><span id="v-mid">0</span></div>
+      <div class="meter high"><span>high</span><div class="bar"><i id="m-high"></i></div><span id="v-high">0</span></div>
+      <div class="meter vol"><span>vol</span><div class="bar"><i id="m-vol"></i></div><span id="v-vol">0</span></div>
+      <div class="audio-toggles" id="audioToggles" aria-label="Audio reactivity">
+        <button type="button" class="chip on" data-fx="scale" title="Bass → noise zoom">Bass zoom</button>
+        <button type="button" class="chip on" data-fx="vel" title="Volume → particle speed">Vol speed</button>
+        <button type="button" class="chip on" data-fx="color" title="Bands → trail hue">Freq hue</button>
+        <button type="button" class="chip on" data-fx="beat" title="Onset → respawn stagnant">Beat reset</button>
+        <button type="button" class="chip on" data-fx="steer" title="MIDI / keys → angle">Steer</button>
+      </div>
+      <div class="midi-keys" id="midiKeys" title="On-screen steer (also Web MIDI if available)">
+        <button type="button" data-semi="0">C</button>
+        <button type="button" data-semi="2">D</button>
+        <button type="button" data-semi="4">E</button>
+        <button type="button" data-semi="5">F</button>
+        <button type="button" data-semi="7">G</button>
+        <button type="button" data-semi="9">A</button>
+        <button type="button" data-semi="11">B</button>
+      </div>
+    </div>
+    <div class="modes" id="mode-chips" aria-label="Atelier modes"></div>
+    
+  </div>
+  <div class="gesture-hint" id="gestureHint" role="button" tabindex="0">
+    <strong>Click to unlock audio</strong>
+    Tap to play the corridor song. Meters should jump with the beat — particles speed up on loud parts, bass kicks the field.
+  </div>
+
+<script>
+(() => {
+const params = new URLSearchParams(location.search);
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches || params.has('still');
+document.getElementById('h-m').textContent = reduceMotion ? 'still' : 'live';
+
+const MODES = [
+  {
+    id: 'mask',
+    label: 'Mask swarm',
+    short: 'mask',
+    title: 'Text & image masking',
+    body: 'Sample pixel brightness from a text or glyph layer. Particles spawn only on ink — swarm letters/shapes. Cycle mask with T (text / ring / noise blot).',
+  },
+  {
+    id: 'pack',
+    label: 'Circle pack',
+    short: 'pack',
+    title: 'Circle packing starts',
+    body: 'Organic evenly-spaced seeds via simple circle packing (reject if overlap). Compare to grid/random — density feels alive without lattice artifacts.',
+  },
+  {
+    id: 'curl',
+    label: 'Liquid curl',
+    short: 'curl',
+    title: 'Animated curl / time-varying',
+    body: 'Stream function ψ = FBM + drifting sines; v = (∂ψ/∂y, −∂ψ/∂x). Time morphs the potential — liquid/smoke without teleport pops. Bridson curl-noise.',
+  },
+  {
+    id: 'attrib',
+    label: 'Attrib paint',
+    short: 'attrib',
+    title: 'Variable particle attributes',
+    body: 'Size, speed, and color from local vector angle and lifespan. Gold when fast/young; violet when slow/aging. Authorship through the field, not uniforms.',
+  },
+  {
+    id: 'wrap',
+    label: 'Wrap densify',
+    short: 'wrap',
+    title: 'Boundary wrap & respawn',
+    body: 'Toroidal wrap keeps trails continuous; lifetime kill + edge-aware respawn keeps density honest. Watch the HUD count stay stable.',
+  },
+  {
+    id: 'music',
+    label: 'Music drive',
+    short: 'music',
+    title: 'Corridor song → field',
+    body: '“A Song with a Hole in It” drives curl zoom (bass), speed (volume), trail hue (bands), and beat respawns. Toggles stay live on every mode once audio is running. Keys / MIDI steer angle.',
+  },
+];
+
+const INK = '#05060a';
+const ACCENT = [240, 194, 75];
+const VIOLET = [138, 123, 184];
+const PAPER = [242, 235, 224];
+
+
+/* ── Audio (corridor song) + MIDI steer ────────────────────────────── */
+const SONG_URL = './demo-assets/audio/corridor-song.mp3';
+const audioFx = { scale: true, vel: true, color: true, beat: true, steer: true };
+const bands = { bass: 0, mid: 0, high: 0, vol: 0, onset: 0 };
+const bandFloor = { bass: 0.08, mid: 0.08, high: 0.08, vol: 0.08 };
+const bandCeil = { bass: 0.35, mid: 0.35, high: 0.35, vol: 0.4 };
+function normBand(key, raw) {
+  // Adaptive AGC so meters dance mid-range instead of pegging
+  const f = bandFloor[key], c = bandCeil[key];
+  bandFloor[key] = f * 0.995 + raw * 0.005;
+  bandCeil[key] = Math.max(bandFloor[key] + 0.06, c * 0.992 + raw * 0.008);
+  const span = Math.max(0.08, bandCeil[key] - bandFloor[key]);
+  return Math.max(0, Math.min(1, (raw - bandFloor[key]) / span));
+}
+let audioCtx = null, analyser = null, audioData = null, audioSrc = null, mediaEl = null;
+let audioReady = false, audioPlaying = false;
+let prevBass = 0, beatCooldown = 0;
+let steerAngle = 0; // radians baseline from MIDI / keys
+let steerHeld = 0;  // 0..1 intensity
+let noiseZoom = 1;  // bass → zoom (higher bass = more chaotic / zoomed-out = lower freq scale)
+
+function setMeter(id, v) {
+  const pct = Math.max(0, Math.min(100, (v * 100) | 0));
+  const bar = document.getElementById('m-' + id);
+  const lab = document.getElementById('v-' + id);
+  if (bar) bar.style.width = pct + '%';
+  if (lab) lab.textContent = String(Math.round(v * 99));
+}
+
+async function ensureAudio() {
+  if (audioReady) return true;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    mediaEl = new Audio(SONG_URL);
+    mediaEl.crossOrigin = 'anonymous';
+    mediaEl.loop = true;
+    mediaEl.preload = 'auto';
+    audioSrc = audioCtx.createMediaElementSource(mediaEl);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.45;
+    audioData = new Uint8Array(analyser.frequencyBinCount);
+    audioSrc.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    audioReady = true;
+    document.getElementById('h-audio').textContent = 'ready';
+    return true;
+  } catch (err) {
+    console.warn('audio init failed', err);
+    document.getElementById('h-audio').textContent = 'fail';
+    return false;
+  }
+}
+
+async function toggleSong() {
+  const ok = await ensureAudio();
+  if (!ok) return;
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  const hint = document.getElementById('gestureHint');
+  if (hint) hint.classList.add('hidden');
+  if (audioPlaying) {
+    mediaEl.pause();
+    audioPlaying = false;
+    document.getElementById('btn-song').classList.remove('on');
+    document.getElementById('h-audio').textContent = 'paused';
+  } else {
+    try {
+      await mediaEl.play();
+      audioPlaying = true;
+      document.getElementById('btn-song').classList.add('on');
+      document.getElementById('h-audio').textContent = 'live';
+      // Arm all music fx and land on Music mode so reaction is obvious
+      Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
+      syncAudioChips();
+      const mi = MODES.findIndex((m) => m.id === 'music');
+      if (mi >= 0) setMode(mi);
+    } catch (err) {
+      document.getElementById('h-audio').textContent = 'blocked';
+      if (hint) hint.classList.remove('hidden');
+    }
+  }
+}
+
+function syncAudioChips() {
+  document.querySelectorAll('#audioToggles .chip').forEach((el) => {
+    const k = el.dataset.fx;
+    el.classList.toggle('on', !!audioFx[k]);
+  });
+}
+
+function sampleAudio(dt) {
+  if (!analyser || !audioPlaying || reduceMotion) {
+    bands.bass *= 0.9; bands.mid *= 0.9; bands.high *= 0.9; bands.vol *= 0.9;
+    bands.onset = 0;
+    noiseZoom += (1 - noiseZoom) * 0.08;
+    setMeter('bass', bands.bass); setMeter('mid', bands.mid);
+    setMeter('high', bands.high); setMeter('vol', bands.vol);
+    return;
+  }
+  analyser.getByteFrequencyData(audioData);
+  const n = audioData.length;
+  // Bin ranges ~ (sr/2)/n ; assume 44.1k → ~21.5 Hz/bin
+  const bassN = Math.max(2, (n * 0.035) | 0);        // ~0–150Hz
+  const mid0 = (n * 0.04) | 0, mid1 = (n * 0.16) | 0; // ~180–1.4k
+  const hi0 = (n * 0.2) | 0, hi1 = (n * 0.5) | 0;     // highs (skip ultra-top hiss)
+  let b = 0, m = 0, h = 0, v = 0;
+  for (let i = 0; i < bassN; i++) b += audioData[i];
+  for (let i = mid0; i < mid1; i++) m += audioData[i];
+  for (let i = hi0; i < hi1; i++) h += audioData[i];
+  // RMS-ish vol over usable spectrum
+  for (let i = 0; i < (n * 0.55) | 0; i++) v += audioData[i] * audioData[i];
+  b = b / (bassN * 255);
+  m = m / (Math.max(1, mid1 - mid0) * 255);
+  h = h / (Math.max(1, hi1 - hi0) * 255);
+  v = Math.sqrt(v / Math.max(1, (n * 0.55) * 255 * 255));
+
+  const nb = normBand('bass', b);
+  const nm = normBand('mid', m);
+  const nh = normBand('high', h);
+  const nv = normBand('vol', v);
+  bands.bass = bands.bass * 0.35 + nb * 0.65;
+  bands.mid = bands.mid * 0.35 + nm * 0.65;
+  bands.high = bands.high * 0.35 + nh * 0.65;
+  bands.vol = bands.vol * 0.3 + nv * 0.7;
+
+  // Onset: relative bass spike (works after AGC)
+  const delta = bands.bass - prevBass;
+  prevBass = bands.bass;
+  beatCooldown = Math.max(0, beatCooldown - dt);
+  bands.onset = 0;
+  if (delta > 0.08 && bands.bass > 0.35 && beatCooldown <= 0) {
+    bands.onset = 1;
+    beatCooldown = 0.12;
+  }
+
+  // Bass → noise zoom
+  if (audioFx.scale) {
+    const target = 1 / (0.45 + bands.bass * 1.7);
+    noiseZoom += (target - noiseZoom) * Math.min(1, dt * 8);
+  } else {
+    noiseZoom += (1 - noiseZoom) * 0.1;
+  }
+
+  setMeter('bass', bands.bass); setMeter('mid', bands.mid);
+  setMeter('high', bands.high); setMeter('vol', bands.vol);
+}
+
+function bandHueRGB() {
+  // low=red, mid=gold, high=blue — mix by energy
+  const r = (bands.bass * 220 + bands.mid * 240 * 0.35) | 0;
+  const g = (bands.mid * 194 + bands.bass * 40 + bands.high * 60) | 0;
+  const b = (bands.high * 220 + bands.mid * 40 + bands.bass * 30) | 0;
+  return [
+    Math.min(255, r || VIOLET[0]),
+    Math.min(255, g || VIOLET[1]),
+    Math.min(255, b || VIOLET[2]),
+  ];
+}
+
+function setupMidi() {
+  // On-screen keys
+  document.querySelectorAll('#midiKeys button').forEach((btn) => {
+    const press = () => {
+      const semi = Number(btn.dataset.semi) || 0;
+      steerAngle = (semi / 12) * Math.PI * 2;
+      steerHeld = 1;
+      btn.classList.add('on');
+      document.getElementById('h-steer').textContent = btn.textContent.trim();
+    };
+    const release = () => {
+      btn.classList.remove('on');
+      steerHeld *= 0.2;
+    };
+    btn.addEventListener('pointerdown', (e) => { press(); e.preventDefault(); });
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointerleave', release);
+  });
+  // Web MIDI optional
+  if (navigator.requestMIDIAccess) {
+    navigator.requestMIDIAccess().then((access) => {
+      const hook = (port) => {
+        port.onmidimessage = (ev) => {
+          const [st, note, vel] = ev.data;
+          const cmd = st & 0xf0;
+          if (cmd === 0x90 && vel > 0) {
+            steerAngle = ((note % 12) / 12) * Math.PI * 2;
+            steerHeld = Math.min(1, vel / 100);
+            document.getElementById('h-steer').textContent = 'M' + (note % 12);
+          } else if (cmd === 0x80 || (cmd === 0x90 && vel === 0)) {
+            steerHeld *= 0.15;
+          }
+        };
+      };
+      access.inputs.forEach(hook);
+      access.onstatechange = () => access.inputs.forEach(hook);
+      document.getElementById('h-steer').textContent = 'midi';
+    }).catch(() => {});
+  }
+}
+
+
+let modeIdx = 0;
+let showVectors = false;
+let paused = false;
+let maskKind = 0; // 0 text, 1 ring, 2 blot
+const MASK_NAMES = ['text', 'ring', 'blot'];
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d', { alpha: false });
+const maskCanvas = document.createElement('canvas');
+const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
+let maskData = null;
+let W = 0, H = 0, dpr = 1;
+
+const COUNT = 3200;
+const particles = [];
+let trailAlpha = 0.055;
+let t = 0;
+let pointer = { x: 0, y: 0, active: false };
+
+/* ── Perlin-ish noise (from practice lab) ──────────────────────────── */
+const PERM = new Uint8Array(512);
+(function seedPerm() {
+  const p = new Uint8Array(256);
+  for (let i = 0; i < 256; i++) p[i] = i;
+  let s = 0x9e3779b9 >>> 0;
+  for (let i = 255; i > 0; i--) {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    const j = s % (i + 1);
+    const tmp = p[i]; p[i] = p[j]; p[j] = tmp;
+  }
+  for (let i = 0; i < 512; i++) PERM[i] = p[i & 255];
+})();
+function fade(u) { return u * u * u * (u * (u * 6 - 15) + 10); }
+function lerp(a, b, u) { return a + (b - a) * u; }
+function grad2(h, x, y) {
+  const u = (h & 1) ? x : -x;
+  const v = (h & 2) ? y : -y;
+  return u + v;
+}
+function noise2(x, y) {
+  const X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
+  const xf = x - Math.floor(x), yf = y - Math.floor(y);
+  const u = fade(xf), v = fade(yf);
+  const aa = PERM[PERM[X] + Y], ab = PERM[PERM[X] + Y + 1];
+  const ba = PERM[PERM[X + 1] + Y], bb = PERM[PERM[X + 1] + Y + 1];
+  return lerp(
+    lerp(grad2(aa, xf, yf), grad2(ba, xf - 1, yf), u),
+    lerp(grad2(ab, xf, yf - 1), grad2(bb, xf - 1, yf - 1), u),
+    v
+  );
+}
+function fbm(x, y, oct = 3) {
+  let a = 0.5, f = 1, s = 0, n = 0;
+  for (let i = 0; i < oct; i++) {
+    s += a * noise2(x * f, y * f);
+    n += a; a *= 0.5; f *= 2.02;
+  }
+  return s / n;
+}
+
+function potential(x, y, time) {
+  // noiseZoom < 1 → spatially zoomed-out (larger features / more chaotic feel under bass)
+  const z = noiseZoom;
+  const nx = (x / Math.max(W, 1)) * 8 * z;
+  const ny = (y / Math.max(H, 1)) * 8 * z;
+  const chaos = audioPlaying && audioFx.scale ? (0.85 + bands.bass * 0.9) : 1;
+  return (
+    fbm(nx * 0.55 + time * 0.035, ny * 0.55 - time * 0.028, 3) * 1.45 * chaos +
+    Math.sin(nx * 0.7 + ny * 0.4 + time * 0.22) * 0.32 +
+    Math.sin(nx * -0.5 + ny * 0.85 - time * 0.18) * 0.26
+  );
+}
+
+function curlField(x, y, time) {
+  const e = 4.5;
+  const ddx = (potential(x + e, y, time) - potential(x - e, y, time)) / (2 * e);
+  const ddy = (potential(x, y + e, time) - potential(x, y - e, time)) / (2 * e);
+  const s = Math.min(W, H) * 0.42;
+  let vx = ddy * s, vy = -ddx * s;
+  // MIDI / on-screen keyboard: blend a steered baseline angle
+  if (audioFx.steer && steerHeld > 0.02) {
+    const mag = Math.hypot(vx, vy) || s * 0.2;
+    const blend = Math.min(0.85, steerHeld * 0.75);
+    const sx = Math.cos(steerAngle) * mag;
+    const sy = Math.sin(steerAngle) * mag;
+    vx = vx * (1 - blend) + sx * blend;
+    vy = vy * (1 - blend) + sy * blend;
+  }
+  return { x: vx, y: vy };
+}
+
+function sampleMaskBright(x, y) {
+  if (!maskData) return 0;
+  const ix = Math.max(0, Math.min(W - 1, x | 0));
+  const iy = Math.max(0, Math.min(H - 1, y | 0));
+  const i = (iy * W + ix) * 4;
+  // brightness of ink (paper is dark bg on mask canvas — we draw white ink)
+  return maskData.data[i] / 255;
+}
+
+function rebuildMask() {
+  maskCanvas.width = W;
+  maskCanvas.height = H;
+  maskCtx.fillStyle = '#000';
+  maskCtx.fillRect(0, 0, W, H);
+  maskCtx.fillStyle = '#fff';
+  maskCtx.strokeStyle = '#fff';
+
+  if (maskKind === 0) {
+    // Text layer
+    const size = Math.min(W, H) * 0.22; // MELODY is wider than NOCT
+    maskCtx.font = `700 ${size}px "Bricolage Grotesque", system-ui, sans-serif`;
+    maskCtx.textAlign = 'center';
+    maskCtx.textBaseline = 'middle';
+    maskCtx.fillText('MELODY', W * 0.5, H * 0.48);
+
+  } else if (maskKind === 1) {
+    // Concentric rings / glyph
+    const cx = W * 0.5, cy = H * 0.5;
+    const R = Math.min(W, H) * 0.32;
+    maskCtx.lineWidth = Math.max(8, R * 0.08);
+    for (let i = 0; i < 4; i++) {
+      maskCtx.beginPath();
+      maskCtx.arc(cx, cy, R * (0.35 + i * 0.22), 0, Math.PI * 2);
+      maskCtx.stroke();
+    }
+    maskCtx.beginPath();
+    maskCtx.arc(cx, cy, R * 0.12, 0, Math.PI * 2);
+    maskCtx.fill();
+  } else {
+    // Soft blot from noise (image-like)
+    const img = maskCtx.createImageData(W, H);
+    for (let y = 0; y < H; y += 2) {
+      for (let x = 0; x < W; x += 2) {
+        const n = fbm(x * 0.008, y * 0.008, 4);
+        const cx = (x - W * 0.5) / (W * 0.35);
+        const cy = (y - H * 0.5) / (H * 0.35);
+        const fall = Math.exp(-(cx * cx + cy * cy));
+        const v = n * 0.55 + 0.45 > 0.52 ? Math.min(255, (n * fall) * 420) : 0;
+        for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) {
+          const px = x + dx, py = y + dy;
+          if (px >= W || py >= H) continue;
+          const i = (py * W + px) * 4;
+          img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+          img.data[i + 3] = 255;
+        }
+      }
+    }
+    maskCtx.putImageData(img, 0, 0);
+  }
+  maskData = maskCtx.getImageData(0, 0, W, H);
+  document.getElementById('h-mask').textContent = MASK_NAMES[maskKind];
+  document.getElementById('maskHint').style.opacity = maskKind === 0 ? '1' : '0';
+}
+
+/* ── Circle packing ────────────────────────────────────────────────── */
+function packCircles(n, minR, maxR) {
+  const out = [];
+  const maxTries = n * 40;
+  let tries = 0;
+  while (out.length < n && tries < maxTries) {
+    tries++;
+    const r = minR + Math.random() * (maxR - minR);
+    const x = r + Math.random() * (W - 2 * r);
+    const y = r + Math.random() * (H - 2 * r);
+    let ok = true;
+    for (let i = 0; i < out.length; i++) {
+      const c = out[i];
+      const dx = c.x - x, dy = c.y - y;
+      if (dx * dx + dy * dy < (c.r + r + 1.5) * (c.r + r + 1.5)) { ok = false; break; }
+    }
+    if (ok) out.push({ x, y, r });
+  }
+  return out;
+}
+
+function spawnOne(opts = {}) {
+  const life = 2.2 + Math.random() * 4.5;
+  let x, y;
+  const mode = MODES[modeIdx].id;
+
+  if (opts.x != null) {
+    x = opts.x; y = opts.y;
+  } else if (mode === 'mask') {
+    // Rejection sample on bright pixels
+    let found = false;
+    for (let k = 0; k < 80; k++) {
+      const sx = Math.random() * W;
+      const sy = Math.random() * H;
+      if (sampleMaskBright(sx, sy) > 0.35) { x = sx; y = sy; found = true; break; }
+    }
+    if (!found) { x = Math.random() * W; y = Math.random() * H; }
+  } else if (mode === 'wrap' && opts.edge) {
+    // Respawn along a random edge (inflow illusion)
+    const e = (Math.random() * 4) | 0;
+    if (e === 0) { x = Math.random() * W; y = 2; }
+    else if (e === 1) { x = Math.random() * W; y = H - 2; }
+    else if (e === 2) { x = 2; y = Math.random() * H; }
+    else { x = W - 2; y = Math.random() * H; }
+  } else {
+    x = Math.random() * W;
+    y = Math.random() * H;
+  }
+
+  const ang = Math.random() * Math.PI * 2;
+  return {
+    x, y,
+    px: x, py: y,
+    life, maxLife: life,
+    seed: Math.random() * Math.PI * 2,
+    size: opts.size || (0.6 + Math.random() * 1.4),
+    speedMul: opts.speedMul || (0.7 + Math.random() * 0.8),
+    hueMix: Math.random(),
+  };
+}
+
+function resetParticles() {
+  particles.length = 0;
+  const mode = MODES[modeIdx].id;
+
+  if (mode === 'pack') {
+    const circles = packCircles(Math.min(420, Math.floor((W * H) / 9000)), 6, 18);
+    // Multiple particles per circle center for density
+    const per = Math.max(2, Math.floor(COUNT / Math.max(circles.length, 1)));
+    for (const c of circles) {
+      for (let k = 0; k < per && particles.length < COUNT; k++) {
+        const a = Math.random() * Math.PI * 2;
+        const rr = Math.random() * c.r * 0.85;
+        particles.push(spawnOne({
+          x: c.x + Math.cos(a) * rr,
+          y: c.y + Math.sin(a) * rr,
+          size: 0.5 + c.r * 0.06,
+        }));
+      }
+    }
+    while (particles.length < COUNT) particles.push(spawnOne());
+  } else if (mode === 'mask') {
+    for (let i = 0; i < COUNT; i++) particles.push(spawnOne());
+  } else {
+    for (let i = 0; i < COUNT; i++) particles.push(spawnOne());
+  }
+
+  document.getElementById('h-n').textContent = String(particles.length);
+  // Hard clear trail (skip if still bake already locked)
+  if (!(reduceMotion && stillBaked)) {
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function setMode(idx) {
+  modeIdx = ((idx % MODES.length) + MODES.length) % MODES.length;
+  const m = MODES[modeIdx];
+  document.getElementById('h-mode').textContent = m.short;
+  const _tt = document.getElementById('teach-title'); if (_tt) _tt.textContent = m.title;
+  const _tb = document.getElementById('teach-body'); if (_tb) _tb.textContent = m.body;
+  document.getElementById('btn-mode').classList.toggle('on', modeIdx > 0);
+  chipsEl.querySelectorAll('.mode-chip').forEach((el, i) => el.classList.toggle('on', i === modeIdx));
+  trailAlpha = (m.id === 'curl' || m.id === 'music') ? 0.042 : m.id === 'attrib' ? 0.06 : 0.055;
+  if (m.id === 'music' && !audioPlaying && !reduceMotion) {
+    const hint = document.getElementById('gestureHint');
+    if (hint) hint.classList.remove('hidden');
+  }
+  resetParticles();
+}
+
+const chipsEl = document.getElementById('mode-chips');
+MODES.forEach((m, i) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'mode-chip' + (i === 0 ? ' on' : '');
+  b.textContent = `${i + 1} · ${m.label}`;
+  b.addEventListener('click', () => setMode(i));
+  chipsEl.appendChild(b);
+});
+
+function setVectors(on) {
+  showVectors = on;
+  document.getElementById('h-vec').textContent = on ? 'on' : 'off';
+  document.getElementById('btn-vec').classList.toggle('on', on);
+}
+function setPaused(on) {
+  paused = on;
+  const btn = document.getElementById('btn-pause');
+  btn.classList.toggle('on', on);
+  btn.innerHTML = on ? 'Play <kbd>␣</kbd>' : 'Pause <kbd>␣</kbd>';
+}
+function cycleMask() {
+  maskKind = (maskKind + 1) % 3;
+  rebuildMask();
+  if (MODES[modeIdx].id === 'mask') resetParticles();
+  document.getElementById('btn-mask').classList.add('on');
+  setTimeout(() => document.getElementById('btn-mask').classList.remove('on'), 200);
+}
+
+document.getElementById('btn-mode').addEventListener('click', () => setMode(modeIdx + 1));
+document.getElementById('btn-vec').addEventListener('click', () => setVectors(!showVectors));
+document.getElementById('btn-mask').addEventListener('click', cycleMask);
+document.getElementById('btn-reset').addEventListener('click', () => resetParticles());
+document.getElementById('btn-pause').addEventListener('click', () => setPaused(!paused));
+document.getElementById('btn-export').addEventListener('click', exportSVG);
+
+window.addEventListener('keydown', (e) => {
+  if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'm') { setMode(modeIdx + 1); e.preventDefault(); }
+  else if (k === 'v') { setVectors(!showVectors); e.preventDefault(); }
+  else if (k === 't') { cycleMask(); e.preventDefault(); }
+  else if (k === 'e') { exportSVG(); e.preventDefault(); }
+  else if (k === 'a') { toggleSong(); e.preventDefault(); }
+  else if (k === 'r') { resetParticles(); e.preventDefault(); }
+  else if (k === ' ' || e.code === 'Space') { setPaused(!paused); e.preventDefault(); }
+  else if (k >= '1' && k <= '6') { setMode(Number(k) - 1); e.preventDefault(); }
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  const r = canvas.getBoundingClientRect();
+  pointer.x = (e.clientX - r.left) * dpr;
+  pointer.y = (e.clientY - r.top) * dpr;
+  pointer.active = true;
+}, { passive: true });
+canvas.addEventListener('pointerleave', () => { pointer.active = false; });
+
+/* ── SVG streamline export (pen plotter) ───────────────────────────── */
+function exportSVG() {
+  const streams = 48;
+  const steps = 90;
+  const stepLen = Math.min(W, H) * 0.012;
+  const paths = [];
+  const mode = MODES[modeIdx].id;
+
+  // Seed points: pack for organic coverage, or mask-aware
+  let seeds;
+  if (mode === 'mask') {
+    seeds = [];
+    for (let i = 0; i < streams * 8 && seeds.length < streams; i++) {
+      const x = Math.random() * W, y = Math.random() * H;
+      if (sampleMaskBright(x, y) > 0.4) seeds.push({ x, y });
+    }
+    while (seeds.length < streams) seeds.push({ x: Math.random() * W, y: Math.random() * H });
+  } else if (mode === 'pack') {
+    seeds = packCircles(streams, 10, 22).map((c) => ({ x: c.x, y: c.y }));
+    while (seeds.length < streams) seeds.push({ x: Math.random() * W, y: Math.random() * H });
+  } else {
+    seeds = [];
+    for (let i = 0; i < streams; i++) {
+      seeds.push({ x: ((i + 0.5) / streams) * W * 0.9 + W * 0.05, y: H * (0.15 + 0.7 * ((i * 0.37) % 1)) });
+    }
+  }
+
+  for (const s of seeds) {
+    let x = s.x, y = s.y;
+    const pts = [`${x.toFixed(2)},${y.toFixed(2)}`];
+    for (let i = 0; i < steps; i++) {
+      const f = curlField(x, y, t);
+      const mag = Math.hypot(f.x, f.y) || 1e-6;
+      x += (f.x / mag) * stepLen;
+      y += (f.y / mag) * stepLen;
+      if (x < 0 || x > W || y < 0 || y > H) break;
+      if (mode === 'mask' && sampleMaskBright(x, y) < 0.08) break;
+      pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+    }
+    if (pts.length > 3) {
+      paths.push(`<polyline fill="none" stroke="#05060a" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />`);
+    }
+  }
+
+  const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+  <title>Noctuary flow atelier · ${mode} · streamlines</title>
+  <rect width="100%" height="100%" fill="#f2ebe0"/>
+  <!-- continuous streamline paths for pen plotter -->
+  ${paths.join('\n  ')}
+</svg>`;
+
+  const blob = new Blob([svg], { type: 'image/svg+xml' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `noctuary-flow-atelier-${mode}.svg`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  document.getElementById('btn-export').classList.add('on');
+  setTimeout(() => document.getElementById('btn-export').classList.remove('on'), 400);
+}
+
+/* ── Draw helpers ──────────────────────────────────────────────────── */
+function drawVectors() {
+  const step = Math.max(28, Math.min(W, H) / 18);
+  ctx.save();
+  ctx.globalAlpha = 0.45;
+  for (let y = step * 0.5; y < H; y += step) {
+    for (let x = step * 0.5; x < W; x += step) {
+      const f = curlField(x, y, t);
+      const mag = Math.hypot(f.x, f.y) || 1e-6;
+      const ux = f.x / mag, uy = f.y / mag;
+      const len = Math.min(mag * 0.08, step * 0.45);
+      const mix = Math.min(mag / (Math.min(W, H) * 0.5), 1);
+      const r = (ACCENT[0] * mix + VIOLET[0] * (1 - mix)) | 0;
+      const g = (ACCENT[1] * mix + VIOLET[1] * (1 - mix)) | 0;
+      const b = (ACCENT[2] * mix + VIOLET[2] * (1 - mix)) | 0;
+      ctx.strokeStyle = `rgb(${r},${g},${b})`;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + ux * len, y + uy * len);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function colorFor(p, ang, speed) {
+  const mode = MODES[modeIdx].id;
+  if (audioPlaying && audioFx.color && (mode === 'music' || bands.vol > 0.04)) {
+    const [cr, cg, cb] = bandHueRGB();
+    // Soften with Noctuary violet when quiet
+    const w = Math.min(1, bands.vol * 1.6 + 0.15);
+    const r = (cr * w + VIOLET[0] * (1 - w)) | 0;
+    const g = (cg * w + VIOLET[1] * (1 - w)) | 0;
+    const b = (cb * w + VIOLET[2] * (1 - w)) | 0;
+    return `rgb(${r},${g},${b})`;
+  }
+  let mix = p.hueMix;
+  if (mode === 'attrib') {
+    const lifeT = p.life / p.maxLife;
+    const angT = (ang / (Math.PI * 2) + 1) % 1;
+    mix = angT * 0.55 + (1 - lifeT) * 0.35 + speed * 0.2;
+    mix = Math.max(0, Math.min(1, mix));
+  } else if (mode === 'curl' || mode === 'music') {
+    mix = 0.35 + Math.min(speed * 1.2, 0.55);
+  }
+  const r = (VIOLET[0] * (1 - mix) + ACCENT[0] * mix) | 0;
+  const g = (VIOLET[1] * (1 - mix) + ACCENT[1] * mix) | 0;
+  const b = (VIOLET[2] * (1 - mix) + ACCENT[2] * mix) | 0;
+  return `rgb(${r},${g},${b})`;
+}
+
+function step(dt) {
+  if (reduceMotion || paused) return;
+  t += dt;
+  const mode = MODES[modeIdx].id;
+  const baseSpeed = Math.min(W, H) * (mode === 'curl' ? 0.55 : 0.48);
+
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    p.px = p.x; p.py = p.y;
+
+    let f = curlField(p.x, p.y, t + p.seed * 0.15);
+
+    // Mild pointer swirl in curl / attrib
+    if (pointer.active && (mode === 'curl' || mode === 'attrib' || mode === 'music')) {
+      const dx = p.x - pointer.x, dy = p.y - pointer.y;
+      const d2 = dx * dx + dy * dy + 40;
+      const fall = 18000 / d2;
+      f = { x: f.x - dy * fall * 0.02 - dx * fall * 0.004, y: f.y + dx * fall * 0.02 - dy * fall * 0.004 };
+    }
+
+    // Music drive (any mode once song is live) — before mag so kick affects motion
+    if (audioPlaying && !reduceMotion) {
+      if (audioFx.beat && bands.onset > 0.5 && Math.random() < 0.32) {
+        Object.assign(p, spawnOne({ edge: Math.random() < 0.55 }));
+        continue;
+      }
+      if (audioFx.scale) {
+        const kick = 1 + bands.bass * 2.6;
+        f = { x: f.x * kick, y: f.y * kick };
+      }
+    }
+
+    const mag = Math.hypot(f.x, f.y) || 1e-6;
+    const ang = Math.atan2(f.y, f.x);
+    let spd = (baseSpeed * p.speedMul);
+
+    if (audioPlaying && !reduceMotion && audioFx.vel) {
+      // Quiet = lazy drift; loud = race the field
+      spd *= 0.18 + bands.vol * 3.1;
+    }
+
+    if (mode === 'attrib') {
+      // speed from |v| and remaining life
+      spd *= (0.55 + Math.min(mag / (Math.min(W, H) * 0.4), 1.1)) * (0.5 + 0.5 * (p.life / p.maxLife));
+      p.size = 0.4 + (1.8 * (p.life / p.maxLife)) + Math.min(mag * 0.002, 1.2);
+    } else if (mode === 'mask') {
+      const bright = sampleMaskBright(p.x, p.y);
+      // Slow outside ink; cling to letterforms
+      spd *= 0.35 + bright * 1.1;
+      if (bright < 0.12) {
+        // Soft pull back toward ink via random reseed occasionally
+        if (Math.random() < 0.02) {
+          Object.assign(p, spawnOne());
+          continue;
+        }
+      }
+    } else if (mode === 'pack') {
+      spd *= 0.85;
+    }
+
+    const ux = f.x / mag, uy = f.y / mag;
+    p.x += ux * spd * dt;
+    p.y += uy * spd * dt;
+    p._ang = ang;
+    p._spd = Math.min(mag / (Math.min(W, H) * 0.5), 1);
+
+    // Boundaries
+    if (mode === 'wrap') {
+      if (p.x > W) p.x = 0;
+      else if (p.x < 0) p.x = W;
+      if (p.y > H) p.y = 0;
+      else if (p.y < 0) p.y = H;
+      p.life -= dt;
+      if (p.life <= 0) Object.assign(p, spawnOne({ edge: true }));
+    } else {
+      // Soft wrap for density in other modes too (atelier always densifies)
+      let wrapped = false;
+      if (p.x > W) { p.x = 0; wrapped = true; }
+      else if (p.x < 0) { p.x = W; wrapped = true; }
+      if (p.y > H) { p.y = 0; wrapped = true; }
+      else if (p.y < 0) { p.y = H; wrapped = true; }
+      if (wrapped) { p.px = p.x; p.py = p.y; }
+      p.life -= dt * (mode === 'attrib' ? 1 : 0.35);
+      if (p.life <= 0) Object.assign(p, spawnOne());
+    }
+  }
+}
+
+let stillBaked = false;
+
+function render() {
+  // Trail fade
+  if (reduceMotion) {
+    if (stillBaked) {
+      if (showVectors) drawVectors();
+      return; // keep baked compose
+    }
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, 0, W, H);
+  } else {
+    ctx.fillStyle = `rgba(5,6,10,${paused ? 0 : trailAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Ghost mask outline in mask mode
+  if (MODES[modeIdx].id === 'mask' && maskData) {
+    ctx.save();
+    ctx.globalAlpha = 0.06;
+    ctx.drawImage(maskCanvas, 0, 0);
+    ctx.restore();
+  }
+
+  // Pack circles ghost
+  if (MODES[modeIdx].id === 'pack' && showVectors) {
+    // light: show that packing was used via sparse rings at particle clusters — skip heavy
+  }
+
+  ctx.lineCap = 'round';
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    const col = colorFor(p, p._ang || 0, p._spd || 0.4);
+    const sz = (MODES[modeIdx].id === 'attrib' ? p.size : p.size) * dpr * 0.9;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = Math.max(0.6, sz * 0.55);
+    ctx.globalAlpha = reduceMotion ? 0.85 : 0.7;
+    // Avoid trail jump on wrap
+    const jump = Math.hypot(p.x - p.px, p.y - p.py);
+    if (jump < Math.min(W, H) * 0.2) {
+      ctx.beginPath();
+      ctx.moveTo(p.px, p.py);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(0.8, sz * 0.4), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  if (showVectors) drawVectors();
+
+  // Still compose: freeze with vectors
+  if (reduceMotion && showVectors) drawVectors();
+}
+
+function resize() {
+  dpr = Math.min(devicePixelRatio || 1, 2);
+  W = Math.floor(innerWidth * dpr);
+  H = Math.floor(innerHeight * dpr);
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.width = innerWidth + 'px';
+  canvas.style.height = innerHeight + 'px';
+  rebuildMask();
+  resetParticles();
+}
+window.addEventListener('resize', resize);
+
+/* ── Still seed ────────────────────────────────────────────────────── */
+function stillCompose() {
+  setMode(2); // curl
+  setVectors(true);
+  // Spiral layout
+  particles.length = 0;
+  for (let i = 0; i < COUNT; i++) {
+    const a = (i / COUNT) * Math.PI * 8;
+    const r = Math.min(W, H) * (0.05 + 0.4 * (i / COUNT));
+    particles.push(spawnOne({
+      x: W * 0.5 + Math.cos(a) * r,
+      y: H * 0.5 + Math.sin(a) * r * 0.78,
+    }));
+  }
+  document.getElementById('h-n').textContent = String(particles.length);
+  ctx.fillStyle = INK;
+  ctx.fillRect(0, 0, W, H);
+  stillBaked = false;
+  // One-shot advection bake for still ink
+  for (let s = 0; s < 40; s++) {
+    t += 0.016;
+    for (const p of particles) {
+      p.px = p.x; p.py = p.y;
+      const f = curlField(p.x, p.y, t + p.seed);
+      const mag = Math.hypot(f.x, f.y) || 1;
+      p.x += (f.x / mag) * 2.2;
+      p.y += (f.y / mag) * 2.2;
+    }
+    ctx.fillStyle = `rgba(5,6,10,0.08)`;
+    ctx.fillRect(0, 0, W, H);
+    for (const p of particles) {
+      ctx.strokeStyle = colorFor(p, 0, 0.5);
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(p.px, p.py);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+  }
+  stillBaked = true;
+  if (showVectors) drawVectors();
+}
+
+let last = performance.now();
+let fpsAcc = 0, fpsN = 0, fpsT = performance.now();
+
+function frame(now) {
+  const dt = Math.min((now - last) / 1000, 0.048);
+  last = now;
+  fpsN++;
+  if (now - fpsT >= 500) {
+    document.getElementById('h-fps').textContent = String(Math.round((fpsN * 1000) / (now - fpsT)));
+    fpsT = now; fpsN = 0;
+  }
+  if (!reduceMotion) {
+    sampleAudio(dt);
+    step(dt);
+    render();
+  } else {
+    // still: redraw static occasionally for resize
+    render();
+  }
+  requestAnimationFrame(frame);
+}
+
+
+/* ── Audio UI wire ─────────────────────────────────────────────────── */
+document.getElementById('btn-song').addEventListener('click', () => toggleSong());
+document.getElementById('gestureHint').addEventListener('click', () => toggleSong());
+document.getElementById('gestureHint').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { toggleSong(); e.preventDefault(); }
+});
+document.querySelectorAll('#audioToggles .chip').forEach((el) => {
+  el.addEventListener('click', () => {
+    const k = el.dataset.fx;
+    audioFx[k] = !audioFx[k];
+    el.classList.toggle('on', audioFx[k]);
+  });
+});
+setupMidi();
+syncAudioChips();
+if (reduceMotion) {
+  document.getElementById('gestureHint').classList.add('hidden');
+  document.getElementById('h-audio').textContent = 'still';
+}
+
+resize();
+setMode(0);
+if (params.has('still') || reduceMotion) {
+  stillCompose();
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
