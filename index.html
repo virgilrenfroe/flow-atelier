@@ -195,7 +195,7 @@
         <button class="pill" type="button" id="btn-mask" title="Cycle mask source (T)">Mask <kbd>T</kbd></button>
         <button class="pill" type="button" id="btn-export" title="Export streamlines SVG (E)">SVG <kbd>E</kbd></button>
         <button class="pill" type="button" id="btn-reset" title="Reset (R)">Reset <kbd>R</kbd></button>
-        <button class="pill" type="button" id="btn-pause" title="Pause (Space)">Pause <kbd>␣</kbd></button>
+        <button class="pill" type="button" id="btn-pause" title="Pause / play song + field (Space)">Pause <kbd>␣</kbd></button>
       </div>
     </div>
     <div class="hud">
@@ -378,6 +378,7 @@ async function toggleSong() {
     try {
       await mediaEl.play();
       audioPlaying = true;
+      if (paused) setPaused(false);
       document.getElementById('btn-song').classList.add('on');
       document.getElementById('h-audio').textContent = 'live';
       notifyCorridorSong(true);
@@ -796,10 +797,36 @@ function setVectors(on) {
   document.getElementById('btn-vec').classList.toggle('on', on);
 }
 function setPaused(on) {
-  paused = on;
+  paused = !!on;
   const btn = document.getElementById('btn-pause');
-  btn.classList.toggle('on', on);
-  btn.innerHTML = on ? 'Play <kbd>␣</kbd>' : 'Pause <kbd>␣</kbd>';
+  if (btn) {
+    btn.classList.toggle('on', paused);
+    btn.innerHTML = paused ? 'Play <kbd>␣</kbd>' : 'Pause <kbd>␣</kbd>';
+  }
+  // Pause / resume the song with the sim — otherwise Pause looks broken
+  if (mediaEl && audioReady) {
+    if (paused) {
+      mediaEl.pause();
+      if (audioPlaying) {
+        audioPlaying = false;
+        const sb = document.getElementById('btn-song');
+        if (sb) sb.classList.remove('on');
+        const ha = document.getElementById('h-audio');
+        if (ha) ha.textContent = 'paused';
+        if (typeof notifyCorridorSong === 'function') notifyCorridorSong(false);
+      }
+    } else if (mediaEl.currentTime > 0.05 && mediaEl.paused) {
+      // Resume from Pause button — restart playback if we had been playing
+      mediaEl.play().then(() => {
+        audioPlaying = true;
+        const sb = document.getElementById('btn-song');
+        if (sb) sb.classList.add('on');
+        const ha = document.getElementById('h-audio');
+        if (ha) ha.textContent = 'live';
+        if (typeof notifyCorridorSong === 'function') notifyCorridorSong(true);
+      }).catch(() => {});
+    }
+  }
 }
 function cycleMask() {
   maskKind = (maskKind + 1) % 3;
@@ -2273,17 +2300,20 @@ const LYRIC_CUES = [
 ];
 let lyricIdx = -1;
 function lyricAt(t) {
+  // One word at a time: visible from start → min(end+0.06, next.start)
+  // Clears in longer gaps so it doesn't feel like whole lines lingering
   let i = -1;
   for (let k = 0; k < LYRIC_CUES.length; k++) {
-    const c = LYRIC_CUES[k];
-    if (t >= c.start - 0.02) i = k;
+    if (t + 0.015 >= LYRIC_CUES[k].start) i = k;
     else break;
   }
   if (i < 0) return -1;
   const c = LYRIC_CUES[i];
   const next = LYRIC_CUES[i + 1];
-  const hold = next ? Math.min(c.end + 0.12, next.start) : c.end + 0.35;
-  if (t > hold + 0.45) return -1;
+  const until = next
+    ? Math.min(c.end + 0.06, next.start)
+    : (c.end + 0.18);
+  if (t < c.start - 0.02 || t >= until) return -1;
   return i;
 }
 function updateLyrics() {
@@ -2318,7 +2348,7 @@ function updateLyrics() {
 document.getElementById('btn-song').addEventListener('click', () => toggleSong());
 document.getElementById('gestureHint').addEventListener('click', () => toggleSong());
 document.getElementById('gestureHint').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') { toggleSong(); e.preventDefault(); }
+  if (e.key === 'Enter') { toggleSong(); e.preventDefault(); }
 });
 document.querySelectorAll('#audioToggles .chip').forEach((el) => {
   el.addEventListener('click', () => {
