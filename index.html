@@ -381,11 +381,9 @@ async function toggleSong() {
       document.getElementById('btn-song').classList.add('on');
       document.getElementById('h-audio').textContent = 'live';
       notifyCorridorSong(true);
-      // Arm all music fx and land on Music mode so reaction is obvious
+      // Arm music fx but stay on current mode (Mask Swarm by default)
       Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
       syncAudioChips();
-      const mi = MODES.findIndex((m) => m.id === 'music');
-      if (mi >= 0) setMode(mi);
     } catch (err) {
       document.getElementById('h-audio').textContent = 'blocked';
       if (hint) hint.classList.remove('hidden');
