@@ -1,0 +1,170 @@
+{
+  "source": "faster-whisper",
+  "model": "small",
+  "track": "A Song with a Hole in It",
+  "draft": false,
+  "cues": [
+    {
+      "start": 0.0,
+      "end": 1.38,
+      "text": "Oh"
+    },
+    {
+      "start": 11.0,
+      "end": 12.4,
+      "text": "Oh"
+    },
+    {
+      "start": 30.3,
+      "end": 31.22,
+      "text": "Oh"
+    },
+    {
+      "start": 45.98,
+      "end": 51.4,
+      "text": "Here is a song but it's got a hole in it"
+    },
+    {
+      "start": 54.52,
+      "end": 59.48,
+      "text": "I had hoped that I could patch it up"
+    },
+    {
+      "start": 62.08,
+      "end": 67.8,
+      "text": "With the suture of melody glued to metallic strings"
+    },
+    {
+      "start": 71.4,
+      "end": 75.42,
+      "text": "I had hoped that I could make it perfect"
+    },
+    {
+      "start": 77.88,
+      "end": 88.42,
+      "text": "cause I know you like for things to be perfect"
+    },
+    {
+      "start": 88.94,
+      "end": 93.6,
+      "text": "To fit perfectly"
+    },
+    {
+      "start": 97.04,
+      "end": 99.78,
+      "text": "Perfect like"
+    },
+    {
+      "start": 107.92,
+      "end": 112.42,
+      "text": "But everything I tried just made the hole bigger"
+    },
+    {
+      "start": 115.92,
+      "end": 121.14,
+      "text": "And soon there was nothing that did not fall into it"
+    },
+    {
+      "start": 124.54,
+      "end": 129.14,
+      "text": "First it was my fingers and then it was my hands"
+    },
+    {
+      "start": 131.94,
+      "end": 142.1,
+      "text": "And then it was my eyes opening in the dark of a hole"
+    },
+    {
+      "start": 144.14,
+      "end": 151.06,
+      "text": "Deep down a song that hardly gets sung"
+    },
+    {
+      "start": 152.06,
+      "end": 159.46,
+      "text": "Where I disappear until now"
+    },
+    {
+      "start": 164.96,
+      "end": 171.38,
+      "text": "Yeah, here is a song but it's got a hole in it"
+    },
+    {
+      "start": 173.7,
+      "end": 178.54,
+      "text": "I had hoped that I could patch it up"
+    },
+    {
+      "start": 181.06,
+      "end": 186.92,
+      "text": "With the suture of melody glued to metallic strings"
+    },
+    {
+      "start": 189.66,
+      "end": 194.78,
+      "text": "I had hoped that I could make it perfect"
+    },
+    {
+      "start": 197.04,
+      "end": 199.76,
+      "text": "So perfect"
+    },
+    {
+      "start": 201.06,
+      "end": 204.0,
+      "text": "So perfect"
+    },
+    {
+      "start": 206.06,
+      "end": 208.04,
+      "text": "To fit perfectly"
+    },
+    {
+      "start": 211.82,
+      "end": 212.8,
+      "text": "Perfectly"
+    },
+    {
+      "start": 214.1,
+      "end": 216.06,
+      "text": "So perfect"
+    },
+    {
+      "start": 222.72,
+      "end": 227.46,
+      "text": "But everything I tried just made the hole bigger"
+    },
+    {
+      "start": 230.96,
+      "end": 236.56,
+      "text": "And soon there was nothing that did not fall into it"
+    },
+    {
+      "start": 239.58,
+      "end": 244.22,
+      "text": "First it was my arms and then it was my hands"
+    },
+    {
+      "start": 247.24,
+      "end": 255.44,
+      "text": "And then it was my heart and my eyes opening"
+    },
+    {
+      "start": 255.44,
+      "end": 258.14,
+      "text": "in the dark of a hole"
+    },
+    {
+      "start": 259.22,
+      "end": 266.14,
+      "text": "Deep down a song that hardly gets sung"
+    },
+    {
+      "start": 266.14,
+      "end": 273.04,
+      "text": "Where I disappear until now"
+    }
+  ],
+  "locked": true,
+  "note": "Virgil corrected 2026-09-20: like for things"
+}
