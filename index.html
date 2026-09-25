@@ -972,6 +972,15 @@ function spawnOne(opts = {}) {
     size: opts.size || (mode === 'mirror' ? (0.42 + Math.random() * 0.85) : (0.6 + Math.random() * 1.4)),
     speedMul: opts.speedMul || (0.7 + Math.random() * 0.8),
     hueMix: Math.random(),
+    head: null,
+    bend: 0,
+    compDraw: false,
+    sx: x,
+    sy: y,
+    lat0: 0,
+    lat1: 0,
+    c0x: x, c0y: y, c1x: x, c1y: y,
+    p0x: x, p0y: y, p1x: x, p1y: y,
   };
 }
 
@@ -1116,6 +1125,164 @@ canvas.addEventListener('pointermove', (e) => {
 }, { passive: true });
 canvas.addEventListener('pointerleave', () => { pointer.active = false; });
 
+/* ── Companion streamlines ───────────────────────────────────────────
+   Each primary segment is stroked with two companions about half an inch
+   off the local normal. Their lateral shift is the primary's bend and
+   bulge with the sign flipped, so the companions undulate the other way
+   and cross the main line where the curve is strong.
+   Live draw: strokePrimaryWithCompanions() (Quad mirror stamps all three
+   through mirrorSegs). SVG export uses the same shift via companionPolys(). */
+function wrapAng(a) {
+  a %= Math.PI * 2;
+  if (a > Math.PI) a -= Math.PI * 2;
+  else if (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+function companionSpacing() {
+  const d = dpr || 1;
+  const shortCss = Math.min(innerWidth || (W / d), innerHeight || (H / d));
+  // 0.5in ≈ 48 CSS px at 96dpi. Keep a slightly smaller gap on phones.
+  const css = shortCss < 760 ? Math.max(28, Math.min(42, shortCss * 0.092)) : 48;
+  return css * d;
+}
+
+function clampLat(v, lim) {
+  return v > lim ? lim : (v < -lim ? -lim : v);
+}
+
+/* shift > 0 pulls the +normal companion toward and through the main line. */
+function companionShift(bend, dev, gap) {
+  const curve = Math.tanh(bend * 2.8) * gap * 1.05;
+  return dev * 2.15 + curve;
+}
+
+function anchorCompanions(p) {
+  const gap = companionSpacing();
+  const ang = (p.head == null || !isFinite(p.head)) ? 0 : p.head;
+  const nx = -Math.sin(ang);
+  const ny = Math.cos(ang);
+  p.bend = 0;
+  p.sx = p.x;
+  p.sy = p.y;
+  p.lat0 = gap;
+  p.lat1 = -gap;
+  p.c0x = p.x + nx * gap;
+  p.c0y = p.y + ny * gap;
+  p.c1x = p.x - nx * gap;
+  p.c1y = p.y - ny * gap;
+  p.p0x = p.c0x; p.p0y = p.c0y;
+  p.p1x = p.c1x; p.p1y = p.c1y;
+  p.compDraw = false;
+}
+
+function syncCompanions(p) {
+  const dx = p.x - p.px;
+  const dy = p.y - p.py;
+  const dist = Math.hypot(dx, dy);
+  if (!(dist > 0.15)) return;
+  const ang = Math.atan2(dy, dx);
+  const gap = companionSpacing();
+  if (p.head == null || !isFinite(p.head)) {
+    p.head = ang;
+    anchorCompanions(p);
+    p.head = ang;
+    return;
+  }
+  const dAng = wrapAng(ang - p.head);
+  const mem = Math.max(32, gap * 2.9);
+  p.bend = (p.bend || 0) * Math.exp(-dist / mem) + dAng;
+  p.head = ang;
+  const nx = -Math.sin(ang);
+  const ny = Math.cos(ang);
+  const smoothLen = Math.max(36, gap * 4.4);
+  const a = 1 - Math.exp(-dist / smoothLen);
+  if (p.sx == null || !isFinite(p.sx)) { p.sx = p.px; p.sy = p.py; }
+  p.sx += (p.x - p.sx) * a;
+  p.sy += (p.y - p.sy) * a;
+  const dev = (p.x - p.sx) * nx + (p.y - p.sy) * ny;
+  const shift = companionShift(p.bend, dev, gap);
+  const lim = gap * 1.34;
+  p.lat0 = clampLat(gap - shift, lim);
+  p.lat1 = clampLat(-gap - shift, lim);
+  p.p0x = p.c0x; p.p0y = p.c0y;
+  p.p1x = p.c1x; p.p1y = p.c1y;
+  p.c0x = p.x + nx * p.lat0;
+  p.c0y = p.y + ny * p.lat0;
+  p.c1x = p.x + nx * p.lat1;
+  p.c1y = p.y + ny * p.lat1;
+  p.compDraw = isFinite(p.p0x) && isFinite(p.p1x);
+}
+
+function companionPolys(raw) {
+  const gap = companionSpacing();
+  const lim = gap * 1.34;
+  const mem = Math.max(32, gap * 2.9);
+  const smoothLen = Math.max(36, gap * 4.4);
+  let head = null;
+  let bend = 0;
+  let sx = raw[0][0], sy = raw[0][1];
+  let ang0 = 0;
+  if (raw.length > 1) ang0 = Math.atan2(raw[1][1] - raw[0][1], raw[1][0] - raw[0][0]);
+  const a = [];
+  const b = [];
+  for (let i = 0; i < raw.length; i++) {
+    const x = raw[i][0], y = raw[i][1];
+    let ang = i === 0 ? ang0 : head;
+    if (i > 0) {
+      const dx = x - raw[i - 1][0], dy = y - raw[i - 1][1];
+      const dist = Math.hypot(dx, dy) || 1e-6;
+      ang = Math.atan2(dy, dx);
+      if (head == null) head = ang;
+      bend = bend * Math.exp(-dist / mem) + wrapAng(ang - head);
+      head = ang;
+      const k = 1 - Math.exp(-dist / smoothLen);
+      sx += (x - sx) * k;
+      sy += (y - sy) * k;
+    }
+    const nx = -Math.sin(ang), ny = Math.cos(ang);
+    const dev = (x - sx) * nx + (y - sy) * ny;
+    const shift = i === 0 ? 0 : companionShift(bend, dev, gap);
+    const lat0 = clampLat(gap - shift, lim);
+    const lat1 = clampLat(-gap - shift, lim);
+    a.push([x + nx * lat0, y + ny * lat0]);
+    b.push([x + nx * lat1, y + ny * lat1]);
+  }
+  return [a, b];
+}
+
+function strokeMirrored(x0, y0, x1, y1, mirrorDraw) {
+  const segs = mirrorDraw ? mirrorSegs(x0, y0, x1, y1) : [[x0, y0, x1, y1]];
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    ctx.beginPath();
+    ctx.moveTo(s[0], s[1]);
+    ctx.lineTo(s[2], s[3]);
+    ctx.stroke();
+  }
+}
+
+function strokePrimaryWithCompanions(p, mirrorDraw) {
+  const mainW = ctx.lineWidth;
+  const mainA = ctx.globalAlpha;
+  if (p.compDraw) {
+    const gap = companionSpacing();
+    const lim = Math.max(gap * 4.5, Math.min(W, H) * 0.16);
+    const limSq = lim * lim;
+    ctx.lineWidth = Math.max(0.35, mainW * 0.7);
+    ctx.globalAlpha = mainA * 0.55;
+    if ((p.c0x - p.p0x) * (p.c0x - p.p0x) + (p.c0y - p.p0y) * (p.c0y - p.p0y) < limSq) {
+      strokeMirrored(p.p0x, p.p0y, p.c0x, p.c0y, mirrorDraw);
+    }
+    if ((p.c1x - p.p1x) * (p.c1x - p.p1x) + (p.c1y - p.p1y) * (p.c1y - p.p1y) < limSq) {
+      strokeMirrored(p.p1x, p.p1y, p.c1x, p.c1y, mirrorDraw);
+    }
+    ctx.lineWidth = mainW;
+    ctx.globalAlpha = mainA;
+  }
+  strokeMirrored(p.px, p.py, p.x, p.y, mirrorDraw);
+}
+
 /* ── SVG streamline export (pen plotter) ───────────────────────────── */
 function exportSVG() {
   const streams = 48;
@@ -1171,12 +1338,16 @@ function exportSVG() {
             (px, py) => [W - px, H - py],
           ]
         : [(px, py) => [px, py]];
+      const bundles = [raw, ...companionPolys(raw)];
+      const widths = ['0.7', '0.45', '0.45'];
       for (const map of copies) {
-        const pts = raw.map(([px, py]) => {
-          const q = map(px, py);
-          return `${q[0].toFixed(2)},${q[1].toFixed(2)}`;
-        });
-        paths.push(`<polyline fill="none" stroke="#05060a" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />`);
+        for (let b = 0; b < bundles.length; b++) {
+          const pts = bundles[b].map(([px, py]) => {
+            const q = map(px, py);
+            return `${q[0].toFixed(2)},${q[1].toFixed(2)}`;
+          });
+          paths.push(`<polyline fill="none" stroke="#05060a" stroke-width="${widths[b]}" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />`);
+        }
       }
     }
   }
@@ -1329,22 +1500,30 @@ function step(dt) {
     p._ang = ang;
     p._spd = Math.min(mag / (Math.min(W, H) * 0.5), 1);
 
-    // Boundaries
+    // Boundaries. Companions are anchored after a wrap so a teleport
+    // doesn't stroke a chord across the canvas.
+    let wrapped = false;
     if (mode === 'wrap') {
-      if (p.x > W) p.x = 0;
-      else if (p.x < 0) p.x = W;
-      if (p.y > H) p.y = 0;
-      else if (p.y < 0) p.y = H;
-      p.life -= dt;
-      if (p.life <= 0) Object.assign(p, spawnOne({ edge: true }));
-    } else {
-      // Soft wrap for density in other modes too (always densifies)
-      let wrapped = false;
       if (p.x > W) { p.x = 0; wrapped = true; }
       else if (p.x < 0) { p.x = W; wrapped = true; }
       if (p.y > H) { p.y = 0; wrapped = true; }
       else if (p.y < 0) { p.y = H; wrapped = true; }
-      if (wrapped) { p.px = p.x; p.py = p.y; }
+      if (wrapped) anchorCompanions(p);
+      else syncCompanions(p);
+      p.life -= dt;
+      if (p.life <= 0) Object.assign(p, spawnOne({ edge: true }));
+    } else {
+      // Soft wrap for density in other modes too (always densifies)
+      if (p.x > W) { p.x = 0; wrapped = true; }
+      else if (p.x < 0) { p.x = W; wrapped = true; }
+      if (p.y > H) { p.y = 0; wrapped = true; }
+      else if (p.y < 0) { p.y = H; wrapped = true; }
+      if (wrapped) {
+        p.px = p.x; p.py = p.y;
+        anchorCompanions(p);
+      } else {
+        syncCompanions(p);
+      }
       p.life -= dt * (mode === 'attrib' ? 1 : 0.35);
       if (p.life <= 0) Object.assign(p, spawnOne());
     }
@@ -1363,7 +1542,13 @@ function render() {
     ctx.fillStyle = INK;
     ctx.fillRect(0, 0, W, H);
   } else {
-    ctx.fillStyle = `rgba(5,6,10,${paused ? 0 : trailAlpha})`;
+    // Companions add two extra strokes per particle. When the song pushes
+    // speed up, fade a little harder so the ink ground doesn't fill in.
+    let fade = trailAlpha;
+    if (audioPlaying && !paused) {
+      fade = Math.min(0.2, trailAlpha * (1 + bands.vol * 2.4 + bands.bass * 0.45));
+    }
+    ctx.fillStyle = `rgba(5,6,10,${paused ? 0 : fade})`;
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -1393,16 +1578,7 @@ function render() {
     // flip X, flip Y, flip both — with no clip at the midlines.
     const jump = Math.hypot(p.x - p.px, p.y - p.py);
     if (jump < Math.min(W, H) * 0.2) {
-      const segs = mirrorDraw
-        ? mirrorSegs(p.px, p.py, p.x, p.y)
-        : [[p.px, p.py, p.x, p.y]];
-      for (let s = 0; s < segs.length; s++) {
-        const seg = segs[s];
-        ctx.beginPath();
-        ctx.moveTo(seg[0], seg[1]);
-        ctx.lineTo(seg[2], seg[3]);
-        ctx.stroke();
-      }
+      strokePrimaryWithCompanions(p, mirrorDraw);
     } else {
       ctx.fillStyle = col;
       const dots = mirrorDraw
@@ -1462,27 +1638,29 @@ function stillCompose() {
       const mag = Math.hypot(f.x, f.y) || 1;
       p.x += (f.x / mag) * 2.4;
       p.y += (f.y / mag) * 2.4;
-      if (p.x > W) p.x -= W;
-      else if (p.x < 0) p.x += W;
-      if (p.y > H) p.y -= H;
-      else if (p.y < 0) p.y += H;
+      let wrapped = false;
+      if (p.x > W) { p.x -= W; wrapped = true; }
+      else if (p.x < 0) { p.x += W; wrapped = true; }
+      if (p.y > H) { p.y -= H; wrapped = true; }
+      else if (p.y < 0) { p.y += H; wrapped = true; }
+      if (wrapped) {
+        p.px = p.x; p.py = p.y;
+        anchorCompanions(p);
+      } else {
+        syncCompanions(p);
+      }
     }
     ctx.fillStyle = `rgba(5,6,10,0.07)`;
     ctx.fillRect(0, 0, W, H);
     ctx.lineWidth = 1.05;
+    ctx.globalAlpha = 0.9;
     const jumpMax = Math.min(W, H) * 0.2;
     for (const p of particles) {
       if (Math.hypot(p.x - p.px, p.y - p.py) > jumpMax) continue;
       ctx.strokeStyle = colorFor(p, 0, 0.5);
-      const segs = mirrorSegs(p.px, p.py, p.x, p.y);
-      for (let i = 0; i < segs.length; i++) {
-        const seg = segs[i];
-        ctx.beginPath();
-        ctx.moveTo(seg[0], seg[1]);
-        ctx.lineTo(seg[2], seg[3]);
-        ctx.stroke();
-      }
+      strokePrimaryWithCompanions(p, true);
     }
+    ctx.globalAlpha = 1;
   }
   stillBaked = true;
   if (showVectors) drawVectors();
