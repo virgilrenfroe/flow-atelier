@@ -279,7 +279,7 @@
       </div>
     </div>
     <div class="hud">
-      <div class="r"><span>mode</span><strong id="h-mode">mask</strong></div>
+      <div class="r"><span>mode</span><strong id="h-mode">mirror</strong></div>
       <div class="r"><span>particles</span><strong id="h-n">—</strong></div>
       <div class="r"><span>fps</span><strong id="h-fps">—</strong></div>
       <div class="r"><span>mask</span><strong id="h-mask">text</strong></div>
@@ -321,7 +321,7 @@
   </div>
   <div class="gesture-hint" id="gestureHint" role="button" tabindex="0">
     <strong>Click to play · or drop your song</strong>
-    Play the default track, or use Your song / drag in an mp3. The field follows bass, volume, and beats.
+    Play the default track, or use Your song / drag in an mp3. Four mirrored corners bleed across the center and bend with volume and frequency.
   </div>
 
 <script>
@@ -331,6 +331,13 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches || p
 document.getElementById('h-m').textContent = reduceMotion ? 'still' : 'live';
 
 const MODES = [
+  {
+    id: 'mirror',
+    label: 'Corner mirror',
+    short: 'mirror',
+    title: 'Four-corner mirror',
+    body: 'One simulation, stamped four ways: flip X, flip Y, and flip both, so NW/NE/SW/SE are the same field. Trails root in the corners and bleed across the center — no grid. Volume and high frequencies bend the curl.',
+  },
   {
     id: 'mask',
     label: 'Mask swarm',
@@ -400,6 +407,7 @@ function normBand(key, raw) {
 let audioCtx = null, analyser = null, audioData = null, audioSrc = null, mediaEl = null;
 let audioReady = false, audioPlaying = false;
 let prevBass = 0, beatCooldown = 0;
+let bendKick = 0;
 let steerAngle = 0;
 let steerHeld = 0;
 let noiseZoom = 1;
@@ -529,7 +537,7 @@ async function toggleSong() {
       if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
       document.getElementById('h-audio').textContent = 'live';
       notifyCorridorSong(true);
-      // Arm music fx but stay on current mode (Mask Swarm by default)
+      // Arm music fx but stay on the current mode — never auto-switch when audio unlocks
       Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
       syncAudioChips();
     } catch (err) {
@@ -550,6 +558,7 @@ function sampleAudio(dt) {
   if (!analyser || !audioPlaying || reduceMotion) {
     bands.bass *= 0.9; bands.mid *= 0.9; bands.high *= 0.9; bands.vol *= 0.9;
     bands.onset = 0;
+    bendKick = Math.max(0, bendKick - dt * 2.2);
     noiseZoom += (1 - noiseZoom) * 0.08;
     setMeter('bass', bands.bass); setMeter('mid', bands.mid);
     setMeter('high', bands.high); setMeter('vol', bands.vol);
@@ -589,7 +598,9 @@ function sampleAudio(dt) {
   if (delta > 0.08 && bands.bass > 0.35 && beatCooldown <= 0) {
     bands.onset = 1;
     beatCooldown = 0.12;
+    bendKick = 1;
   }
+  bendKick = Math.max(0, bendKick - dt * 1.6);
 
   // Bass → noise zoom
   if (audioFx.scale) {
@@ -724,12 +735,26 @@ function potential(x, y, time) {
   const z = noiseZoom;
   const nx = (x / Math.max(W, 1)) * 8 * z;
   const ny = (y / Math.max(H, 1)) * 8 * z;
+  const mirror = MODES[modeIdx].id === 'mirror';
+  const hot = mirror && audioPlaying && !reduceMotion;
+  const hi = hot ? bands.high : 0;
+  const mid = hot ? bands.mid : 0;
+  const vol = hot ? bands.vol : 0;
+  const bass = hot ? bands.bass : 0;
+  // Loud / bright passages speed the drift and raise the spatial frequency of ψ
+  const tempo = 1 + vol * 1.7 + hi * 0.9;
   const chaos = audioPlaying && audioFx.scale ? (0.85 + bands.bass * 0.9) : 1;
-  return (
-    fbm(nx * 0.55 + time * 0.035, ny * 0.55 - time * 0.028, 3) * 1.45 * chaos +
-    Math.sin(nx * 0.7 + ny * 0.4 + time * 0.22) * 0.32 +
-    Math.sin(nx * -0.5 + ny * 0.85 - time * 0.18) * 0.26
-  );
+  let psi =
+    fbm(nx * 0.55 + time * 0.035 * tempo, ny * 0.55 - time * 0.028 * tempo, 3) * 1.45 * chaos +
+    Math.sin(nx * 0.7 + ny * 0.4 + time * 0.22 * tempo) * 0.32 +
+    Math.sin(nx * -0.5 + ny * 0.85 - time * 0.18 * tempo) * 0.26;
+  if (hot) {
+    const freq = 1.15 + hi * 5.2 + mid * 1.8;
+    const amp = 0.2 + vol * 1.35 + hi * 0.9 + bass * 0.3 + bendKick * 0.55;
+    psi += Math.sin(nx * freq + ny * (0.5 + mid * 1.5) + time * 0.62 * tempo) * amp;
+    psi += Math.sin(nx * (-0.4 * freq) + ny * (0.85 + hi * 2.4) - time * 0.48 * tempo) * amp * 0.7;
+  }
+  return psi;
 }
 
 function curlField(x, y, time) {
@@ -748,6 +773,60 @@ function curlField(x, y, time) {
     vy = vy * (1 - blend) + sy * blend;
   }
   return { x: vx, y: vy };
+}
+
+/* Corner-rooted swirl. Quiet = a light eddy; loud/high-freq = tight arcs.
+   Added before normalize so it actually rotates the step direction. */
+function cornerSwirl(x, y) {
+  const r = Math.hypot(x, y) + 28;
+  const tx = -y / r;
+  const ty = x / r;
+  let amp = 2.1;
+  if (audioPlaying && !reduceMotion) {
+    amp += bands.vol * 18 + bands.high * 14 + bands.mid * 5.5 + bands.bass * 4 + bendKick * 8;
+  }
+  const tight = audioPlaying ? (1 + bands.high * 1.6 + bands.mid * 0.35) : 1;
+  const fall = Math.pow(Math.min(W, H) / r, 0.22 * tight);
+  let vx = tx * amp * fall;
+  let vy = ty * amp * fall;
+  if (audioPlaying && !reduceMotion && audioFx.scale) {
+    const rad = (bands.bass - 0.4) * (3.2 + bands.vol * 9 + bendKick * 4);
+    vx += (x / r) * rad;
+    vy += (y / r) * rad;
+  }
+  return { x: vx, y: vy };
+}
+
+/* One field sample. Mirror mode adds audio curvature + a soft corner bias
+   (tanh, no midline clip) so paths arc and still cross the center. */
+function flowAt(x, y, time) {
+  let f = curlField(x, y, time);
+  if (MODES[modeIdx].id !== 'mirror') return f;
+  const s = cornerSwirl(x, y);
+  f = { x: f.x + s.x, y: f.y + s.y };
+  const pull = 2.6;
+  f.x -= Math.tanh(x / (Math.max(W, 1) * 0.85)) * pull;
+  f.y -= Math.tanh(y / (Math.max(H, 1) * 0.85)) * pull;
+  const hi = audioPlaying ? bands.high : 0;
+  const mid = audioPlaying ? bands.mid : 0;
+  const vol = audioPlaying ? bands.vol : 0;
+  const excite = audioPlaying
+    ? (vol * 1.25 + hi * 1.15 + mid * 0.4 + bands.bass * 0.22 + bendKick * 0.7)
+    : 0.16;
+  const k = 0.0055 + hi * 0.032 + mid * 0.012;
+  const wave = Math.sin(x * k + y * k * 0.72 + time * (0.55 + vol * 1.8));
+  const dAng = wave * Math.min(1.85, 0.22 + excite * 0.95);
+  const cs = Math.cos(dAng), sn = Math.sin(dAng);
+  return { x: f.x * cs - f.y * sn, y: f.x * sn + f.y * cs };
+}
+
+function mirrorSegs(x0, y0, x1, y1) {
+  return [
+    [x0, y0, x1, y1],
+    [W - x0, y0, W - x1, y1],
+    [x0, H - y0, x1, H - y1],
+    [W - x0, H - y0, W - x1, H - y1],
+  ];
 }
 
 function sampleMaskBright(x, y) {
@@ -847,6 +926,16 @@ function spawnOne(opts = {}) {
 
   if (opts.x != null) {
     x = opts.x; y = opts.y;
+  } else if (mode === 'mirror') {
+    // Corner-weighted, with a uniform tail so the center is crossed immediately.
+    // No clamp at W/2 or H/2 — sections bleed.
+    if (Math.random() < 0.24) {
+      x = Math.random() * W * 0.99;
+      y = Math.random() * H * 0.99;
+    } else {
+      x = Math.pow(Math.random(), 1.6) * W * 0.995;
+      y = Math.pow(Math.random(), 1.6) * H * 0.995;
+    }
   } else if (mode === 'mask') {
     // Rejection sample on bright pixels
     let found = false;
@@ -874,22 +963,27 @@ function spawnOne(opts = {}) {
     px: x, py: y,
     life, maxLife: life,
     seed: Math.random() * Math.PI * 2,
-    size: opts.size || (0.6 + Math.random() * 1.4),
+    size: opts.size || (mode === 'mirror' ? (0.42 + Math.random() * 0.85) : (0.6 + Math.random() * 1.4)),
     speedMul: opts.speedMul || (0.7 + Math.random() * 0.8),
     hueMix: Math.random(),
   };
 }
 
+function targetCount() {
+  return MODES[modeIdx].id === 'mirror' ? 1500 : COUNT;
+}
+
 function resetParticles() {
   particles.length = 0;
   const mode = MODES[modeIdx].id;
+  const n = targetCount();
 
   if (mode === 'pack') {
     const circles = packCircles(Math.min(420, Math.floor((W * H) / 9000)), 6, 18);
     // Multiple particles per circle center for density
     const per = Math.max(2, Math.floor(COUNT / Math.max(circles.length, 1)));
     for (const c of circles) {
-      for (let k = 0; k < per && particles.length < COUNT; k++) {
+      for (let k = 0; k < per && particles.length < n; k++) {
         const a = Math.random() * Math.PI * 2;
         const rr = Math.random() * c.r * 0.85;
         particles.push(spawnOne({
@@ -899,11 +993,11 @@ function resetParticles() {
         }));
       }
     }
-    while (particles.length < COUNT) particles.push(spawnOne());
+    while (particles.length < n) particles.push(spawnOne());
   } else if (mode === 'mask') {
-    for (let i = 0; i < COUNT; i++) particles.push(spawnOne());
+    for (let i = 0; i < n; i++) particles.push(spawnOne());
   } else {
-    for (let i = 0; i < COUNT; i++) particles.push(spawnOne());
+    for (let i = 0; i < n; i++) particles.push(spawnOne());
   }
 
   document.getElementById('h-n').textContent = String(particles.length);
@@ -922,8 +1016,11 @@ function setMode(idx) {
   const _tb = document.getElementById('teach-body'); if (_tb) _tb.textContent = m.body;
   document.getElementById('btn-mode').classList.toggle('on', modeIdx > 0);
   chipsEl.querySelectorAll('.mode-chip').forEach((el, i) => el.classList.toggle('on', i === modeIdx));
-  trailAlpha = (m.id === 'curl' || m.id === 'music') ? 0.042 : m.id === 'attrib' ? 0.06 : 0.055;
-  if (m.id === 'music' && !audioPlaying && !reduceMotion) {
+  trailAlpha = (m.id === 'curl' || m.id === 'music') ? 0.042
+    : m.id === 'mirror' ? 0.046
+    : m.id === 'attrib' ? 0.06
+    : 0.055;
+  if ((m.id === 'music' || m.id === 'mirror') && !audioPlaying && !reduceMotion) {
     const hint = document.getElementById('gestureHint');
     if (hint) hint.classList.remove('hidden');
   }
@@ -1002,7 +1099,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'a') { toggleSong(); e.preventDefault(); }
   else if (k === 'r') { resetParticles(); e.preventDefault(); }
   else if (k === ' ' || e.code === 'Space') { setPaused(!paused); e.preventDefault(); }
-  else if (k >= '1' && k <= '6') { setMode(Number(k) - 1); e.preventDefault(); }
+  else if (k >= '1' && k <= '7') { setMode(Number(k) - 1); e.preventDefault(); }
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -1033,6 +1130,13 @@ function exportSVG() {
   } else if (mode === 'pack') {
     seeds = packCircles(streams, 10, 22).map((c) => ({ x: c.x, y: c.y }));
     while (seeds.length < streams) seeds.push({ x: Math.random() * W, y: Math.random() * H });
+  } else if (mode === 'mirror') {
+    seeds = [];
+    for (let i = 0; i < streams; i++) {
+      const u = Math.pow(Math.random(), 1.4);
+      const v = Math.pow(Math.random(), 1.4);
+      seeds.push({ x: u * W * 0.98, y: v * H * 0.98 });
+    }
   } else {
     seeds = [];
     for (let i = 0; i < streams; i++) {
@@ -1042,18 +1146,32 @@ function exportSVG() {
 
   for (const s of seeds) {
     let x = s.x, y = s.y;
-    const pts = [`${x.toFixed(2)},${y.toFixed(2)}`];
+    const raw = [[x, y]];
     for (let i = 0; i < steps; i++) {
-      const f = curlField(x, y, t);
+      const f = mode === 'mirror' ? flowAt(x, y, t) : curlField(x, y, t);
       const mag = Math.hypot(f.x, f.y) || 1e-6;
       x += (f.x / mag) * stepLen;
       y += (f.y / mag) * stepLen;
       if (x < 0 || x > W || y < 0 || y > H) break;
       if (mode === 'mask' && sampleMaskBright(x, y) < 0.08) break;
-      pts.push(`${x.toFixed(2)},${y.toFixed(2)}`);
+      raw.push([x, y]);
     }
-    if (pts.length > 3) {
-      paths.push(`<polyline fill="none" stroke="#05060a" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />`);
+    if (raw.length > 3) {
+      const copies = mode === 'mirror'
+        ? [
+            (px, py) => [px, py],
+            (px, py) => [W - px, py],
+            (px, py) => [px, H - py],
+            (px, py) => [W - px, H - py],
+          ]
+        : [(px, py) => [px, py]];
+      for (const map of copies) {
+        const pts = raw.map(([px, py]) => {
+          const q = map(px, py);
+          return `${q[0].toFixed(2)},${q[1].toFixed(2)}`;
+        });
+        paths.push(`<polyline fill="none" stroke="#05060a" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" points="${pts.join(' ')}" />`);
+      }
     }
   }
 
@@ -1077,12 +1195,13 @@ function exportSVG() {
 
 /* ── Draw helpers ──────────────────────────────────────────────────── */
 function drawVectors() {
-  const step = Math.max(28, Math.min(W, H) / 18);
+  const mirror = MODES[modeIdx].id === 'mirror';
+  const step = Math.max(28, Math.min(W, H) / (mirror ? 14 : 18));
   ctx.save();
   ctx.globalAlpha = 0.45;
   for (let y = step * 0.5; y < H; y += step) {
     for (let x = step * 0.5; x < W; x += step) {
-      const f = curlField(x, y, t);
+      const f = mirror ? flowAt(x, y, t) : curlField(x, y, t);
       const mag = Math.hypot(f.x, f.y) || 1e-6;
       const ux = f.x / mag, uy = f.y / mag;
       const len = Math.min(mag * 0.08, step * 0.45);
@@ -1091,10 +1210,16 @@ function drawVectors() {
       const g = (ACCENT[1] * mix + VIOLET[1] * (1 - mix)) | 0;
       const b = (ACCENT[2] * mix + VIOLET[2] * (1 - mix)) | 0;
       ctx.strokeStyle = `rgb(${r},${g},${b})`;
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x + ux * len, y + uy * len);
-      ctx.stroke();
+      const segs = mirror
+        ? mirrorSegs(x, y, x + ux * len, y + uy * len)
+        : [[x, y, x + ux * len, y + uy * len]];
+      for (let i = 0; i < segs.length; i++) {
+        const s = segs[i];
+        ctx.beginPath();
+        ctx.moveTo(s[0], s[1]);
+        ctx.lineTo(s[2], s[3]);
+        ctx.stroke();
+      }
     }
   }
   ctx.restore();
@@ -1117,7 +1242,7 @@ function colorFor(p, ang, speed) {
     const angT = (ang / (Math.PI * 2) + 1) % 1;
     mix = angT * 0.55 + (1 - lifeT) * 0.35 + speed * 0.2;
     mix = Math.max(0, Math.min(1, mix));
-  } else if (mode === 'curl' || mode === 'music') {
+  } else if (mode === 'curl' || mode === 'music' || mode === 'mirror') {
     mix = 0.35 + Math.min(speed * 1.2, 0.55);
   }
   const r = (VIOLET[0] * (1 - mix) + ACCENT[0] * mix) | 0;
@@ -1136,11 +1261,17 @@ function step(dt) {
     const p = particles[i];
     p.px = p.x; p.py = p.y;
 
-    let f = curlField(p.x, p.y, t + p.seed * 0.15);
+    let f = flowAt(p.x, p.y, t + p.seed * 0.15);
 
-    // Mild pointer swirl in curl / attrib
-    if (pointer.active && (mode === 'curl' || mode === 'attrib' || mode === 'music')) {
-      const dx = p.x - pointer.x, dy = p.y - pointer.y;
+    // Mild pointer swirl in curl / attrib. Mirror folds the pointer into the sim
+    // so a stir in any corner bends all four stamps together.
+    if (pointer.active && (mode === 'curl' || mode === 'attrib' || mode === 'music' || mode === 'mirror')) {
+      let px = pointer.x, py = pointer.y;
+      if (mode === 'mirror') {
+        if (px > W * 0.5) px = W - px;
+        if (py > H * 0.5) py = H - py;
+      }
+      const dx = p.x - px, dy = p.y - py;
       const d2 = dx * dx + dy * dy + 40;
       const fall = 18000 / d2;
       f = { x: f.x - dy * fall * 0.02 - dx * fall * 0.004, y: f.y + dx * fall * 0.02 - dy * fall * 0.004 };
@@ -1244,25 +1375,39 @@ function render() {
   }
 
   ctx.lineCap = 'round';
+  const mirrorDraw = MODES[modeIdx].id === 'mirror';
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
     const col = colorFor(p, p._ang || 0, p._spd || 0.4);
-    const sz = (MODES[modeIdx].id === 'attrib' ? p.size : p.size) * dpr * 0.9;
+    const sz = (MODES[modeIdx].id === 'attrib' ? p.size : p.size) * dpr * (mirrorDraw ? 0.72 : 0.9);
     ctx.strokeStyle = col;
-    ctx.lineWidth = Math.max(0.6, sz * 0.55);
-    ctx.globalAlpha = reduceMotion ? 0.85 : 0.7;
-    // Avoid trail jump on wrap
+    ctx.lineWidth = Math.max(0.6, sz * (mirrorDraw ? 0.48 : 0.55));
+    ctx.globalAlpha = reduceMotion ? 0.85 : (mirrorDraw ? 0.58 : 0.7);
+    // Avoid trail jump on wrap. Mirror stamps the same segment four ways —
+    // flip X, flip Y, flip both — with no clip at the midlines.
     const jump = Math.hypot(p.x - p.px, p.y - p.py);
     if (jump < Math.min(W, H) * 0.2) {
-      ctx.beginPath();
-      ctx.moveTo(p.px, p.py);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
+      const segs = mirrorDraw
+        ? mirrorSegs(p.px, p.py, p.x, p.y)
+        : [[p.px, p.py, p.x, p.y]];
+      for (let s = 0; s < segs.length; s++) {
+        const seg = segs[s];
+        ctx.beginPath();
+        ctx.moveTo(seg[0], seg[1]);
+        ctx.lineTo(seg[2], seg[3]);
+        ctx.stroke();
+      }
     } else {
       ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(0.8, sz * 0.4), 0, Math.PI * 2);
-      ctx.fill();
+      const dots = mirrorDraw
+        ? [[p.x, p.y], [W - p.x, p.y], [p.x, H - p.y], [W - p.x, H - p.y]]
+        : [[p.x, p.y]];
+      const rad = Math.max(0.8, sz * 0.4);
+      for (let d = 0; d < dots.length; d++) {
+        ctx.beginPath();
+        ctx.arc(dots[d][0], dots[d][1], rad, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
   ctx.globalAlpha = 1;
@@ -1295,41 +1440,42 @@ window.addEventListener('resize', resize);
 
 /* ── Still seed ────────────────────────────────────────────────────── */
 function stillCompose() {
-  setMode(2); // curl
-  setVectors(true);
-  // Spiral layout
-  particles.length = 0;
-  for (let i = 0; i < COUNT; i++) {
-    const a = (i / COUNT) * Math.PI * 8;
-    const r = Math.min(W, H) * (0.05 + 0.4 * (i / COUNT));
-    particles.push(spawnOne({
-      x: W * 0.5 + Math.cos(a) * r,
-      y: H * 0.5 + Math.sin(a) * r * 0.78,
-    }));
-  }
+  const mi = MODES.findIndex((m) => m.id === 'mirror');
+  setMode(mi >= 0 ? mi : 0);
+  setVectors(false);
   document.getElementById('h-n').textContent = String(particles.length);
   ctx.fillStyle = INK;
   ctx.fillRect(0, 0, W, H);
   stillBaked = false;
-  // One-shot advection bake for still ink
-  for (let s = 0; s < 40; s++) {
+  // One-shot advection bake — same four-corner stamp as the live field
+  for (let s = 0; s < 48; s++) {
     t += 0.016;
     for (const p of particles) {
       p.px = p.x; p.py = p.y;
-      const f = curlField(p.x, p.y, t + p.seed);
+      const f = flowAt(p.x, p.y, t + p.seed);
       const mag = Math.hypot(f.x, f.y) || 1;
-      p.x += (f.x / mag) * 2.2;
-      p.y += (f.y / mag) * 2.2;
+      p.x += (f.x / mag) * 2.4;
+      p.y += (f.y / mag) * 2.4;
+      if (p.x > W) p.x -= W;
+      else if (p.x < 0) p.x += W;
+      if (p.y > H) p.y -= H;
+      else if (p.y < 0) p.y += H;
     }
-    ctx.fillStyle = `rgba(5,6,10,0.08)`;
+    ctx.fillStyle = `rgba(5,6,10,0.07)`;
     ctx.fillRect(0, 0, W, H);
+    ctx.lineWidth = 1.05;
+    const jumpMax = Math.min(W, H) * 0.2;
     for (const p of particles) {
+      if (Math.hypot(p.x - p.px, p.y - p.py) > jumpMax) continue;
       ctx.strokeStyle = colorFor(p, 0, 0.5);
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(p.px, p.py);
-      ctx.lineTo(p.x, p.y);
-      ctx.stroke();
+      const segs = mirrorSegs(p.px, p.py, p.x, p.y);
+      for (let i = 0; i < segs.length; i++) {
+        const seg = segs[i];
+        ctx.beginPath();
+        ctx.moveTo(seg[0], seg[1]);
+        ctx.lineTo(seg[2], seg[3]);
+        ctx.stroke();
+      }
     }
   }
   stillBaked = true;
