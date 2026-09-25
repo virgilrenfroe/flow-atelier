@@ -781,14 +781,17 @@ function cornerSwirl(x, y) {
   const r = Math.hypot(x, y) + 28;
   const tx = -y / r;
   const ty = x / r;
-  let amp = 2.1;
+  // Idle amp beats the base curl so paths orbit a corner. Loud/high bands
+  // raise it further and the stream-function kinks take over the shape.
+  let amp = 11;
   if (audioPlaying && !reduceMotion) {
-    amp += bands.vol * 18 + bands.high * 14 + bands.mid * 5.5 + bands.bass * 4 + bendKick * 8;
+    amp += bands.vol * 22 + bands.high * 18 + bands.mid * 7 + bands.bass * 5 + bendKick * 10;
   }
   const tight = audioPlaying ? (1 + bands.high * 1.6 + bands.mid * 0.35) : 1;
-  const fall = Math.pow(Math.min(W, H) / r, 0.22 * tight);
-  let vx = tx * amp * fall;
-  let vy = ty * amp * fall;
+  const fall = Math.pow(Math.min(W, H) / r, 0.28 * tight);
+  const home = 2.2;
+  let vx = tx * amp * fall - (x / r) * home;
+  let vy = ty * amp * fall - (y / r) * home;
   if (audioPlaying && !reduceMotion && audioFx.scale) {
     const rad = (bands.bass - 0.4) * (3.2 + bands.vol * 9 + bendKick * 4);
     vx += (x / r) * rad;
@@ -929,12 +932,12 @@ function spawnOne(opts = {}) {
   } else if (mode === 'mirror') {
     // Corner-weighted, with a uniform tail so the center is crossed immediately.
     // No clamp at W/2 or H/2 — sections bleed.
-    if (Math.random() < 0.24) {
-      x = Math.random() * W * 0.99;
-      y = Math.random() * H * 0.99;
+    if (Math.random() < 0.18) {
+      x = Math.random() * W * 0.96;
+      y = Math.random() * H * 0.96;
     } else {
-      x = Math.pow(Math.random(), 1.6) * W * 0.995;
-      y = Math.pow(Math.random(), 1.6) * H * 0.995;
+      x = Math.pow(Math.random(), 2.05) * W * 0.78;
+      y = Math.pow(Math.random(), 2.05) * H * 0.78;
     }
   } else if (mode === 'mask') {
     // Rejection sample on bright pixels
@@ -1255,7 +1258,7 @@ function step(dt) {
   if (reduceMotion || paused) return;
   t += dt;
   const mode = MODES[modeIdx].id;
-  const baseSpeed = Math.min(W, H) * (mode === 'curl' ? 0.55 : 0.48);
+  const baseSpeed = Math.min(W, H) * (mode === 'curl' ? 0.55 : mode === 'mirror' ? 0.32 : 0.48);
 
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
