@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<title>Noctuary · Cityscape</title>
+<meta name="description" content="Night quay massing — music-reactive windows. Play or drop your song." />
+<style>
+  :root {
+    --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+    --font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "Space Mono", ui-monospace, monospace;
+    --ink: #05060a;
+    --paper: #f2ebe0;
+    --mute: rgba(242,235,224,0.62);
+    --line: rgba(242,235,224,0.18);
+    --accent: #f0c24b;
+    --violet: #8a7bb8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper);
+    font-family: var(--font-sans); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2; transition: opacity 0.28s ease; }
+  .topbar {
+    position: absolute; top: 18px; left: 18px; right: 18px;
+    display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;
+  }
+  .brand {
+    font-family: var(--font-sans);
+    font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+    padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.45); backdrop-filter: blur(12px);
+  }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .pill {
+    border: 1px solid var(--line); background: rgba(5,6,10,0.5);
+    color: var(--mute); border-radius: 999px; padding: 10px 14px;
+    font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    backdrop-filter: blur(12px);
+  }
+  .pill.tech { color: var(--paper); border-color: rgba(240,194,75,0.35); }
+  .hero {
+    position: absolute; left: 6vw; top: 12vh; max-width: min(560px, 80vw);
+    transition: opacity 0.28s ease;
+  }
+  .hero .stack {
+    font-family: var(--font-display); font-optical-sizing: auto;
+    font-weight: 650; line-height: 0.92; letter-spacing: -0.03em;
+    font-size: clamp(2.4rem, 6.5vw, 4.8rem); margin: 0;
+  }
+  .hero .stack span { display: block; color: rgba(242,235,224,0.28); }
+  .hero .stack span.focus { color: var(--paper); }
+  .hero .sub {
+    margin: 14px 0 0; max-width: 40ch; font-size: 13px; line-height: 1.5; color: var(--mute);
+  }
+  .hud {
+    position: absolute; left: 18px; bottom: 18px;
+    min-width: 220px; padding: 12px 14px; border-radius: 14px;
+    border: 1px solid var(--line); background: rgba(5,6,10,0.55);
+    backdrop-filter: blur(14px); font-family: var(--font-mono);
+    font-size: 11px; letter-spacing: 0.06em; line-height: 1.65;
+    opacity: 0.9; transition: opacity 0.28s ease;
+  }
+  .hud .r { display: flex; justify-content: space-between; gap: 14px; color: var(--mute); }
+  .hud .r strong { color: var(--paper); font-weight: 400; }
+  .hud .r strong.accent { color: var(--accent); }
+  .note {
+    position: absolute; right: 18px; bottom: 18px; font-size: 11px;
+    opacity: 0.42; max-width: 300px; text-align: right; line-height: 1.45;
+    transition: opacity 0.28s ease;
+  }
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 48%, rgba(5,6,10,0.55) 100%);
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); border: 0;
+  }
+  /* Exhibit-clean: fade instructional chrome until H / ?hud=1 */
+  body.exhibit .hero,
+  body.exhibit .note,
+  body.exhibit .hud { opacity: 0; pointer-events: none; }
+  body.exhibit .pills { opacity: 0.35; }
+  body.exhibit .brand { opacity: 0.55; }
+
+  a.pill { text-decoration: none; color: inherit; }
+  .pill.btn {
+    appearance: none; font: inherit; cursor: pointer;
+    pointer-events: auto; color: var(--paper);
+  }
+  .pill.btn:hover, .pill.btn.on {
+    border-color: rgba(240,194,75,0.5); color: var(--accent);
+  }
+  .pill.btn kbd {
+    font-family: var(--font-mono); font-size: 10px; opacity: 0.55;
+    margin-left: 5px; letter-spacing: 0.04em; text-transform: none;
+  }
+  .music-row {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;
+    pointer-events: auto;
+  }
+  .music-row .pill {
+    padding: 7px 11px; font-size: 10px; letter-spacing: 0.1em;
+  }
+  .music-row input[type=file] { display: none; }
+  body.exhibit .music-row { opacity: 0.35; }
+</style>
+</head>
+<body>
+  <h1 class="sr-only">Noctuary intermediate — quay massing modified materials</h1>
+  <div class="layer" id="ui">
+    <div class="topbar">
+      <div class="brand">Noctuary · intermediate</div>
+      <div class="pills" id="tech-pills">
+        <a class="pill btn" href="index.html" title="Back to Flow atelier">Flow</a>
+        <div class="pill tech">Modified</div>
+        <div class="pill tech">onBeforeCompile</div>
+        <div class="pill tech">PMREM</div>
+        <div class="pill tech">Bloom</div>
+        <div class="pill tech" id="pill-fps">FPS</div>
+        <div class="pill tech" id="pill-music">Music</div>
+      </div>
+    </div>
+    <div class="hero">
+      <h2 class="stack"><span class="focus">Quay</span><span>massing</span><span>materials</span></h2>
+      <p class="sub">MeshStandard patched with onBeforeCompile — night window grid, wet specular, live env reflections. Pointer wetness · music breathes window occupancy. Harbor / Quay / Signal.</p>
+    </div>
+    <div class="hud">
+      <div class="r"><span>path</span><strong id="h-path">onBeforeCompile</strong></div>
+      <div class="r"><span>env</span><strong id="h-env">PMREM</strong></div>
+      <div class="r"><span>wetness</span><strong class="accent" id="h-wet">0.55</strong></div>
+      <div class="r"><span>occupancy</span><strong id="h-occ">0.62</strong></div>
+      <div class="r"><span>audio</span><strong id="h-audio">idle</strong></div>
+      <div class="r"><span>massing</span><strong id="h-mass">—</strong></div>
+      <div class="r"><span>fps</span><strong id="h-fps">—</strong></div>
+      <div class="r"><span>motion</span><strong id="h-m">live</strong></div>
+      <div class="music-row" id="musicRow">
+        <button class="pill btn" type="button" id="btn-song" title="Play / pause (A)">Play <kbd>A</kbd></button>
+        <button class="pill btn" type="button" id="btn-load" title="Load your own audio">Your song</button>
+        <input type="file" id="file-song" accept="audio/*,.mp3,.wav,.m4a,.ogg,.flac,.aac" />
+      </div>
+    </div>
+    <p class="note">Step 03 · Journey Modified materials · Play drives window lights · pointer wet · ?still=1 freezes · H / ?hud=1 chrome</p>
+    <div class="vignette"></div>
+  </div>
+
+  <script type="importmap">
+  {"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.170.0/examples/jsm/"}}
+  </script>
+  <script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const params = new URLSearchParams(location.search);
+const stillMode = params.has('still') && params.get('still') !== '0';
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const freezeMotion = reduceMotion || stillMode;
+document.getElementById('h-m').textContent = freezeMotion ? 'still' : 'live';
+
+/* ── Exhibit-clean HUD ──────────────────────────────────────────────── */
+const HUD_KEY = 'noctuary-materials-hud';
+function readHudPref() {
+  if (params.has('hud')) return params.get('hud') === '1' || params.get('hud') === 'on';
+  try {
+    const v = localStorage.getItem(HUD_KEY);
+    if (v === 'on') return true;
+    if (v === 'off') return false;
+  } catch (_) {}
+  return false;
+}
+function applyHud(show) {
+  document.body.classList.toggle('exhibit', !show);
+  try { localStorage.setItem(HUD_KEY, show ? 'on' : 'off'); } catch (_) {}
+}
+let showHud = readHudPref();
+applyHud(showHud);
+
+/* ── Renderer ───────────────────────────────────────────────────────── */
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x05060a, 1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.prepend(renderer.domElement);
+
+/* ── Scene / camera / lights ────────────────────────────────────────── */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.FogExp2(0x05060a, 0.022);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 120);
+camera.position.set(10.5, 5.8, 12.8);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.rotateSpeed = 0.55;
+controls.target.set(0, 2.0, 0);
+controls.maxPolarAngle = Math.PI * 0.48;
+controls.minDistance = 5;
+controls.maxDistance = 32;
+controls.update();
+if (freezeMotion) controls.enableDamping = false;
+
+const hemi = new THREE.HemisphereLight(0x8a7bb8, 0x0a0c14, 0.55);
+scene.add(hemi);
+const key = new THREE.PointLight(0xf0c24b, 48, 52, 2);
+key.position.set(5.2, 8.5, 4.0);
+scene.add(key);
+const fill = new THREE.PointLight(0x6a7ab8, 28, 44, 2);
+fill.position.set(-7.5, 4.2, -3.5);
+scene.add(fill);
+const rim = new THREE.PointLight(0xf0c24b, 18, 30, 2);
+rim.position.set(-2, 3.5, 8);
+scene.add(rim);
+
+/* ── Night PMREM environment (RoomEnvironment tinted via intensity) ─── */
+const pmrem = new THREE.PMREMGenerator(renderer);
+pmrem.compileEquirectangularShader();
+
+// Custom night env scene: dark room + warm/cool accent panels so wet quay reflects
+const envScene = new THREE.Scene();
+envScene.add(new THREE.HemisphereLight(0x6a78a8, 0x05060a, 0.9));
+const envGold = new THREE.Mesh(
+  new THREE.PlaneGeometry(4, 4),
+  new THREE.MeshBasicMaterial({ color: 0xf0c24b, side: THREE.DoubleSide })
+);
+envGold.position.set(3.5, 2.2, -4);
+envScene.add(envGold);
+const envViolet = new THREE.Mesh(
+  new THREE.PlaneGeometry(5, 3),
+  new THREE.MeshBasicMaterial({ color: 0x8a7bb8, side: THREE.DoubleSide })
+);
+envViolet.position.set(-4, 1.8, 3);
+envViolet.rotation.y = Math.PI * 0.35;
+envScene.add(envViolet);
+const envWarm = new THREE.Mesh(
+  new THREE.PlaneGeometry(2.5, 1.2),
+  new THREE.MeshBasicMaterial({ color: 0xffe0a0, side: THREE.DoubleSide })
+);
+envWarm.position.set(0, 0.4, 4.5);
+envScene.add(envWarm);
+// Soft ground bounce
+const envFloor = new THREE.Mesh(
+  new THREE.PlaneGeometry(20, 20),
+  new THREE.MeshBasicMaterial({ color: 0x1a1e2c, side: THREE.DoubleSide })
+);
+envFloor.rotation.x = -Math.PI / 2;
+envFloor.position.y = -1;
+envScene.add(envFloor);
+let envMap = pmrem.fromScene(envScene, 0.04).texture;
+scene.environment = envMap;
+scene.environmentIntensity = 0.85;
+document.getElementById('h-env').textContent = 'PMREM · night';
+
+/* Shared modified uniforms (live) */
+const modUniforms = {
+  uTime: { value: 0 },
+  uWetness: { value: 0.55 },
+  uOccupancy: { value: 0.62 },
+  uBass: { value: 0 },
+  uHigh: { value: 0 },
+  uPointer: { value: new THREE.Vector2(0.5, 0.5) },
+};
+
+/* ── onBeforeCompile helpers (r170: no vUv unless USE_UV — use local/world) ── */
+function injectModPars(shader) {
+  shader.uniforms.uTime = modUniforms.uTime;
+  shader.uniforms.uWetness = modUniforms.uWetness;
+  shader.uniforms.uOccupancy = modUniforms.uOccupancy;
+  shader.uniforms.uBass = modUniforms.uBass;
+  shader.uniforms.uHigh = modUniforms.uHigh;
+  shader.uniforms.uPointer = modUniforms.uPointer;
+
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <common>',
+    `#include <common>
+varying vec3 vLocalPos;
+varying vec3 vWorldPosMod;
+`
+  );
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <begin_vertex>',
+    `#include <begin_vertex>
+vLocalPos = position;
+`
+  );
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <project_vertex>',
+    `#include <project_vertex>
+vWorldPosMod = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
+`
+  );
+
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <common>',
+    `#include <common>
+uniform float uTime;
+uniform float uWetness;
+uniform float uOccupancy;
+uniform float uBass;
+uniform float uHigh;
+uniform vec2 uPointer;
+varying vec3 vLocalPos;
+varying vec3 vWorldPosMod;
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
+}
+
+// Triplanar-ish facade UV from local position + normal (box massing)
+vec2 facadeUv(vec3 lp, vec3 n) {
+  vec3 an = abs(n);
+  if (an.y > an.x && an.y > an.z) return lp.xz;
+  if (an.x > an.z) return lp.zy;
+  return lp.xy;
+}
+`
+  );
+}
+
+function patchMassingMaterial(mat) {
+  mat.onBeforeCompile = (shader) => {
+    injectModPars(shader);
+
+    // Night window grid into emissive — Standard still owns PBR lighting
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+{
+  vec3 n = normalize(normal);
+  // Skip roof-ish tops for windows
+  float wall = 1.0 - smoothstep(0.55, 0.85, abs(n.y));
+  vec2 facade = facadeUv(vLocalPos, n) * vec2(1.15, 1.55);
+  vec2 cell = floor(facade);
+  vec2 f = fract(facade);
+  float frame = step(0.14, f.x) * step(f.x, 0.86) * step(0.20, f.y) * step(f.y, 0.80);
+  float occ = clamp(uOccupancy, 0.05, 0.95);
+  float lit = step(1.0 - occ, hash21(cell + 17.0));
+  // Highs: sparse cool cells on upper floors
+  float hiSparse = step(0.88 - uHigh * 0.42, hash21(cell + 55.0))
+    * smoothstep(2.0, 5.5, vLocalPos.y) * clamp(uHigh, 0.0, 1.0);
+  lit = max(lit, hiSparse);
+  float breath = 0.85 + 0.15 * sin(uTime * 1.4 + hash21(cell) * 6.28);
+  float warm = hash21(cell + 3.1);
+  // Bass → warmer tint; highs → cool flicker bias
+  float warmAmt = clamp(warm + uBass * 0.42 - uHigh * 0.22, 0.0, 1.0);
+  vec3 winWarm = vec3(0.98, 0.76, 0.38);
+  vec3 winCool = vec3(0.48, 0.58, 0.98);
+  vec3 winCol = mix(winCool, winWarm, warmAmt);
+  float coolFlick = (1.0 - warm) * uHigh * (0.35 + 0.65 * sin(uTime * 16.0 + hash21(cell) * 9.0));
+  // Bass pulse + wetness-adjacent glow intensity on lit panes
+  float glow = 1.55 * (1.0 + uBass * 0.75 + uWetness * uBass * 0.2) * (1.0 + coolFlick * 0.85);
+  totalEmissiveRadiance += winCol * frame * lit * breath * wall * glow;
+}
+`
+    );
+
+    // Lower wet sheen on lower facade (street mist)
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>
+{
+  float drip = smoothstep(0.0, 2.2, vWorldPosMod.y) * (1.0 - smoothstep(2.2, 5.5, vWorldPosMod.y));
+  drip = (1.0 - drip) * uWetness * 0.55;
+  float streak = sin(vWorldPosMod.x * 6.0 + uTime * 0.3) * 0.5 + 0.5;
+  roughnessFactor = mix(roughnessFactor, roughnessFactor * 0.28, drip * (0.5 + 0.5 * streak));
+}
+`
+    );
+
+    mat.userData.shader = shader;
+  };
+  mat.customProgramCacheKey = () => 'noctuary-massing-v3';
+  mat.needsUpdate = true;
+  return mat;
+}
+
+function patchQuayMaterial(mat) {
+  mat.onBeforeCompile = (shader) => {
+    injectModPars(shader);
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>
+{
+  vec2 qUv = vWorldPosMod.xz * 0.08 + 0.5;
+  float plank = abs(fract(vWorldPosMod.x * 0.55) - 0.5);
+  float seam = smoothstep(0.04, 0.0, plank - 0.42);
+  float streak = pow(abs(sin(vWorldPosMod.z * 3.2 + vWorldPosMod.x * 0.8 + uTime * 0.15)), 4.0);
+  float puddle = 1.0 - smoothstep(0.08, 0.48, distance(qUv, uPointer));
+  float wet = clamp(uWetness * (0.55 + 0.45 * streak) + puddle * 0.6, 0.0, 1.0);
+  roughnessFactor = mix(roughnessFactor, 0.06, wet);
+  roughnessFactor = mix(roughnessFactor, min(1.0, roughnessFactor + 0.4), seam * 0.55);
+}
+`
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <metalnessmap_fragment>',
+      `#include <metalnessmap_fragment>
+{
+  float streak2 = pow(abs(sin(vWorldPosMod.z * 2.8 + uTime * 0.2)), 3.0);
+  vec2 qUv2 = vWorldPosMod.xz * 0.08 + 0.5;
+  float puddle2 = 1.0 - smoothstep(0.1, 0.5, distance(qUv2, uPointer));
+  metalnessFactor = mix(metalnessFactor, 0.78, clamp(uWetness * 0.75 + puddle2 * 0.45, 0.0, 1.0) * (0.35 + 0.65 * streak2));
+}
+`
+    );
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+{
+  float band = smoothstep(0.025, 0.0, abs(fract(vWorldPosMod.x * 0.35 + uTime * 0.02) - 0.5) - 0.44);
+  float wetVis = clamp(uWetness, 0.0, 1.0);
+  diffuseColor.rgb += vec3(0.14, 0.12, 0.07) * band * wetVis * 0.65;
+  diffuseColor.rgb += vec3(0.06, 0.07, 0.14) * wetVis * 0.2;
+}
+`
+    );
+
+    mat.userData.shader = shader;
+  };
+  mat.customProgramCacheKey = () => 'noctuary-quay-v2';
+  mat.needsUpdate = true;
+  return mat;
+}
+
+/* ── Harbor-adjacent stage ──────────────────────────────────────────── */
+const stage = new THREE.Group();
+scene.add(stage);
+
+const groundMat = new THREE.MeshStandardMaterial({
+  color: 0x12151f, roughness: 0.92, metalness: 0.04,
+  envMapIntensity: 0.35,
+});
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(56, 40), groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.position.y = 0;
+stage.add(ground);
+
+const quayMat = patchQuayMaterial(new THREE.MeshStandardMaterial({
+  color: 0x2a3144,
+  roughness: 0.42,
+  metalness: 0.28,
+  envMapIntensity: 1.35,
+  emissive: 0x0c1018,
+  emissiveIntensity: 0.15,
+}));
+const quay = new THREE.Mesh(new THREE.BoxGeometry(24, 0.38, 5.0), quayMat);
+quay.position.set(0, 0.19, 5.4);
+stage.add(quay);
+
+// Massing — shared patched Standard (imported-like blocks, not dollhouse)
+const massingMat = patchMassingMaterial(new THREE.MeshStandardMaterial({
+  color: 0x1c2232,
+  roughness: 0.78,
+  metalness: 0.12,
+  envMapIntensity: 0.75,
+  emissive: 0x0a0e18,
+  emissiveIntensity: 0.2,
+}));
+
+const massingDefs = [
+  { x: -7.2, z: -2.4, w: 3.4, h: 5.2, d: 2.8 },
+  { x: -3.2, z: -3.8, w: 2.6, h: 7.0, d: 2.4 },
+  { x: 0.4, z: -2.2, w: 3.0, h: 4.0, d: 2.6 },
+  { x: 4.0, z: -4.0, w: 3.2, h: 8.2, d: 2.7 },
+  { x: 7.6, z: -1.8, w: 2.4, h: 4.6, d: 2.2 },
+  { x: -9.0, z: 1.0, w: 2.2, h: 3.0, d: 2.0 },
+  { x: 9.2, z: -3.2, w: 2.0, h: 5.5, d: 2.0 },
+];
+const massingMeshes = [];
+for (const m of massingDefs) {
+  const box = new THREE.Mesh(new THREE.BoxGeometry(m.w, m.h, m.d), massingMat);
+  box.position.set(m.x, m.h * 0.5, m.z);
+  stage.add(box);
+  massingMeshes.push(box);
+}
+document.getElementById('h-mass').textContent = String(massingDefs.length);
+
+// Glass-ish low shed on quay — high metalness so env reflections read clearly
+const glassMat = patchMassingMaterial(new THREE.MeshStandardMaterial({
+  color: 0x1a2030,
+  roughness: 0.18,
+  metalness: 0.85,
+  envMapIntensity: 1.6,
+  transparent: true,
+  opacity: 0.92,
+  emissive: 0x14182a,
+  emissiveIntensity: 0.25,
+}));
+const shed = new THREE.Mesh(new THREE.BoxGeometry(4.5, 2.2, 2.4), glassMat);
+shed.position.set(-1.5, 1.3, 4.6);
+stage.add(shed);
+
+// Signal tip — gold emissive motif (simple Standard, no custom ShaderMaterial hero)
+const signalGroup = new THREE.Group();
+signalGroup.position.set(6.5, 0, 4.2);
+stage.add(signalGroup);
+const poleMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2e3c, roughness: 0.55, metalness: 0.4, envMapIntensity: 0.9,
+});
+const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.2, 10), poleMat);
+pole.position.y = 2.1;
+signalGroup.add(pole);
+const tipMat = new THREE.MeshStandardMaterial({
+  color: 0xf0c24b, roughness: 0.35, metalness: 0.6,
+  emissive: 0xf0c24b, emissiveIntensity: 1.4, envMapIntensity: 1.2,
+});
+const tip = new THREE.Mesh(new THREE.SphereGeometry(0.22, 16, 12), tipMat);
+tip.position.y = 4.35;
+signalGroup.add(tip);
+const halo = new THREE.Mesh(
+  new THREE.RingGeometry(0.35, 0.55, 24),
+  new THREE.MeshBasicMaterial({ color: 0xf0c24b, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
+);
+halo.rotation.x = -Math.PI / 2;
+halo.position.y = 4.35;
+signalGroup.add(halo);
+
+
+/* ── Audio (default corridor track or user upload) ──────────────────── */
+/* Sibling of index.html: ./demo-assets resolves from the site root. */
+let songUrl = './demo-assets/audio/corridor-song.mp3';
+let songLabelText = 'A Song with a Hole in It';
+let customTrack = false;
+let objectUrl = null;
+const bands = { bass: 0, mid: 0, high: 0, vol: 0 };
+const bandFloor = { bass: 0.08, mid: 0.08, high: 0.08, vol: 0.08 };
+const bandCeil = { bass: 0.35, mid: 0.35, high: 0.35, vol: 0.4 };
+function normBand(key, raw) {
+  const f = bandFloor[key], c = bandCeil[key];
+  bandFloor[key] = f * 0.995 + raw * 0.005;
+  bandCeil[key] = Math.max(bandFloor[key] + 0.06, c * 0.992 + raw * 0.008);
+  const span = Math.max(0.08, bandCeil[key] - bandFloor[key]);
+  return Math.max(0, Math.min(1, (raw - bandFloor[key]) / span));
+}
+let audioCtx = null, analyser = null, audioData = null, audioSrc = null, mediaEl = null;
+let audioReady = false, audioPlaying = false;
+
+function setAudioHud(state) {
+  const el = document.getElementById('h-audio');
+  if (el) el.textContent = state;
+  const pill = document.getElementById('pill-music');
+  if (pill) pill.textContent = audioPlaying ? 'Music · live' : 'Music';
+}
+
+function updateSongChrome() {
+  const btn = document.getElementById('btn-song');
+  if (btn && !audioPlaying) btn.innerHTML = 'Play <kbd>A</kbd>';
+}
+
+function wireMediaEnded() {
+  if (!mediaEl) return;
+  mediaEl.addEventListener('ended', () => {
+    audioPlaying = false;
+    const sb = document.getElementById('btn-song');
+    if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
+    setAudioHud('ended');
+  });
+}
+
+async function ensureAudio() {
+  if (freezeMotion) {
+    setAudioHud('still');
+    return false;
+  }
+  if (audioReady && mediaEl) return true;
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!analyser) {
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.45;
+      audioData = new Uint8Array(analyser.frequencyBinCount);
+      analyser.connect(audioCtx.destination);
+    }
+    mediaEl = new Audio(songUrl);
+    mediaEl.crossOrigin = 'anonymous';
+    mediaEl.loop = true;
+    mediaEl.preload = 'auto';
+    audioSrc = audioCtx.createMediaElementSource(mediaEl);
+    audioSrc.connect(analyser);
+    audioReady = true;
+    wireMediaEnded();
+    setAudioHud('ready');
+    updateSongChrome();
+    return true;
+  } catch (err) {
+    console.warn('[materials] audio init failed', err);
+    setAudioHud('fail');
+    return false;
+  }
+}
+
+async function loadUserFile(file) {
+  if (!file || freezeMotion) return;
+  if (!file.type.startsWith('audio/') && !/\.(mp3|wav|m4a|ogg|flac|aac)$/i.test(file.name)) {
+    setAudioHud('not audio');
+    return;
+  }
+  try {
+    if (mediaEl) { try { mediaEl.pause(); } catch (_) {} }
+    if (audioSrc) { try { audioSrc.disconnect(); } catch (_) {} }
+    audioSrc = null;
+    mediaEl = null;
+    audioReady = false;
+    audioPlaying = false;
+    if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    objectUrl = URL.createObjectURL(file);
+    songUrl = objectUrl;
+    songLabelText = file.name.replace(/\.[^.]+$/, '') || file.name;
+    customTrack = true;
+    const sb = document.getElementById('btn-song');
+    if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
+    updateSongChrome();
+    const ok = await ensureAudio();
+    if (!ok) return;
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    await mediaEl.play();
+    audioPlaying = true;
+    if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
+    setAudioHud('live · ' + songLabelText.slice(0, 18));
+  } catch (err) {
+    console.warn(err);
+    setAudioHud('blocked');
+  }
+}
+
+async function toggleSong() {
+  if (freezeMotion) {
+    setAudioHud('still');
+    return;
+  }
+  const ok = await ensureAudio();
+  if (!ok) return;
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  const sb = document.getElementById('btn-song');
+  if (audioPlaying) {
+    mediaEl.pause();
+    audioPlaying = false;
+    if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
+    setAudioHud('paused');
+  } else {
+    try {
+      await mediaEl.play();
+      audioPlaying = true;
+      if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
+      setAudioHud(customTrack ? 'live · your track' : 'live');
+    } catch (err) {
+      setAudioHud('blocked');
+    }
+  }
+}
+
+function sampleAudio() {
+  if (!analyser || !audioPlaying || freezeMotion) {
+    bands.bass *= 0.9;
+    bands.mid *= 0.9;
+    bands.high *= 0.9;
+    bands.vol *= 0.9;
+    return;
+  }
+  analyser.getByteFrequencyData(audioData);
+  const n = audioData.length;
+  const bassN = Math.max(2, (n * 0.035) | 0);
+  const mid0 = (n * 0.04) | 0, mid1 = (n * 0.16) | 0;
+  const hi0 = (n * 0.2) | 0, hi1 = (n * 0.5) | 0;
+  let b = 0, m = 0, h = 0, v = 0;
+  for (let i = 0; i < bassN; i++) b += audioData[i];
+  for (let i = mid0; i < mid1; i++) m += audioData[i];
+  for (let i = hi0; i < hi1; i++) h += audioData[i];
+  for (let i = 0; i < (n * 0.55) | 0; i++) v += audioData[i] * audioData[i];
+  b = b / (bassN * 255);
+  m = m / (Math.max(1, mid1 - mid0) * 255);
+  h = h / (Math.max(1, hi1 - hi0) * 255);
+  v = Math.sqrt(v / Math.max(1, (n * 0.55) * 255 * 255));
+  bands.bass = bands.bass * 0.35 + normBand('bass', b) * 0.65;
+  bands.mid = bands.mid * 0.35 + normBand('mid', m) * 0.65;
+  bands.high = bands.high * 0.35 + normBand('high', h) * 0.65;
+  bands.vol = bands.vol * 0.3 + normBand('vol', v) * 0.7;
+}
+
+function disposeAudio() {
+  try { if (mediaEl) mediaEl.pause(); } catch (_) {}
+  try { if (audioSrc) audioSrc.disconnect(); } catch (_) {}
+  try { if (analyser) analyser.disconnect(); } catch (_) {}
+  try { if (audioCtx && audioCtx.state !== 'closed') audioCtx.close(); } catch (_) {}
+  if (objectUrl) { try { URL.revokeObjectURL(objectUrl); } catch (_) {} objectUrl = null; }
+  audioSrc = null;
+  mediaEl = null;
+  analyser = null;
+  audioCtx = null;
+  audioReady = false;
+  audioPlaying = false;
+  audioData = null;
+}
+
+/* ── Pointer → wetness / UV puddle ──────────────────────────────────── */
+const pointerNDC = new THREE.Vector2(0, 0);
+const raycaster = new THREE.Raycaster();
+const hit = new THREE.Vector3();
+let targetWet = 0.55;
+let targetOcc = 0.62;
+
+function setPointerFromEvent(e) {
+  const x = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? innerWidth * 0.5;
+  const y = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? innerHeight * 0.5;
+  pointerNDC.x = (x / innerWidth) * 2 - 1;
+  pointerNDC.y = -(y / innerHeight) * 2 + 1;
+  // Map NDC to UV-ish for quay puddle (0–1)
+  modUniforms.uPointer.value.set(
+    THREE.MathUtils.clamp(x / innerWidth, 0, 1),
+    THREE.MathUtils.clamp(1.0 - y / innerHeight, 0, 1)
+  );
+  // Wetness follows horizontal sweep; occupancy follows vertical
+  targetWet = THREE.MathUtils.clamp(0.25 + (x / innerWidth) * 0.75, 0.15, 1.0);
+  targetOcc = THREE.MathUtils.clamp(0.3 + (1.0 - y / innerHeight) * 0.65, 0.2, 0.95);
+}
+
+renderer.domElement.addEventListener('pointermove', setPointerFromEvent);
+renderer.domElement.addEventListener('pointerdown', setPointerFromEvent);
+
+/* ── Post: soft bloom ───────────────────────────────────────────────── */
+let composer = null;
+let bloomPass = null;
+if (!freezeMotion) {
+  try {
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.42, 0.48, 0.72);
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+  } catch (err) {
+    console.warn('[materials] bloom skipped', err);
+    composer = null;
+  }
+}
+
+/* ── Keys ───────────────────────────────────────────────────────────── */
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'h' || e.key === 'H') {
+    showHud = !showHud;
+    applyHud(showHud);
+  }
+  if (e.key === 'a' || e.key === 'A') {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    toggleSong();
+  }
+});
+
+document.getElementById('btn-song')?.addEventListener('click', () => toggleSong());
+document.getElementById('btn-load')?.addEventListener('click', () => {
+  document.getElementById('file-song')?.click();
+});
+document.getElementById('file-song')?.addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (f) loadUserFile(f);
+  e.target.value = '';
+});
+if (freezeMotion) setAudioHud('still');
+
+/* ── Animate ────────────────────────────────────────────────────────── */
+const clock = new THREE.Clock();
+let frames = 0;
+let fpsT = 0;
+
+function frame() {
+  const dt = Math.min(clock.getDelta(), 0.048);
+  const t = clock.elapsedTime;
+  frames++;
+  fpsT += dt;
+  if (fpsT >= 0.5) {
+    const fps = Math.round(frames / fpsT);
+    frames = 0;
+    fpsT = 0;
+    document.getElementById('h-fps').textContent = String(fps);
+    document.getElementById('pill-fps').textContent = `${fps} FPS`;
+  }
+
+  controls.update();
+
+  sampleAudio();
+
+  if (!freezeMotion) {
+    modUniforms.uTime.value = t;
+    // Pointer owns wetness; bass adds a light wetness-adjacent glow bias when music is live
+    const wetTarget = audioPlaying
+      ? THREE.MathUtils.clamp(targetWet + bands.bass * 0.12, 0.15, 1.0)
+      : targetWet;
+    modUniforms.uWetness.value = THREE.MathUtils.damp(modUniforms.uWetness.value, wetTarget, 4.0, dt);
+
+    let occTarget;
+    if (audioPlaying) {
+      // Mids → overall occupancy; bass pulse; pointer Y at low weight
+      const musicOcc = 0.22 + bands.mid * 0.58 + bands.bass * 0.22;
+      occTarget = THREE.MathUtils.lerp(musicOcc, targetOcc, 0.18);
+      modUniforms.uBass.value = THREE.MathUtils.damp(modUniforms.uBass.value, bands.bass, 6.0, dt);
+      modUniforms.uHigh.value = THREE.MathUtils.damp(modUniforms.uHigh.value, bands.high, 6.0, dt);
+    } else {
+      // Occupancy: pointer target + slow night breathe
+      const breathe = 0.55 + 0.12 * Math.sin(t * 0.35);
+      occTarget = THREE.MathUtils.lerp(breathe, targetOcc, 0.65);
+      modUniforms.uBass.value = THREE.MathUtils.damp(modUniforms.uBass.value, 0, 3.0, dt);
+      modUniforms.uHigh.value = THREE.MathUtils.damp(modUniforms.uHigh.value, 0, 3.0, dt);
+    }
+    modUniforms.uOccupancy.value = THREE.MathUtils.damp(modUniforms.uOccupancy.value, occTarget, 2.2, dt);
+    const tipPulse = audioPlaying ? bands.bass * 0.45 : 0;
+    tipMat.emissiveIntensity = 1.25 + Math.sin(t * 2.2) * 0.35 + tipPulse;
+    halo.material.opacity = 0.16 + Math.sin(t * 2.2) * 0.08 + tipPulse * 0.1;
+  } else {
+    modUniforms.uTime.value = 0;
+    modUniforms.uBass.value = 0;
+    modUniforms.uHigh.value = 0;
+  }
+
+  document.getElementById('h-wet').textContent = modUniforms.uWetness.value.toFixed(2);
+  document.getElementById('h-occ').textContent = modUniforms.uOccupancy.value.toFixed(2);
+
+  if (composer && !freezeMotion) composer.render();
+  else renderer.render(scene, camera);
+
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+
+/* ── Resize / dispose ───────────────────────────────────────────────── */
+function onResize() {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  if (composer) composer.setSize(innerWidth, innerHeight);
+  if (bloomPass) bloomPass.resolution.set(innerWidth, innerHeight);
+}
+window.addEventListener('resize', onResize);
+
+function disposeAll() {
+  disposeAudio();
+  groundMat.dispose();
+  quayMat.dispose();
+  massingMat.dispose();
+  glassMat.dispose();
+  poleMat.dispose();
+  tipMat.dispose();
+  halo.material.dispose();
+  if (envMap) envMap.dispose();
+  pmrem.dispose();
+  if (composer) composer.dispose();
+  renderer.dispose();
+}
+window.addEventListener('pagehide', disposeAll);
+window.addEventListener('beforeunload', disposeAll);
+
+window.__materials = {
+  path: 'onBeforeCompile',
+  env: 'PMREM-night',
+  massingCount: massingDefs.length,
+  patched: true,
+  wetness: () => modUniforms.uWetness.value,
+  occupancy: () => modUniforms.uOccupancy.value,
+  freezeMotion,
+  hasBloom: !!composer,
+  motifs: ['Harbor', 'Quay', 'Signal'],
+  get audioPlaying() { return audioPlaying; },
+  bands: () => ({ bass: bands.bass, mid: bands.mid, high: bands.high, vol: bands.vol }),
+  song: () => songLabelText + (customTrack ? ' · your track' : ''),
+};
+</script>
+</body>
+</html>
