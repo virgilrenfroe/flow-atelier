@@ -766,6 +766,16 @@ const buildingMat = new THREE.ShaderMaterial({
       return texture2D(atlas, cellOrigin + clamp(huv, 0.0, 1.0) * (cellSize - 2.0 * inset)).rgb;
     }
 
+    // Shared UV center-crop for EVERY interior atlas sample (room + shop + face-map).
+    // 0.60 ≈ crop 20% margin each side — fenestra cells bake asymmetric beige L/R
+    // walls (up to ~28% on one side); 0.72 left dollhouse margins on heavy cells.
+    // One InstancedMesh / one buildingMat — crop is not per-façade; uneven sides
+    // are cell content + Fresnel/glancing + wall color, not a skipped shader branch.
+    const float ATLAS_UV_CROP = 0.60;
+    vec2 cropAtlasUV(vec2 uv) {
+      return 0.5 + (clamp(uv, 0.0, 1.0) - 0.5) * ATLAS_UV_CROP;
+    }
+
     // Procedural cavity fallback (atlases off) — classic face colors.
     vec3 shadeRoomProc(vec3 ro, vec3 rd, float lit, float warmAmt, float shop) {
       float tMin = 1e5;
@@ -860,22 +870,22 @@ const buildingMat = new THREE.ShaderMaterial({
       vec3 cavityF = vec3(0.045, 0.042, 0.05);
       vec3 cavityC = vec3(0.09, 0.09, 0.1);
       if (face == 0) {
-        uv = clamp(vec2(hit.x * invW, hit.y * invH) + 0.5, 0.0, 1.0);
+        uv = cropAtlasUV(clamp(vec2(hit.x * invW, hit.y * invH) + 0.5, 0.0, 1.0));
         return sampleAtlas(uFaceBack, uFaceCols, uFaceRows, idx, uv);
       } else if (face == 1) {
-        uv = clamp(vec2(-hit.z * invD, hit.y * invH + 0.5), 0.0, 1.0);
+        uv = cropAtlasUV(clamp(vec2(-hit.z * invD, hit.y * invH + 0.5), 0.0, 1.0));
         vec3 tex = sampleAtlas(uFaceLeft, uFaceCols, uFaceRows, idx, uv);
         return mix(tex, cavityL, sideMute);
       } else if (face == 2) {
-        uv = clamp(vec2(hit.z * invD + 1.0, hit.y * invH + 0.5), 0.0, 1.0);
+        uv = cropAtlasUV(clamp(vec2(hit.z * invD + 1.0, hit.y * invH + 0.5), 0.0, 1.0));
         vec3 tex = sampleAtlas(uFaceRight, uFaceCols, uFaceRows, idx, uv);
         return mix(tex, cavityR, sideMute);
       } else if (face == 3) {
-        uv = clamp(vec2(hit.x * invW + 0.5, -hit.z * invD), 0.0, 1.0);
+        uv = cropAtlasUV(clamp(vec2(hit.x * invW + 0.5, -hit.z * invD), 0.0, 1.0));
         vec3 tex = texture2D(uFaceFloor, uv).rgb * 0.82;
         return mix(tex, cavityF, sideMute * 0.85);
       } else {
-        uv = clamp(vec2(hit.x * invW + 0.5, -hit.z * invD), 0.0, 1.0);
+        uv = cropAtlasUV(clamp(vec2(hit.x * invW + 0.5, -hit.z * invD), 0.0, 1.0));
         vec3 tex = texture2D(uFaceCeiling, uv).rgb;
         return mix(tex, cavityC, sideMute * 0.85);
       }
@@ -883,14 +893,11 @@ const buildingMat = new THREE.ShaderMaterial({
 
     // Atlas path — FLAT orthographic back-wall sample (Virgil 2026-09-26).
     // Deep ray-box parallax bowed mullions/furniture into curves at glancing angles.
-    // UV center-crop (0.72): fenestra plates bake beige side walls into L/R of each
-    // 512 cell — zoom into furniture so panes read as rooms, not wall margins.
+    // UV center-crop via cropAtlasUV (ATLAS_UV_CROP): same factor for room + shop.
     // Extremely shallow depth cue only via mild vignette, not ray hit.
     vec3 shadeRoomAtlas(vec2 paneUV, float lit, float shop, float seed) {
       float glowAmt = clamp(lit, 0.0, 1.0);
-      vec2 huv = clamp(paneUV, 0.0, 1.0);
-      // Zoom into cell center — crop ~14% margin each side (beige dollhouse walls)
-      huv = 0.5 + (huv - 0.5) * 0.72;
+      vec2 huv = cropAtlasUV(paneUV);
       float idx = shop > 0.55
         ? floor(hash(vec2(seed * 1.7, seed * 0.31)) * 16.0)
         : floor(hash(vec2(seed * 2.3, seed * 0.19)) * uRoomCount);
@@ -1036,7 +1043,7 @@ const buildingMat = new THREE.ShaderMaterial({
           float roomIdx = floor(h0 * uFaceCount);
           float distW = length(cameraPosition - vWorldPos);
           float lodFlat = smoothstep(16.0, 36.0, distW); // 0=near full, 1=far flat impostor
-          vec2 paneUV = clamp(pane, 0.0, 1.0);
+          vec2 paneUV = cropAtlasUV(pane);
           vec3 faceCol;
           if (lodFlat < 0.97) {
             faceCol = shadeFaceMappedRoom(camM, localXY, cellW, cellH, depthM, roomIdx, sideMute);
