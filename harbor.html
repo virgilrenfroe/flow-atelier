@@ -192,13 +192,14 @@
     <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · not live</p>
   </div>
   <div id="walk-hint" aria-live="polite">Citizen · WASD · click to look · V to exit</div>
-  <div id="props-hint" aria-live="polite">Quay · drag a crate</div>
+  <div id="props-hint" aria-live="polite">Quay · toss into basin · B blast</div>
   <div id="props-actions" aria-label="Quay physics">
     <button class="pill on" id="props-constraint" type="button" title="Toggle lantern hinge" aria-pressed="true">Constraint</button>
     <button class="pill" id="props-toss" type="button" title="Toss crate (Space)">Toss</button>
     <button class="pill" id="props-reset" type="button" title="Reset props (R)">Reset</button>
     <button class="pill on" id="props-wind" type="button" title="Toggle wind (N) · dir ,/. · strength [/]" aria-pressed="true" aria-label="Wind">Wind E ···</button>
     <button class="pill on" id="props-springs" type="button" title="Toggle soft springs (G)" aria-pressed="true">Springs</button>
+    <button class="pill" id="props-blast" type="button" title="Basin blast impulse (B)">Blast</button>
   </div>
   <div id="tour-hint" aria-live="polite">Tour</div>
   <pre id="tour-log" aria-live="polite"></pre>
@@ -324,6 +325,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'g' || e.key === 'G') {
     window.dispatchEvent(new CustomEvent('noctuary-springs-toggle'));
+  }
+  if (e.key === 'b' || e.key === 'B') {
+    window.dispatchEvent(new CustomEvent('noctuary-props-blast'));
   }
   if (e.key === ',' || e.key === '<') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-dir', { detail: -1 }));
@@ -2026,14 +2030,37 @@ const quayDeckBody = new CANNON.Body({
 });
 physWorld.addBody(quayDeckBody);
 
-// Soft seawall lip stop (prevents crates sliding into basin)
+// Soft seawall curb (low) — slows sliding but toss clears into basin for buoyancy
 const seawallLip = new CANNON.Body({
   mass: 0,
   material: physGroundMat,
-  shape: new CANNON.Box(new CANNON.Vec3(11, 0.35, 0.14)),
-  position: new CANNON.Vec3(0, 0.2, SEAWALL_Z + 0.05),
+  shape: new CANNON.Box(new CANNON.Vec3(11, 0.14, 0.12)),
+  position: new CANNON.Vec3(0, 0.08, SEAWALL_Z + 0.05),
 });
 physWorld.addBody(seawallLip);
+
+// Basin floor (deep) — catch sunk dense crates; buoyancy handles floaters
+const BASIN_FLOOR_Y = -2.4;
+const basinFloor = new CANNON.Body({
+  mass: 0,
+  material: physGroundMat,
+  shape: new CANNON.Box(new CANNON.Vec3(WATER_W * 0.5 + 0.5, 0.12, WATER_D * 0.5 + 0.5)),
+  position: new CANNON.Vec3(0, BASIN_FLOOR_Y, WATER_NEAR_Z + WATER_D * 0.5),
+});
+physWorld.addBody(basinFloor);
+// Side walls keep floaters in the night basin AABB
+for (const [sx, sz, px, pz] of [
+  [0.2, WATER_D * 0.5 + 0.4, -WATER_W * 0.5 - 0.15, WATER_NEAR_Z + WATER_D * 0.5],
+  [0.2, WATER_D * 0.5 + 0.4,  WATER_W * 0.5 + 0.15, WATER_NEAR_Z + WATER_D * 0.5],
+  [WATER_W * 0.5 + 0.4, 0.2, 0, WATER_NEAR_Z + WATER_D + 0.15],
+]) {
+  physWorld.addBody(new CANNON.Body({
+    mass: 0,
+    material: physGroundMat,
+    shape: new CANNON.Box(new CANNON.Vec3(sx, 1.4, sz)),
+    position: new CANNON.Vec3(px, -0.6, pz),
+  }));
+}
 
 const ironMatStd = new THREE.MeshStandardMaterial({
   color: 0x2a2e3a, roughness: 0.88, metalness: 0.22,
@@ -2198,12 +2225,19 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   })();
 }
 
-// Free crates (2–4) — grab + toss
+// Free crates — grab + toss · density variants for basin buoyancy (light / mid / dense)
+// density = mass / (sx*sy*sz); WATER_DENSITY≈9 so light floats high, dense sits low / sinks
 const HARBOR_CRATE_DEFS = [
-  { size: [0.55, 0.55, 0.55], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2 },
-  { size: [0.7, 0.4, 0.55], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35 },
-  { size: [0.45, 0.45, 0.45], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55 },
-  { size: [0.6, 0.5, 0.5], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1 },
+  // mid — cream, ~6.6 dens → floats mid
+  { size: [0.55, 0.55, 0.55], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2, label: 'mid' },
+  // dense — taupe, ~14.3 dens → sits low / sinks
+  { size: [0.7, 0.4, 0.55], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35, label: 'dense' },
+  // light — gold, ~7.7 dens → floats high
+  { size: [0.45, 0.45, 0.45], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55, label: 'light' },
+  // mid-heavy — ~12 dens → low float
+  { size: [0.6, 0.5, 0.5], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1, label: 'mid' },
+  // cork floatable — very light, high bob
+  { size: [0.5, 0.35, 0.5], mass: 0.45, color: 0xc4a574, emissive: 0xf0c24b, ei: 0.06, pos: [-4.1, 0.75, 3.5], yaw: -0.2, label: 'light' },
 ];
 
 function makeHarborCrate(def) {
@@ -2237,6 +2271,10 @@ function makeHarborCrate(def) {
   }
   const entry = physAdd(mesh, body, 'crate', def.mass);
   entry.halfExtents = new CANNON.Vec3(sx / 2, sy / 2, sz / 2);
+  entry.volume = sx * sy * sz;
+  entry.density = def.mass / Math.max(entry.volume, 1e-4);
+  entry.densityLabel = def.label || 'mid';
+  entry.floatable = true;
   // Refresh spawn after still park
   entry.spawn.position.copy(body.position);
   entry.spawn.quaternion.copy(body.quaternion);
@@ -2422,6 +2460,170 @@ function physSetConstraint(on) {
   refreshHarborPhysicsProbe();
 }
 
+
+// ——— Basin buoyancy (Archimedes) + light blast impulse · ladder step 3 ———
+// Water plane = visual Gerstner mesh Y (WATER_Y). Force only inside basin AABB.
+const WATER_DENSITY = 9.0; // game-scale; matches crate dens ~5–14 (not SI 1000)
+const BUOY_DRAG_LINEAR = 2.8;
+const BUOY_DRAG_ANGULAR = 1.6;
+const BUOY_WAVE_COUPLE = 0.55; // bob from Gerstner amp
+const basinBuoy = {
+  on: !physFreeze,
+  waterY: WATER_Y,
+  density: WATER_DENSITY,
+  aabb: {
+    x0: -WATER_W * 0.5,
+    x1:  WATER_W * 0.5,
+    z0:  WATER_NEAR_Z,
+    z1:  WATER_NEAR_Z + WATER_D,
+    yBottom: BASIN_FLOOR_Y + 0.2,
+  },
+  submerged: 0,
+  forceScratch: new CANNON.Vec3(),
+  offsetScratch: new CANNON.Vec3(),
+  blastOrigin: new CANNON.Vec3(0, WATER_Y, WATER_NEAR_Z + WATER_D * 0.35),
+  blastImpulse: 14,
+  blastRadius: 7.5,
+  lastBlastAt: 0,
+};
+
+function basinSurfaceY(x, z, t) {
+  // Match visual water base + small Gerstner-ish bob so crates don't float in air
+  const amp = physFreeze ? 0 : WATER_AMP;
+  if (amp <= 0) return basinBuoy.waterY;
+  const phase = t * 0.48;
+  const w1 = Math.sin(x * 0.42 + z * 0.15 - phase) * amp * 0.95;
+  const w2 = Math.sin(-x * 0.23 + z * 0.42 - t * 0.65 + 1.3) * amp * 0.58;
+  return basinBuoy.waterY + (w1 + w2) * BUOY_WAVE_COUPLE;
+}
+
+function crateInBasinXZ(p) {
+  const a = basinBuoy.aabb;
+  return p.x >= a.x0 && p.x <= a.x1 && p.z >= a.z0 && p.z <= a.z1;
+}
+
+/** Approx submerged fraction of axis-aligned box vs horizontal water plane. */
+function submergedFraction(entry, surfaceY) {
+  const he = entry.halfExtents || new CANNON.Vec3(0.25, 0.25, 0.25);
+  const p = entry.body.position;
+  const top = p.y + he.y;
+  const bot = p.y - he.y;
+  if (bot >= surfaceY) return 0;
+  if (top <= surfaceY) return 1;
+  return (surfaceY - bot) / Math.max(2 * he.y, 1e-4);
+}
+
+function buoyancyApplyForces(t) {
+  if (physFreeze || !basinBuoy.on) {
+    basinBuoy.submerged = 0;
+    return;
+  }
+  let wet = 0;
+  const g = 9.82;
+  for (const entry of physCrates) {
+    if (!entry.floatable || entry.mass <= 0) continue;
+    const body = entry.body;
+    if (body.type !== CANNON.Body.DYNAMIC) continue;
+    if (physGrab && physGrab.entry === entry) continue; // don't fight grab
+    const p = body.position;
+    if (!crateInBasinXZ(p)) continue;
+    const surfaceY = basinSurfaceY(p.x, p.z, t);
+    const frac = submergedFraction(entry, surfaceY);
+    if (frac <= 0) continue;
+    wet++;
+    const vol = entry.volume || (entry.halfExtents
+      ? entry.halfExtents.x * entry.halfExtents.y * entry.halfExtents.z * 8
+      : 0.1);
+    const submergedVol = vol * frac;
+    // Archimedes: F = ρ_water * V_sub * g  upward
+    const Fb = basinBuoy.density * submergedVol * g;
+    basinBuoy.forceScratch.set(0, Fb, 0);
+    body.wakeUp();
+    body.applyForce(basinBuoy.forceScratch, basinBuoy.offsetScratch.set(0, 0, 0));
+    // Quadratic-ish drag while wet — settles bob instead of perpetual thrash
+    const damp = frac;
+    body.velocity.x *= Math.max(0, 1 - BUOY_DRAG_LINEAR * damp * 0.016);
+    body.velocity.y *= Math.max(0, 1 - BUOY_DRAG_LINEAR * damp * 0.022);
+    body.velocity.z *= Math.max(0, 1 - BUOY_DRAG_LINEAR * damp * 0.016);
+    body.angularVelocity.x *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
+    body.angularVelocity.y *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
+    body.angularVelocity.z *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
+  }
+  basinBuoy.submerged = wet;
+}
+
+function physBlast() {
+  if (physFreeze) return;
+  const now = performance.now();
+  if (now - basinBuoy.lastBlastAt < 280) return; // light debounce
+  basinBuoy.lastBlastAt = now;
+  const origin = basinBuoy.blastOrigin;
+  // Prefer blast near mean of wet crates; else basin mid
+  let n = 0;
+  let sx = 0, sz = 0;
+  for (const entry of physCrates) {
+    const p = entry.body.position;
+    if (!crateInBasinXZ(p)) continue;
+    const surfaceY = basinSurfaceY(p.x, p.z, now * 0.001);
+    if (submergedFraction(entry, surfaceY) <= 0.05) continue;
+    sx += p.x; sz += p.z; n++;
+  }
+  if (n > 0) {
+    origin.x = sx / n;
+    origin.z = sz / n;
+  } else {
+    origin.x = 0;
+    origin.z = WATER_NEAR_Z + WATER_D * 0.35;
+  }
+  origin.y = basinBuoy.waterY;
+  const R = basinBuoy.blastRadius;
+  const strength = basinBuoy.blastImpulse;
+  for (const entry of physCrates) {
+    if (entry.mass <= 0) continue;
+    const body = entry.body;
+    if (body.type !== CANNON.Body.DYNAMIC) continue;
+    const p = body.position;
+    const dx = p.x - origin.x;
+    const dy = p.y - origin.y;
+    const dz = p.z - origin.z;
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist > R || dist < 1e-4) continue;
+    const falloff = 1 - dist / R;
+    const k = strength * falloff * falloff;
+    const inv = 1 / dist;
+    // Lateral shove across basin + slight lift
+    const ix = dx * inv * k;
+    const iy = Math.max(0.35, dy * inv * k * 0.45 + 1.2 * falloff);
+    const iz = dz * inv * k;
+    body.wakeUp();
+    body.applyImpulse(new CANNON.Vec3(ix, iy, iz), new CANNON.Vec3(0, 0, 0));
+    body.angularVelocity.set(
+      (Math.random() - 0.5) * 4 * falloff,
+      (Math.random() - 0.5) * 5 * falloff,
+      (Math.random() - 0.5) * 4 * falloff
+    );
+  }
+  // Soft lantern tip from blast pressure
+  for (const L of physLanterns) {
+    if (!L.constraint) continue;
+    L.body.wakeUp();
+    L.body.applyImpulse(
+      new CANNON.Vec3((Math.random() - 0.5) * 0.4, 0.15, 0.25 + Math.random() * 0.3),
+      new CANNON.Vec3(0, 0.12, 0)
+    );
+  }
+  if (propsHint && !showHud) {
+    propsHint.textContent = 'Blast · basin shove';
+    propsHint.classList.add('on');
+    setTimeout(() => {
+      if (!showHud) {
+        propsHint.textContent = 'Quay · toss into basin · B blast';
+        propsHint.classList.remove('on');
+      }
+    }, 1600);
+  }
+}
+
 // ——— Scene wind (crates + hinged lanterns; bollards / InstancedMesh untouched) ———
 const WIND_CARDINALS = [
   { name: 'E', x: 1, z: 0 },
@@ -2557,7 +2759,9 @@ function physStep() {
     if (typeof physHooks.onFreezeSync === 'function') physHooks.onFreezeSync();
     return;
   }
-  windApplyForces(performance.now() * 0.001);
+  const _tBuoy = performance.now() * 0.001;
+  buoyancyApplyForces(_tBuoy);
+  windApplyForces(_tBuoy);
   if (typeof physHooks.beforeStep === 'function') physHooks.beforeStep();
   physWorld.fixedStep();
   for (const entry of physEntries) physSync(entry);
@@ -2589,7 +2793,7 @@ function refreshHarborPhysicsProbe() {
       ? physLanterns.map(() => 'PointToPoint')
       : [],
     constraintOn: physConstraintOn,
-    staticGround: 2, // quay slab + seawall lip
+    staticGround: 6, // quay + curb + basin floor + 3 walls
     wind: windProbe,
     cratePos: physCrates.map((c) => ({
       x: +c.body.position.x.toFixed(3),
@@ -2601,7 +2805,20 @@ function refreshHarborPhysicsProbe() {
       y: +L.body.position.y.toFixed(3),
       z: +L.body.position.z.toFixed(3),
     })),
+    buoyancy: {
+      on: basinBuoy.on && !physFreeze,
+      waterY: basinBuoy.waterY,
+      density: basinBuoy.density,
+      submerged: basinBuoy.submerged,
+      blastImpulse: basinBuoy.blastImpulse,
+      crates: physCrates.map((c) => ({
+        label: c.densityLabel,
+        density: +(c.density || 0).toFixed(2),
+        mass: c.mass,
+      })),
+    },
   };
+  window.__buoyancy = window.__harborPhysics.buoyancy;
   if (typeof physHooks.onProbe === 'function') physHooks.onProbe();
 }
 refreshHarborPhysicsProbe();
@@ -2630,6 +2847,12 @@ if (propsWindBtn) {
 window.addEventListener('noctuary-wind-toggle', () => windSetOn(!harborWind.on));
 window.addEventListener('noctuary-wind-dir', (ev) => windCycleDir(ev.detail || 1));
 window.addEventListener('noctuary-wind-str', (ev) => windCycleStr(ev.detail || 1));
+window.addEventListener('noctuary-props-blast', physBlast);
+const propsBlastBtn = document.getElementById('props-blast');
+if (propsBlastBtn) {
+  propsBlastBtn.addEventListener('click', physBlast);
+  if (physFreeze) propsBlastBtn.disabled = true;
+}
 
 // Soft toast: brief exhibit-only (no button row). Hidden whenever HUD chrome shows actions.
 const propsHint = document.getElementById('props-hint');
