@@ -1,0 +1,4195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<title>Noctuary · intermediate · Harbor</title>
+<style>
+  :root {
+    --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+    --font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "Space Mono", ui-monospace, monospace;
+    --ink: #05060a;
+    --paper: #f2ebe0;
+    --mute: rgba(242,235,224,0.62);
+    --line: rgba(242,235,224,0.18);
+    --accent: #f0c24b;
+    --violet: #8a7bb8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper);
+    font-family: var(--font-sans); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+  .topbar {
+    /* Left cluster only — top-right reserved for #props-actions (one quay control row) */
+    position: absolute; top: 18px; left: 18px; right: 220px;
+    display: flex; justify-content: flex-start; gap: 12px; align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .brand {
+    font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+    padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.5); backdrop-filter: blur(12px);
+  }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-start; max-width: min(420px, 55vw); }
+  .pill {
+    border: 1px solid var(--line); background: rgba(5,6,10,0.5);
+    color: var(--paper); border-radius: 999px; padding: 9px 13px;
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    backdrop-filter: blur(12px);
+  }
+  .pill.tech { border-color: rgba(138,123,184,0.4); color: rgba(242,235,224,0.88); }
+  .pill.gold { border-color: rgba(240,194,75,0.45); color: var(--accent); }
+  .hero {
+    position: absolute; left: 5vw; top: 15vh; max-width: min(560px, 82vw);
+  }
+  .hero .eyebrow {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--violet); margin: 0 0 10px;
+  }
+  .hero .stack {
+    font-family: var(--font-display); font-optical-sizing: auto;
+    font-weight: 650; line-height: 0.92; letter-spacing: -0.03em;
+    font-size: clamp(2.6rem, 7.5vw, 5.6rem); margin: 0;
+  }
+  .hero .stack span { display: block; color: rgba(242,235,224,0.28); }
+  .hero .stack span.focus { color: var(--paper); }
+  .hero p { margin: 16px 0 0; max-width: 42ch; color: var(--mute); font-size: 14px; line-height: 1.5; }
+  .hud {
+    position: absolute; right: 18px; bottom: 18px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em;
+    line-height: 1.75; color: var(--mute);
+    padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.55); backdrop-filter: blur(14px);
+    min-width: 178px;
+  }
+  .hud .r { display: flex; justify-content: space-between; gap: 18px; }
+  .hud strong { color: var(--paper); font-weight: 400; }
+  .hud .accent { color: var(--accent); }
+  .note {
+    position: absolute; left: 18px; bottom: 18px; font-size: 11px;
+    opacity: 0.42; max-width: 280px; line-height: 1.45;
+  }
+  .signal-chip {
+    position: absolute; left: 50%; top: 22%; transform: translate(-50%, -20px);
+    opacity: 0; transition: opacity 0.45s ease, transform 0.45s ease;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--accent);
+    padding: 10px 16px; border-radius: 999px; border: 1px solid rgba(240,194,75,0.4);
+    background: rgba(5,6,10,0.62); backdrop-filter: blur(14px);
+    pointer-events: none;
+  }
+  .signal-chip.on { opacity: 1; transform: translate(-50%, 0); }
+  /* Pass 6 · clean exhibit (default): district only — no instructional chrome */
+  body.exhibit .layer { display: none !important; }
+  /* Citizen walk pill — outside .layer so it shows in exhibit */
+  #walk-hint {
+    position: fixed; left: 18px; bottom: 18px; z-index: 5;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--paper);
+    padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.62); backdrop-filter: blur(12px);
+    pointer-events: none; opacity: 0; transition: opacity 0.25s ease;
+  }
+  #walk-hint.on { opacity: 1; }
+  /* Quay physics props — soft toast outside .layer (exhibit-clean) */
+  #props-hint {
+    position: fixed; left: 18px; bottom: 52px; z-index: 5;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--mute);
+    padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.55); backdrop-filter: blur(12px);
+    pointer-events: none; opacity: 0; transition: opacity 0.6s ease;
+  }
+  #props-hint.on { opacity: 0.72; }
+  #props-actions {
+    position: fixed; right: 18px; top: 18px; z-index: 5;
+    display: none; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+    pointer-events: auto;
+  }
+  #props-actions.show { display: flex; }
+  #props-actions .pill {
+    border: 1px solid var(--line); background: rgba(5,6,10,0.55);
+    color: var(--paper); border-radius: 999px; padding: 8px 12px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase; cursor: pointer; backdrop-filter: blur(12px);
+  }
+  #props-actions .pill:hover { border-color: rgba(240,194,75,0.45); color: var(--accent); }
+  #props-actions .pill.on { border-color: rgba(240,194,75,0.5); color: var(--accent); }
+  #tour-hint {
+    position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 6;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--accent);
+    padding: 8px 14px; border-radius: 999px; border: 1px solid rgba(240,194,75,0.4);
+    background: rgba(5,6,10,0.7); backdrop-filter: blur(12px);
+    pointer-events: none; opacity: 0; transition: opacity 0.25s ease;
+    max-width: min(92vw, 520px); text-align: center;
+  }
+  #tour-hint.on { opacity: 1; }
+  #tour-log {
+    position: fixed; left: 18px; top: 56px; z-index: 6;
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
+    color: var(--paper); max-width: min(420px, 88vw); max-height: 55vh; overflow: auto;
+    padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.78); backdrop-filter: blur(14px);
+    pointer-events: none; display: none; white-space: pre-wrap;
+  }
+  #tour-log.on { display: block; }
+  #debug-hud {
+    position: fixed; right: 18px; bottom: 18px; z-index: 8;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em;
+    line-height: 1.7; color: var(--mute);
+    padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(240,194,75,0.35);
+    background: rgba(5,6,10,0.82); backdrop-filter: blur(14px);
+    min-width: 220px; pointer-events: none; display: none; white-space: pre;
+  }
+  #debug-hud.on { display: block; }
+  #debug-hud .k { color: var(--accent); }
+  #debug-hud .v { color: var(--paper); }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+  @media (max-width: 720px) {
+    .note { display: none; }
+    .hero { top: 11vh; }
+    .pills { max-width: 58vw; }
+  }
+</style>
+</head>
+<body class="exhibit">
+  <h1 class="sr-only">Noctuary intermediate — Harbor district night</h1>
+  <div class="layer" id="chrome" hidden aria-hidden="true">
+    <div class="topbar">
+      <div class="brand">Noctuary · intermediate</div>
+      <div class="pills">
+        <div class="pill tech">Streets</div>
+        <div class="pill tech">Interior</div>
+        <div class="pill tech">Mullion</div>
+        <div class="pill tech">Instance</div>
+        <div class="pill tech">Shader</div>
+        <div class="pill tech">FBO</div>
+      </div>
+    </div>
+    <div class="hero">
+      <p class="eyebrow">Step 01 · real windows · craft ladder</p>
+      <h1 class="stack"><span class="focus">Harbor</span><span>district</span><span>night</span></h1>
+      <p id="hero-blurb">Windows as openings: rectilinear box façades, local UV, dark mullions, flat fenestra interiors, Fresnel glass. Occupied-32 + shop atlases on planar panes. No curved massing, no sway, no world-UV swirl.</p>
+    </div>
+    <div class="signal-chip" id="signal-chip">Signal · product hero</div>
+    <div class="hud" id="hud" aria-live="polite">
+      <div class="r"><span>district</span><strong class="accent">Harbor</strong></div>
+      <div class="r"><span>step</span><strong>01 · p5</strong></div>
+      <div class="r"><span>fps</span><strong id="fps">—</strong></div>
+      <div class="r"><span>fbo</span><strong id="fbo-state">A→B</strong></div>
+      <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
+      <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
+    </div>
+    <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · not live</p>
+  </div>
+  <div id="walk-hint" aria-live="polite">Citizen · WASD · click to look · V to exit</div>
+  <div id="props-hint" aria-live="polite">Quay · drag a crate</div>
+  <div id="props-actions" aria-label="Quay physics">
+    <button class="pill on" id="props-constraint" type="button" title="Toggle lantern hinge" aria-pressed="true">Constraint</button>
+    <button class="pill" id="props-toss" type="button" title="Toss crate (Space)">Toss</button>
+    <button class="pill" id="props-reset" type="button" title="Reset props (R)">Reset</button>
+    <button class="pill on" id="props-wind" type="button" title="Toggle wind (N) · dir ,/. · strength [/]" aria-pressed="true" aria-label="Wind">Wind E ···</button>
+    <button class="pill on" id="props-springs" type="button" title="Toggle soft springs (G)" aria-pressed="true">Springs</button>
+  </div>
+  <div id="tour-hint" aria-live="polite">Tour</div>
+  <pre id="tour-log" aria-live="polite"></pre>
+  <pre id="debug-hud" aria-live="polite"></pre>
+
+  <script type="importmap">
+  {"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.170.0/examples/jsm/","cannon-es":"https://unpkg.com/cannon-es@0.20.0/dist/cannon-es.js"}}
+  </script>
+  <script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import * as CANNON from 'cannon-es';
+
+const params = new URLSearchParams(location.search);
+let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
+const ROOM_FACE_NAMES = ['living','kitchen','master','study','kids','dining','den'];
+const stillMode = params.has('still');
+// Atlas (fenestra occupied-32 + shop) is the default interior path. Persist so Safari reopen keeps it.
+// ?faces=1 / ?faces=on → force face-map. ?atlas=1 / ?faces=0 / ?faces=off → force atlas.
+const FACES_KEY = 'noctuary-harbor-faces-v2'; // v2: atlas default (ignore old face-locked 'on')
+function readFacesPref() {
+  if (params.get('atlas') === '1' || params.get('faces') === '0' || params.get('faces') === 'off') return false;
+  if (params.get('faces') === '1' || params.get('faces') === 'on') return true;
+  try {
+    const v = localStorage.getItem(FACES_KEY);
+    if (v === 'off') return false;
+    if (v === 'on') return true;
+  } catch (_) {}
+  return false; // default: occupied-32 + shop atlas interiors
+}
+const facesMode = readFacesPref();
+try { localStorage.setItem(FACES_KEY, facesMode ? 'on' : 'off'); } catch (_) {}
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const freezeMotion = reduceMotion || stillMode;
+
+// Clean exhibit mode (Virgil): no on-screen instructional text by default.
+// Persist: localStorage noctuary-harbor-hud = 'off' | 'on'
+// Override: ?hud=1 show chrome · ?hud=0 force exhibit
+const HUD_KEY = 'noctuary-harbor-hud';
+function readHudPref() {
+  if (params.has('hud')) return params.get('hud') === '1' || params.get('hud') === 'on';
+  try {
+    const v = localStorage.getItem(HUD_KEY);
+    if (v === 'on') return true;
+    if (v === 'off') return false;
+  } catch (_) {}
+  return false; // default exhibit
+}
+function applyHud(show) {
+  document.body.classList.toggle('exhibit', !show);
+  const chrome = document.getElementById('chrome');
+  if (chrome) {
+    chrome.hidden = !show;
+    chrome.setAttribute('aria-hidden', show ? 'false' : 'true');
+  }
+  const propsAct = document.getElementById('props-actions');
+  if (propsAct) propsAct.classList.toggle('show', !!show);
+  // props-hint is exhibit-only toast — never restate actions when buttons are visible
+  const ph = document.getElementById('props-hint');
+  if (ph && show) ph.classList.remove('on');
+  try { localStorage.setItem(HUD_KEY, show ? 'on' : 'off'); } catch (_) {}
+}
+let showHud = readHudPref();
+applyHud(showHud);
+
+// Citizen walk: ?walk=1 / localStorage noctuary-harbor-walk / key V
+const WALK_KEY = 'noctuary-harbor-walk';
+function readWalkPref() {
+  if (params.get('walk') === '1' || params.get('walk') === 'on') return true;
+  if (params.get('walk') === '0' || params.get('walk') === 'off') return false;
+  try {
+    const v = localStorage.getItem(WALK_KEY);
+    if (v === 'on') return true;
+    if (v === 'off') return false;
+  } catch (_) {}
+  return false;
+}
+let walkWanted = readWalkPref();
+
+
+
+if (facesMode) {
+  const blurb = document.getElementById('hero-blurb');
+  if (blurb) {
+    blurb.textContent = 'Face-map mode (?faces=1): five room-face textures by ray-box hit. Default Harbor uses fenestra occupied-32 + shop atlases; ?atlas=1 / ?faces=0 force atlas.';
+  }
+  const eyebrow = document.querySelector('.hero .eyebrow');
+  if (eyebrow) eyebrow.textContent = 'Step 01 · face-mapped interiors · override';
+}
+window.addEventListener('keydown', (e) => {
+  if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+  if (e.key === 'h' || e.key === 'H') {
+    showHud = !showHud;
+    applyHud(showHud);
+  }
+  if (e.key === 'v' || e.key === 'V') {
+    // Walk toggle — handler attached after PointerLock setup (see setWalkMode)
+    window.dispatchEvent(new CustomEvent('noctuary-toggle-walk'));
+  }
+  if (e.key === 't' || e.key === 'T') {
+    window.dispatchEvent(new CustomEvent('noctuary-start-tour'));
+  }
+  if (e.key === 'd' || e.key === 'D') {
+    debugMode = !debugMode;
+    const el = document.getElementById('debug-hud');
+    if (el && !debugMode) el.classList.remove('on');
+  }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    window.dispatchEvent(new CustomEvent('noctuary-props-toss'));
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    window.dispatchEvent(new CustomEvent('noctuary-props-reset'));
+  }
+  if (e.key === 'n' || e.key === 'N') {
+    window.dispatchEvent(new CustomEvent('noctuary-wind-toggle'));
+  }
+  if (e.key === 'g' || e.key === 'G') {
+    window.dispatchEvent(new CustomEvent('noctuary-springs-toggle'));
+  }
+  if (e.key === ',' || e.key === '<') {
+    window.dispatchEvent(new CustomEvent('noctuary-wind-dir', { detail: -1 }));
+  }
+  if (e.key === '.' || e.key === '>') {
+    window.dispatchEvent(new CustomEvent('noctuary-wind-dir', { detail: 1 }));
+  }
+  if (e.key === '[') {
+    window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail: -1 }));
+  }
+  if (e.key === ']') {
+    window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail: 1 }));
+  }
+});
+
+const MOTIFS = ['Harbor', 'Quay', 'Signal'];
+let motifIdx = 0;
+
+const BLOOM_LAYER = 1;
+const bloomLayer = new THREE.Layers();
+bloomLayer.set(BLOOM_LAYER);
+
+// ——— Renderer / scene ———
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+if ('dithering' in renderer) renderer.dithering = false;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.FogExp2(0x05060a, 0.018);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 120);
+camera.position.set(16.5, 10.5, 20.5);
+const ORBIT_FOV = camera.fov;
+const WALK_FOV = 72;
+// Scene units ≠ metres: residential storey ≈ cellH 0.72–1.0, short walk-ups ≈ 2–3 tall.
+// Real eye ≈ 1.7/3.0 of a storey → ~0.55–0.6 here (was 1.7 = mid 2nd floor).
+const EYE_H = 0.58;
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+// minDistance was 8 — blocked street-close fenestra reads (panes stayed mushy/distant).
+controls.minDistance = 0.35;
+controls.maxDistance = 48;
+controls.maxPolarAngle = Math.PI * 0.495;
+controls.target.set(0, 1.6, -2.5);
+controls.update();
+if (freezeMotion) {
+  controls.enableDamping = false;
+  controls.enableRotate = !stillMode;
+}
+
+// Idle auto-orbit (disabled while pointer is down)
+let pointerDown = false;
+let idleOrbit = 0;
+renderer.domElement.addEventListener('pointerdown', () => { pointerDown = true; });
+addEventListener('pointerup', () => { pointerDown = false; });
+addEventListener('pointercancel', () => { pointerDown = false; });
+
+// Lights
+const hemi = new THREE.HemisphereLight(0x8a7bb8, 0x0a0c14, 0.55);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffe6c8, 1.35);
+key.position.set(8, 14, 6);
+scene.add(key);
+const fill = new THREE.PointLight(0xf0c24b, 28, 40, 2);
+fill.position.set(-2, 3.2, 3.2);
+scene.add(fill);
+const violetLamp = new THREE.PointLight(0x8a7bb8, 18, 28, 2);
+violetLamp.position.set(4, 4.5, -6);
+scene.add(violetLamp);
+
+// Pointer (NDC) for water / mist / quay
+const pointer = new THREE.Vector2(0.0, 0.0);
+const pointerSmooth = new THREE.Vector2(0.0, 0.0);
+addEventListener('pointermove', (e) => {
+  pointer.x = (e.clientX / innerWidth) * 2 - 1;
+  pointer.y = -((e.clientY / innerHeight) * 2 - 1);
+});
+
+// ——— Shared GLSL helpers ———
+const NOISE_GLSL = `
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+float hash3(vec3 p){ return fract(sin(dot(p, vec3(127.1,311.7,74.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p); vec2 f = fract(p);
+  float a = hash(i), b = hash(i+vec2(1.,0.));
+  float c = hash(i+vec2(0.,1.)), d = hash(i+vec2(1.,1.));
+  vec2 u = f*f*(3.-2.*f);
+  return mix(a,b,u.x) + (c-a)*u.y*(1.-u.x) + (d-b)*u.x*u.y;
+}
+float fbm(vec2 p){
+  float v=0., a=0.5;
+  for(int i=0;i<4;i++){ v+=a*noise(p); p*=2.02; a*=0.5; }
+  return v;
+}
+`;
+
+// ——— Urban grammar: streets → blocks → lots → buildings (pass 3 + irregular lots p4) ———
+// Hierarchy refs: CityEngine / StreetGen / Purdue procedural; Three.js CityGenerator + SidewalkGenerator;
+// arXiv:1801.05741; mysimulator procedural buildings. Negative space = asphalt corridors.
+const STREET_W = 1.65;
+const SIDEWALK_W = 0.50;
+const CURB_H = 0.09;
+const BLOCK_W = 5.0;   // lot area width (X) inside sidewalks
+const BLOCK_D = 4.4;   // lot area depth (Z)
+const SETBACK = 0.32;
+const GRID_COLS = 5;   // blocks along quay (X)
+const GRID_ROWS = 4;   // blocks toward hinterland (−Z)
+const LOTS_X = 2;
+const LOTS_Z = 2;
+
+const cellW = BLOCK_W + STREET_W;
+const cellD = BLOCK_D + STREET_W;
+const districtW = GRID_COLS * BLOCK_W + (GRID_COLS + 1) * STREET_W;
+const districtD = GRID_ROWS * BLOCK_D + (GRID_ROWS + 1) * STREET_W;
+const gridOriginX = -districtW * 0.5 + STREET_W;
+const gridOriginZ = 1.15; // first block near quay (+Z water), rows march −Z
+
+function blockRect(bx, bz) {
+  const x0 = gridOriginX + bx * cellW;
+  const z1 = gridOriginZ - bz * cellD; // near edge (toward quay / +Z)
+  return { x0, x1: x0 + BLOCK_W, z0: z1 - BLOCK_D, z1 };
+}
+
+// Asphalt shader — wet streaks + dashed centerline (night-readable)
+const asphaltMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uFogColor: { value: new THREE.Color(0x05060a) },
+    uFogDensity: { value: 0.018 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    void main(){
+      vUv = uv;
+      vec4 wp = instanceMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    uniform float uTime;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    ${NOISE_GLSL}
+    void main(){
+      vec3 col = vec3(0.045, 0.048, 0.06);
+      float grain = fbm(vWorldPos.xz * 1.8 + uTime * 0.02);
+      col += grain * 0.03;
+      // wet specular streaks
+      float streak = pow(max(0.0, sin(vWorldPos.x * 3.2 + grain * 2.0 + uTime * 0.15)), 14.0);
+      col += vec3(0.22, 0.28, 0.42) * streak * 0.35;
+      // dashed centerline along longer axis of UV (u along road)
+      float along = vUv.x;
+      float across = abs(vUv.y - 0.5);
+      float dash = step(0.45, fract(along * 14.0));
+      float line = smoothstep(0.06, 0.02, across) * dash;
+      col = mix(col, vec3(0.72, 0.68, 0.42), line * 0.55);
+      // soft curb glow at edges
+      float edge = smoothstep(0.04, 0.0, min(vUv.y, 1.0 - vUv.y));
+      col += vec3(0.08, 0.09, 0.12) * edge;
+      float dist = length(vWorldPos - cameraPosition);
+      float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 12.0);
+      gl_FragColor = vec4(mix(col, uFogColor, clamp(fog, 0.0, 0.88)), 1.0);
+    }
+  `,
+});
+
+// Sidewalk — raised concrete
+const sidewalkMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uFogColor: { value: new THREE.Color(0x05060a) },
+    uFogDensity: { value: 0.018 },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    void main(){
+      vUv = uv;
+      vec4 wp = instanceMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    ${NOISE_GLSL}
+    void main(){
+      vec3 col = vec3(0.14, 0.145, 0.17);
+      float g = fbm(vWorldPos.xz * 4.5);
+      col += g * 0.04;
+      // expansion joints
+      float jx = smoothstep(0.02, 0.0, abs(fract(vUv.x * 5.0) - 0.5) - 0.47);
+      float jz = smoothstep(0.02, 0.0, abs(fract(vUv.y * 3.0) - 0.5) - 0.47);
+      col *= 1.0 - (jx + jz) * 0.12;
+      float dist = length(vWorldPos - cameraPosition);
+      float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 12.0);
+      gl_FragColor = vec4(mix(col, uFogColor, clamp(fog, 0.0, 0.85)), 1.0);
+    }
+  `,
+});
+
+const curbMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2e38, roughness: 0.78, metalness: 0.08,
+});
+
+const roadGeo = new THREE.PlaneGeometry(1, 1);
+const slabGeo = new THREE.BoxGeometry(1, 1, 1);
+slabGeo.translate(0, 0.5, 0);
+
+const ROAD_MAX = 64;
+const SW_MAX = 200;
+const CURB_MAX = 160;
+const roads = new THREE.InstancedMesh(roadGeo, asphaltMat, ROAD_MAX);
+const sidewalks = new THREE.InstancedMesh(slabGeo, sidewalkMat, SW_MAX);
+const curbs = new THREE.InstancedMesh(slabGeo, curbMat, CURB_MAX);
+roads.frustumCulled = false;
+sidewalks.frustumCulled = false;
+curbs.frustumCulled = false;
+
+const dummyR = new THREE.Object3D();
+let roadN = 0, swN = 0, curbN = 0;
+
+function addRoad(cx, cz, len, width, rotY) {
+  if (roadN >= ROAD_MAX) return;
+  dummyR.position.set(cx, 0.015, cz);
+  dummyR.rotation.set(-Math.PI / 2, 0, rotY);
+  // PlaneGeometry: scale.x = len along local X after rot, scale.y = width
+  dummyR.scale.set(len, width, 1);
+  dummyR.updateMatrix();
+  roads.setMatrixAt(roadN++, dummyR.matrix);
+}
+
+function addSidewalk(cx, cz, sx, sz) {
+  if (swN >= SW_MAX) return;
+  dummyR.position.set(cx, 0.03, cz);
+  dummyR.rotation.set(0, 0, 0);
+  dummyR.scale.set(sx, 0.055, sz);
+  dummyR.updateMatrix();
+  sidewalks.setMatrixAt(swN++, dummyR.matrix);
+}
+
+function addCurb(cx, cz, sx, sz) {
+  if (curbN >= CURB_MAX) return;
+  dummyR.position.set(cx, 0.02, cz);
+  dummyR.rotation.set(0, 0, 0);
+  dummyR.scale.set(sx, CURB_H, sz);
+  dummyR.updateMatrix();
+  curbs.setMatrixAt(curbN++, dummyR.matrix);
+}
+
+// Horizontal streets (along X) — GRID_ROWS+1 corridors
+for (let r = 0; r <= GRID_ROWS; r++) {
+  const z = gridOriginZ + STREET_W * 0.5 - r * cellD;
+  const cx = 0;
+  addRoad(cx, z, districtW + 0.4, STREET_W * 0.98, 0);
+  // crosswalk ticks near block corners (simple night dashes perpendicular)
+  for (let c = 0; c <= GRID_COLS; c++) {
+    const x = gridOriginX - STREET_W * 0.5 + c * cellW;
+    // short crosswalk band
+    if (roadN < ROAD_MAX) {
+      dummyR.position.set(x, 0.018, z);
+      dummyR.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
+      dummyR.scale.set(STREET_W * 0.9, 1.1, 1);
+      dummyR.updateMatrix();
+      roads.setMatrixAt(roadN++, dummyR.matrix);
+    }
+  }
+}
+// Vertical streets (along Z)
+for (let c = 0; c <= GRID_COLS; c++) {
+  const x = gridOriginX - STREET_W * 0.5 + c * cellW;
+  const zMid = gridOriginZ - districtD * 0.5 + STREET_W * 0.5;
+  addRoad(x, zMid, districtD + 0.2, STREET_W * 0.98, Math.PI / 2);
+}
+
+// Sidewalks + curbs around each block perimeter
+for (let bz = 0; bz < GRID_ROWS; bz++) {
+  for (let bx = 0; bx < GRID_COLS; bx++) {
+    const b = blockRect(bx, bz);
+    const sw = SIDEWALK_W;
+    // N (+Z, quay-ward), S (−Z), E (+X), W (−X) sidewalk strips outside lot rect
+    addSidewalk((b.x0 + b.x1) * 0.5, b.z1 + sw * 0.5, BLOCK_W + sw * 2, sw);
+    addSidewalk((b.x0 + b.x1) * 0.5, b.z0 - sw * 0.5, BLOCK_W + sw * 2, sw);
+    addSidewalk(b.x0 - sw * 0.5, (b.z0 + b.z1) * 0.5, sw, BLOCK_D);
+    addSidewalk(b.x1 + sw * 0.5, (b.z0 + b.z1) * 0.5, sw, BLOCK_D);
+    // granite curb drop at sidewalk outer edge (toward street)
+    const cw = 0.08;
+    addCurb((b.x0 + b.x1) * 0.5, b.z1 + sw + cw * 0.5, BLOCK_W + sw * 2 + cw * 2, cw);
+    addCurb((b.x0 + b.x1) * 0.5, b.z0 - sw - cw * 0.5, BLOCK_W + sw * 2 + cw * 2, cw);
+    addCurb(b.x0 - sw - cw * 0.5, (b.z0 + b.z1) * 0.5, cw, BLOCK_D + sw * 2);
+    addCurb(b.x1 + sw + cw * 0.5, (b.z0 + b.z1) * 0.5, cw, BLOCK_D + sw * 2);
+  }
+}
+
+// Lot pads — raised block interiors (negative space outside = streets)
+for (let bz = 0; bz < GRID_ROWS; bz++) {
+  for (let bx = 0; bx < GRID_COLS; bx++) {
+    const b = blockRect(bx, bz);
+    addSidewalk((b.x0 + b.x1) * 0.5, (b.z0 + b.z1) * 0.5, BLOCK_W * 0.98, BLOCK_D * 0.98);
+  }
+}
+
+roads.count = roadN;
+sidewalks.count = swN;
+curbs.count = curbN;
+roads.instanceMatrix.needsUpdate = true;
+sidewalks.instanceMatrix.needsUpdate = true;
+curbs.instanceMatrix.needsUpdate = true;
+scene.add(roads);
+scene.add(sidewalks);
+scene.add(curbs);
+
+// ——— Buildings on lots — InstancedMesh + real windows (pass 5 · interior mapping) ———
+// Teachers: van Dongen Interior Mapping (2008); Gotow Part 1; Chandler & Yang procwin;
+// Mapbox building.fragment faux rooms; three-fenestra (rooms behind glass + Fresnel) — implemented in GLSL.
+// Kill sway. Local façade UV from vLocalPos × instance scale. Mullions = opaque wall. Windows = holes + rooms.
+// Pass 7 · atlases wired: room-atlas-occupied-32 (8×4 fenestra) upstairs · shop-atlas ground band.
+const INSTANCE_COUNT = 128;
+const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+boxGeo.translate(0, 0.5, 0);
+
+const buildingMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uFogColor: { value: new THREE.Color(0x05060a) },
+    uFogDensity: { value: 0.018 },
+    uLive: { value: freezeMotion ? 0.0 : 1.0 },
+    uRoomAtlas: { value: null },
+    uShopAtlas: { value: null },
+    uRoomCols: { value: 8.0 },
+    uRoomRows: { value: 4.0 },
+    uRoomCount: { value: 32.0 },
+    uAtlasOn: { value: 0.0 },
+    uFaceMapOn: { value: 0.0 },
+    uFaceBack: { value: null },
+    uFaceLeft: { value: null },
+    uFaceRight: { value: null },
+    uFaceFloor: { value: null },
+    uFaceCeiling: { value: null },
+    uFaceCount: { value: 7.0 },
+    uFaceCols: { value: 4.0 },
+    uFaceRows: { value: 2.0 },
+  },
+  vertexShader: /* glsl */`
+    varying vec3 vColor;
+    varying vec3 vWorldPos;
+    varying vec3 vNormalW;
+    varying vec3 vLocalPos;
+    varying vec3 vLocalNormal;
+    varying vec3 vScale;
+    varying vec3 vCamLocal;
+    varying float vId;
+    void main(){
+      vLocalPos = position;
+      vLocalNormal = normal;
+      vId = float(gl_InstanceID);
+      // Instance scale from matrix columns (local UV locked to massing — never world XZ)
+      vec3 s = vec3(
+        length(vec3(instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2])),
+        length(vec3(instanceMatrix[1][0], instanceMatrix[1][1], instanceMatrix[1][2])),
+        length(vec3(instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2]))
+      );
+      vScale = max(s, vec3(1e-4));
+      mat3 rot = mat3(
+        vec3(instanceMatrix[0][0], instanceMatrix[0][1], instanceMatrix[0][2]) / vScale.x,
+        vec3(instanceMatrix[1][0], instanceMatrix[1][1], instanceMatrix[1][2]) / vScale.y,
+        vec3(instanceMatrix[2][0], instanceMatrix[2][1], instanceMatrix[2][2]) / vScale.z
+      );
+      vec3 translation = instanceMatrix[3].xyz;
+      // Camera in unit-box local space (no sway). GLES1-safe: no transpose()
+      // Local = (dot(worldDelta, axisX), …) then un-scale
+      vec3 worldDelta = cameraPosition - translation;
+      vCamLocal = vec3(dot(worldDelta, rot[0]), dot(worldDelta, rot[1]), dot(worldDelta, rot[2]));
+      vCamLocal /= vScale;
+
+      vec4 world = instanceMatrix * vec4(position, 1.0);
+      vWorldPos = world.xyz;
+      vNormalW = normalize(rot * normal);
+      #ifdef USE_INSTANCING_COLOR
+        vColor = instanceColor;
+      #else
+        vColor = vec3(0.45, 0.55, 0.72);
+      #endif
+      gl_Position = projectionMatrix * viewMatrix * world;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec3 vColor;
+    varying vec3 vWorldPos;
+    varying vec3 vNormalW;
+    varying vec3 vLocalPos;
+    varying vec3 vLocalNormal;
+    varying vec3 vScale;
+    varying vec3 vCamLocal;
+    varying float vId;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    uniform float uTime;
+    uniform float uLive;
+    uniform sampler2D uRoomAtlas;
+    uniform sampler2D uShopAtlas;
+    uniform float uRoomCols;
+    uniform float uRoomRows;
+    uniform float uRoomCount;
+    uniform float uAtlasOn;
+    uniform float uFaceMapOn;
+    uniform sampler2D uFaceBack;
+    uniform sampler2D uFaceLeft;
+    uniform sampler2D uFaceRight;
+    uniform sampler2D uFaceFloor;
+    uniform sampler2D uFaceCeiling;
+    uniform float uFaceCount;
+    uniform float uFaceCols;
+    uniform float uFaceRows;
+    ${NOISE_GLSL}
+
+    // Sample atlas cell (cols×rows). huv in [0,1]. Flip V for image space.
+    vec3 sampleAtlas(sampler2D atlas, float cols, float rows, float idx, vec2 huv) {
+      float n = cols * rows;
+      float id = mod(floor(idx + 0.5), n);
+      float col = mod(id, cols);
+      float row = floor(id / cols);
+      vec2 cellSize = vec2(1.0 / cols, 1.0 / rows);
+      vec2 inset = cellSize * 0.001;
+      vec2 cellOrigin = vec2(col * cellSize.x, 1.0 - (row + 1.0) * cellSize.y) + inset;
+      return texture2D(atlas, cellOrigin + clamp(huv, 0.0, 1.0) * (cellSize - 2.0 * inset)).rgb;
+    }
+
+    // Procedural cavity fallback (atlases off) — classic face colors.
+    vec3 shadeRoomProc(vec3 ro, vec3 rd, float lit, float warmAmt, float shop) {
+      float tMin = 1e5;
+      int face = -1;
+      vec2 huv = vec2(0.0);
+      if (abs(rd.z) > 1e-5) {
+        float t = (1.0 - ro.z) / rd.z;
+        vec3 p = ro + rd * t;
+        if (t > 1e-4 && t < tMin && p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0) {
+          tMin = t; face = 0; huv = p.xy;
+        }
+      }
+      if (abs(rd.y) > 1e-5) {
+        float t = (0.0 - ro.y) / rd.y;
+        vec3 p = ro + rd * t;
+        if (t > 1e-4 && t < tMin && p.x >= 0.0 && p.x <= 1.0 && p.z >= 0.0 && p.z <= 1.0) {
+          tMin = t; face = 1; huv = p.xz;
+        }
+      }
+      if (abs(rd.y) > 1e-5) {
+        float t = (1.0 - ro.y) / rd.y;
+        vec3 p = ro + rd * t;
+        if (t > 1e-4 && t < tMin && p.x >= 0.0 && p.x <= 1.0 && p.z >= 0.0 && p.z <= 1.0) {
+          tMin = t; face = 2; huv = p.xz;
+        }
+      }
+      if (abs(rd.x) > 1e-5) {
+        float t = (0.0 - ro.x) / rd.x;
+        vec3 p = ro + rd * t;
+        if (t > 1e-4 && t < tMin && p.y >= 0.0 && p.y <= 1.0 && p.z >= 0.0 && p.z <= 1.0) {
+          tMin = t; face = 3; huv = p.yz;
+        }
+      }
+      if (abs(rd.x) > 1e-5) {
+        float t = (1.0 - ro.x) / rd.x;
+        vec3 p = ro + rd * t;
+        if (t > 1e-4 && t < tMin && p.y >= 0.0 && p.y <= 1.0 && p.z >= 0.0 && p.z <= 1.0) {
+          tMin = t; face = 4; huv = p.yz;
+        }
+      }
+      vec3 floorLit = mix(vec3(0.22, 0.18, 0.12), vec3(0.42, 0.28, 0.12), warmAmt);
+      floorLit = mix(floorLit, vec3(0.48, 0.32, 0.10), shop);
+      vec3 ceilLit = mix(vec3(0.55, 0.52, 0.42), vec3(0.70, 0.58, 0.32), warmAmt);
+      vec3 wallLit = mix(vec3(0.28, 0.32, 0.42), vec3(0.48, 0.36, 0.22), warmAmt);
+      vec3 col = vec3(0.035, 0.038, 0.05);
+      if (face == 0) col = mix(vec3(0.028, 0.03, 0.042), wallLit * 0.85, lit);
+      else if (face == 1) col = mix(vec3(0.03, 0.032, 0.04), floorLit, lit);
+      else if (face == 2) col = mix(vec3(0.045, 0.048, 0.055), ceilLit, lit);
+      else if (face == 3 || face == 4) col = mix(vec3(0.035, 0.038, 0.05), wallLit, lit);
+      return col;
+    }
+
+
+    // Face-mapped room in ORTHONORMAL metres (Tw/Bw/Nw).
+    // Old path normalized rays in cellW/cellH/cellSpan units — that anisotropic
+    // space bends straight furniture lines on tall shop cells and yawed massing.
+    // camM / originM / box extents are all metres; UV is still 0–1 on each face.
+    // sideMute 0 = full 5-face; 1 = back only (flat cavity sides) — kills concave/convex
+    // wall bow when orbiting corners (double-perspective on side elevations).
+    vec3 shadeFaceMappedRoom(vec3 camM, vec2 localXY, float cellW, float cellH, float depthM, float roomIdx, float sideMute) {
+      vec3 origin = vec3(localXY.x * cellW, localXY.y * cellH, 0.0);
+      vec3 dir = normalize(origin - camM);
+      vec3 invDir = 1.0 / dir;
+      vec3 bmin = vec3(-0.5 * cellW, -0.5 * cellH, -depthM);
+      vec3 bmax = vec3( 0.5 * cellW,  0.5 * cellH,  0.0);
+      vec3 t1 = (bmin - origin) * invDir;
+      vec3 t2 = (bmax - origin) * invDir;
+      vec3 tFar = max(t1, t2);
+      float t = min(min(tFar.x, tFar.y), tFar.z);
+      vec3 hit = origin + dir * max(t, 1e-4);
+
+      float backDist = abs(hit.z + depthM);
+      float leftDist = abs(hit.x + 0.5 * cellW);
+      float rightDist = abs(hit.x - 0.5 * cellW);
+      float floorDist = abs(hit.y + 0.5 * cellH);
+      float ceilDist = abs(hit.y - 0.5 * cellH);
+
+      float best = backDist;
+      int face = 0;
+      if (leftDist < best)  { best = leftDist;  face = 1; }
+      if (rightDist < best) { best = rightDist; face = 2; }
+      if (floorDist < best) { best = floorDist; face = 3; }
+      if (ceilDist < best)  { best = ceilDist;  face = 4; }
+
+      float invW = 1.0 / max(cellW, 1e-4);
+      float invH = 1.0 / max(cellH, 1e-4);
+      float invD = 1.0 / max(depthM, 1e-4);
+      float idx = mod(floor(roomIdx + 0.5), max(uFaceCount, 1.0));
+      vec2 uv;
+      vec3 cavityL = vec3(0.07, 0.075, 0.09);
+      vec3 cavityR = vec3(0.055, 0.06, 0.075);
+      vec3 cavityF = vec3(0.045, 0.042, 0.05);
+      vec3 cavityC = vec3(0.09, 0.09, 0.1);
+      if (face == 0) {
+        uv = clamp(vec2(hit.x * invW, hit.y * invH) + 0.5, 0.0, 1.0);
+        return sampleAtlas(uFaceBack, uFaceCols, uFaceRows, idx, uv);
+      } else if (face == 1) {
+        uv = clamp(vec2(-hit.z * invD, hit.y * invH + 0.5), 0.0, 1.0);
+        vec3 tex = sampleAtlas(uFaceLeft, uFaceCols, uFaceRows, idx, uv);
+        return mix(tex, cavityL, sideMute);
+      } else if (face == 2) {
+        uv = clamp(vec2(hit.z * invD + 1.0, hit.y * invH + 0.5), 0.0, 1.0);
+        vec3 tex = sampleAtlas(uFaceRight, uFaceCols, uFaceRows, idx, uv);
+        return mix(tex, cavityR, sideMute);
+      } else if (face == 3) {
+        uv = clamp(vec2(hit.x * invW + 0.5, -hit.z * invD), 0.0, 1.0);
+        vec3 tex = texture2D(uFaceFloor, uv).rgb * 0.82;
+        return mix(tex, cavityF, sideMute * 0.85);
+      } else {
+        uv = clamp(vec2(hit.x * invW + 0.5, -hit.z * invD), 0.0, 1.0);
+        vec3 tex = texture2D(uFaceCeiling, uv).rgb;
+        return mix(tex, cavityC, sideMute * 0.85);
+      }
+    }
+
+    // Atlas path — FLAT orthographic back-wall sample (Virgil 2026-09-26).
+    // Deep ray-box parallax bowed mullions/furniture into curves at glancing angles.
+    // Pane UV maps 1:1 onto the fenestra cell — furniture lines stay axis-aligned.
+    // Extremely shallow depth cue only via mild vignette, not ray hit.
+    vec3 shadeRoomAtlas(vec2 paneUV, float lit, float shop, float seed) {
+      float glowAmt = clamp(lit, 0.0, 1.0);
+      vec2 huv = clamp(paneUV, 0.0, 1.0);
+      float idx = shop > 0.55
+        ? floor(hash(vec2(seed * 1.7, seed * 0.31)) * 16.0)
+        : floor(hash(vec2(seed * 2.3, seed * 0.19)) * uRoomCount);
+      vec3 tex = shop > 0.55
+        ? sampleAtlas(uShopAtlas, 4.0, 4.0, idx, huv)
+        : sampleAtlas(uRoomAtlas, uRoomCols, uRoomRows, idx, huv);
+      // Mild edge vignette (no lateral parallax) — keeps pot-light rooms readable
+      float vig = 1.0 - 0.12 * pow(max(abs(huv.x - 0.5), abs(huv.y - 0.5)) * 2.0, 2.0);
+      tex *= vig;
+      vec3 dark = tex * 0.10 + vec3(0.01, 0.012, 0.018);
+      vec3 litTex = tex * mix(0.65, 1.15, glowAmt);
+      return mix(dark, litTex, mix(0.18, 1.0, glowAmt));
+    }
+
+    void main(){
+      vec3 N = normalize(vNormalW);
+      vec3 Ln = normalize(vLocalNormal);
+      float ndl = clamp(dot(N, normalize(vec3(0.35, 0.9, 0.2))), 0.0, 1.0);
+      vec3 wallCol = mix(vColor * 0.28, vColor * 0.78, ndl) + vec3(0.035, 0.04, 0.06);
+
+      float isRoof = step(0.7, Ln.y);
+      float isFloor = step(0.7, -Ln.y);
+      float isVert = 1.0 - max(isRoof, isFloor);
+
+      // Local metres on façade (instance scale) — NEVER world-position UV
+      vec3 lpM = vLocalPos * vScale;
+      // Ground-floor shop band in metres (taller cells + warmer interiors)
+      float shopBandM = 2.55;
+      float nearGround = (1.0 - smoothstep(shopBandM * 0.82, shopBandM * 1.08, lpM.y)) * step(0.15, lpM.y);
+
+      // Cell size CONSTANT in metres (Virgil 2026-09-26).
+      // cellW/cellH that vary with height (nearGround mix) bend vertical mullions
+      // into curves — roomUV.x = facadeU/cellW(y) shifts sideways as Y changes.
+      // Same square pitch every floor; shop band only changes interior atlas/warmth.
+      float cellW = 0.76;
+      float cellH = 0.76;
+
+      // Dominant face → façade U along the horizontal tangent, V along height
+      vec3 T, B, D; // tangent, bitangent, inward depth (unit-local)
+      float faceAlong;
+      if (abs(Ln.x) >= abs(Ln.z)) {
+        float sx = sign(Ln.x + 1e-6);
+        T = vec3(0.0, 0.0, -sx);
+        B = vec3(0.0, 1.0, 0.0);
+        D = vec3(-sx, 0.0, 0.0);
+        faceAlong = lpM.z; // metres along Z on ±X façades
+      } else {
+        float sz = sign(Ln.z + 1e-6);
+        T = vec3(sz, 0.0, 0.0);
+        B = vec3(0.0, 1.0, 0.0);
+        D = vec3(0.0, 0.0, -sz);
+        faceAlong = lpM.x;
+      }
+
+      float facadeU = faceAlong;
+      float facadeV = lpM.y;
+      vec2 roomUV = vec2(facadeU / cellW, facadeV / cellH);
+      vec2 cell = floor(roomUV);
+      vec2 f = fract(roomUV);
+
+      // Mullions / frames — dark opaque bands; window = hole, not glow sticker
+      float mullU = mix(0.14, 0.11, nearGround);
+      float mullV = mix(0.16, 0.12, nearGround);
+      float inPane = step(mullU, f.x) * step(f.x, 1.0 - mullU)
+                   * step(mullV, f.y) * step(f.y, 1.0 - mullV);
+      // Keep clear of roof/plinth edge
+      inPane *= step(0.12, lpM.y) * step(lpM.y, vScale.y - 0.18);
+      inPane *= isVert;
+      // Corner conflict: façade-local rooms reorient on adjacent faces.
+      // Kill ~1.5 bays at each vertical edge (hard), then soft-fade another half bay
+      // so the last lit pane does not snap. Opaque pier reads as structure.
+      float halfAlong = (abs(Ln.x) >= abs(Ln.z)) ? (0.5 * vScale.z) : (0.5 * vScale.x);
+      float edgeDistM = halfAlong - abs(faceAlong);
+      // Thin opaque pier — hard kill; short soft fade (long soft fades smeared mullions into arcs).
+      float edgeKillM = max(0.42 * cellW, 0.28);
+      float edgeSoftM = edgeKillM + 0.18 * cellW;
+      inPane *= step(edgeKillM, edgeDistM);
+      float edgeFade = smoothstep(edgeKillM, edgeSoftM, edgeDistM);
+
+      // Frame / mullion bands — opaque wall structure between panes
+      float frameBand = isVert * (1.0 - step(mullU * 0.55, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))));
+      vec3 mullionCol = vColor * 0.12 + vec3(0.015, 0.016, 0.022);
+      vec3 body = mix(wallCol, mullionCol, frameBand * 0.92);
+
+      // Shared 3D room seed (building-local) — same volume from +X or +Z.
+      // Keep 2D cell/f/pane for façade mullion grid only.
+      float cellX = floor(lpM.x / cellW);
+      float cellY = floor(lpM.y / cellH);
+      float cellZ = floor(lpM.z / cellW);
+      vec3 roomCell = vec3(cellX, cellY, cellZ);
+      float h0 = hash3(roomCell + vec3(vId * 0.17, vId * 0.09, vId * 0.05));
+      float h1 = hash3(roomCell * 1.61 + vec3(vId * 0.31, 19.3, 7.2));
+      float h2 = hash3(roomCell + vec3(7.1 + vId * 0.05, 3.7, 11.3));
+      float warmAmt = smoothstep(0.35, 0.75, vColor.r);
+      float coolAmt = smoothstep(0.35, 0.7, vColor.b);
+      float litThresh = mix(0.48, 0.30, warmAmt);
+      litThresh = mix(litThresh, 0.46, coolAmt * 0.55);
+      litThresh = mix(litThresh, 0.16, nearGround * 0.9);
+      float lit = step(litThresh, h0);
+      float flickerGate = step(0.93, h1);
+      float flicker = 1.0 - flickerGate * uLive * (0.25 + 0.55 * (0.5 + 0.5 * sin(uTime * (1.4 + h1 * 2.2) + h0 * 6.28)));
+      float shiftGate = step(0.90, h2);
+      float shiftWave = 0.5 + 0.5 * sin(uTime * 0.12 + h0 * 12.0 + vId);
+      float litLive = mix(lit, mix(lit, 1.0 - lit, shiftWave), shiftGate * uLive);
+      float glow = litLive * flicker;
+
+      // Interior mapping when in pane
+      vec3 interior = body;
+      if (inPane > 0.5) {
+        // Remap pane fract to [0,1] excluding mullion margins
+        vec2 pane = (f - vec2(mullU, mullV)) / (vec2(1.0) - 2.0 * vec2(mullU, mullV));
+        pane = clamp(pane, 0.0, 1.0);
+
+        // Stable room frame = instance-local T/B/D (yaw=0). World Tw=cross(up,N)
+        // flips near corners and makes virtual walls read concave/convex while orbiting.
+        vec2 localXY = pane - 0.5;
+        vec3 dM = (vCamLocal - vLocalPos) * vScale; // metres, frag → camera
+        // Camera in room space relative to pane center (frag room-xy + offset to cam)
+        vec3 camM = vec3(dot(dM, T), dot(dM, B), max(-dot(dM, D), 0.08))
+                  + vec3(localXY.x * cellW, localXY.y * cellH, 0.0);
+        float cellSpan = mix(cellW, cellH, 0.5);
+        // Shallower box — deep rooms exaggerate wall bow at glancing angles
+        float depthM = mix(0.78, 1.05, nearGround);
+        vec3 camLocal = vec3(camM.x / cellW, camM.y / cellH, camM.z / cellSpan);
+        float roomDepth = depthM / cellSpan;
+
+        // Head-on mid-façade: full 5-face. Near corner / glancing: back atlas only + damp lateral parallax.
+        vec3 Vearly = normalize(cameraPosition - vWorldPos);
+        float facing = max(dot(normalize(vNormalW), Vearly), 0.0);
+        float sideMute = 0.0;
+        if (edgeDistM < 1.1 * cellW || facing < 0.40) {
+          sideMute = 1.0;
+        }
+        // Crush sideways room parallax at glancing angles (bow kill without blanking panes)
+        camM.x *= mix(0.12, 1.0, clamp(facing * 1.4, 0.0, 1.0));
+
+        if (uFaceMapOn > 0.5) {
+          float roomIdx = floor(h0 * uFaceCount);
+          float distW = length(cameraPosition - vWorldPos);
+          float lodFlat = smoothstep(16.0, 36.0, distW); // 0=near full, 1=far flat impostor
+          vec2 paneUV = clamp(pane, 0.0, 1.0);
+          vec3 faceCol;
+          if (lodFlat < 0.97) {
+            faceCol = shadeFaceMappedRoom(camM, localXY, cellW, cellH, depthM, roomIdx, sideMute);
+            vec3 flatCol = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, roomIdx, paneUV);
+            faceCol = mix(faceCol, flatCol, lodFlat);
+          } else {
+            faceCol = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, roomIdx, paneUV);
+          }
+          vec3 faceDark = faceCol * 0.07 + vec3(0.008, 0.01, 0.015);
+          vec3 faceLit = faceCol * mix(0.5, 1.0, glow);
+          interior = mix(faceDark, faceLit, mix(0.12, 1.0, glow));
+          // Soft edge pier: blend toward solid body before hard kill
+          interior = mix(body, interior, edgeFade);
+        } else if (uAtlasOn > 0.5) {
+          // Flat ortho fenestra sample — no ray-box bow
+          interior = shadeRoomAtlas(pane, glow, nearGround, h0 + vId * 0.13);
+          interior = mix(body, interior, edgeFade);
+        } else {
+          vec3 rayDirM = normalize((vLocalPos - vCamLocal) * vScale);
+          float into = max(dot(rayDirM, D), 0.02);
+          float roomDepthM = depthM;
+          vec3 rd = normalize(vec3(
+            dot(rayDirM, T) / cellW,
+            dot(rayDirM, B) / cellH,
+            into / roomDepthM
+          ));
+          vec3 ro = vec3(pane.x, pane.y, 0.001);
+          if (rd.z > 0.015) {
+            interior = shadeRoomProc(ro, rd, glow, warmAmt, nearGround);
+          } else {
+            interior = mix(vec3(0.02, 0.022, 0.03), vec3(0.12, 0.1, 0.06) * glow, 0.3);
+          }
+        }
+
+        // Glass: Fresnel at grazing. Atlas path keeps head-on almost pure fenestra
+        // (no ray-box warp to hide) so rooms stay sharp and rectilinear.
+        vec3 V = normalize(cameraPosition - vWorldPos);
+        float fres = pow(1.0 - max(dot(N, V), 0.0), 2.85);
+        fres = max(fres, (1.0 - edgeFade) * 0.35);
+        vec3 skyTint = vec3(0.12, 0.16, 0.28);
+        vec3 streetTint = vec3(0.18, 0.14, 0.08);
+        vec3 glassRefl = mix(streetTint, skyTint, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+        glassRefl += vec3(0.08, 0.07, 0.12) * fres;
+        float spec = pow(max(dot(reflect(-V, N), normalize(vec3(0.35, 0.9, 0.2))), 0.0), 48.0);
+        glassRefl += vec3(0.55, 0.6, 0.75) * spec * 0.18;
+
+        float atlasPath = step(0.5, uAtlasOn) * (1.0 - step(0.5, uFaceMapOn));
+        // Atlas: barely dim head-on; Face/proc: stronger hide-warp behaviour
+        interior *= (1.0 - fres * mix(0.45, 0.22, atlasPath));
+        float glassMix = mix(mix(0.02, 0.01, atlasPath), mix(0.88, 0.72, atlasPath), fres);
+        vec3 glass = mix(interior, glassRefl, glassMix);
+        glass = mix(glass, interior, glow * mix(0.55, 0.72, atlasPath) * (1.0 - fres * 0.9));
+        body = glass;
+      }
+
+      // Soft roof wash
+      body = mix(body, vColor * 0.20 + vec3(0.03, 0.035, 0.05), isRoof * 0.88);
+      body = mix(body, vColor * 0.16, isFloor * 0.9);
+
+      float rim = pow(1.0 - max(dot(N, normalize(cameraPosition - vWorldPos)), 0.0), 2.8);
+      body += vec3(0.28, 0.24, 0.48) * rim * 0.08 * isVert * (1.0 - inPane);
+
+      float dist = length(vWorldPos - cameraPosition);
+      float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 12.0);
+      vec3 col = mix(body, uFogColor, clamp(fog, 0.0, 0.85));
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+
+const mesh = new THREE.InstancedMesh(boxGeo, buildingMat, INSTANCE_COUNT);
+
+// ——— Atlas textures (fenestra occupied-32 residential · 16 shop) ———
+const atlasLoader = new THREE.TextureLoader();
+const atlasBase = new URL('./06-intermediate-assets/', import.meta.url);
+function prepAtlas(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  // No mip chain — glancing/upward panes were streaking into horizontal mush via mips.
+  // Anisotropy unused without mips; Linear keeps fenestra furniture lines crisp.
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+function prepFace(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function wireRoomShopAtlases(roomTex, shopTex, cols, rows, count) {
+  buildingMat.uniforms.uRoomAtlas.value = prepAtlas(roomTex);
+  buildingMat.uniforms.uShopAtlas.value = prepAtlas(shopTex);
+  buildingMat.uniforms.uRoomCols.value = cols;
+  buildingMat.uniforms.uRoomRows.value = rows;
+  buildingMat.uniforms.uRoomCount.value = count;
+  buildingMat.uniforms.uAtlasOn.value = 1.0;
+  buildingMat.needsUpdate = true;
+}
+async function loadHarborAtlases() {
+  // Default: fenestra occupied-32 (8×4). Fallback: locked room-atlas.png (4×4).
+  // room-atlas-48.png is NOT the approved upstairs sheet.
+  try {
+    const [roomTex, shopTex] = await Promise.all([
+      atlasLoader.loadAsync(new URL('room-atlas-occupied-32.png', atlasBase).href),
+      atlasLoader.loadAsync(new URL('shop-atlas.png', atlasBase).href),
+    ]);
+    wireRoomShopAtlases(roomTex, shopTex, 8.0, 4.0, 32.0);
+  } catch (err) {
+    console.warn('Harbor occupied-32 load failed — trying room-atlas.png', err);
+    try {
+      const [roomTex, shopTex] = await Promise.all([
+        atlasLoader.loadAsync(new URL('room-atlas.png', atlasBase).href),
+        atlasLoader.loadAsync(new URL('shop-atlas.png', atlasBase).href),
+      ]);
+      wireRoomShopAtlases(roomTex, shopTex, 4.0, 4.0, 16.0);
+    } catch (e2) {
+      console.warn('Harbor atlas load failed — procedural interiors remain', e2);
+    }
+  }
+}
+
+if (facesMode) {
+  const faceBase = new URL('./06-intermediate-assets/face-proto/', import.meta.url);
+  Promise.all([
+    atlasLoader.loadAsync(new URL('face-back-atlas.png', faceBase).href),
+    atlasLoader.loadAsync(new URL('face-left-atlas.png', faceBase).href),
+    atlasLoader.loadAsync(new URL('face-right-atlas.png', faceBase).href),
+    atlasLoader.loadAsync(new URL('face-floor.png', faceBase).href),
+    atlasLoader.loadAsync(new URL('face-ceiling.png', faceBase).href),
+  ]).then(([back, left, right, floor, ceil]) => {
+    buildingMat.uniforms.uFaceBack.value = prepFace(back);
+    buildingMat.uniforms.uFaceLeft.value = prepFace(left);
+    buildingMat.uniforms.uFaceRight.value = prepFace(right);
+    buildingMat.uniforms.uFaceFloor.value = prepFace(floor);
+    buildingMat.uniforms.uFaceCeiling.value = prepFace(ceil);
+    buildingMat.uniforms.uFaceCount.value = 7.0;
+    buildingMat.uniforms.uFaceCols.value = 4.0;
+    buildingMat.uniforms.uFaceRows.value = 2.0;
+    buildingMat.uniforms.uFaceMapOn.value = 1.0;
+    buildingMat.uniforms.uAtlasOn.value = 0.0;
+    buildingMat.needsUpdate = true;
+  }).catch((err) => {
+    console.warn('Harbor face-map load failed — falling back to atlas', err);
+    loadHarborAtlases();
+  });
+} else {
+  loadHarborAtlases();
+}
+
+mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+const dummy = new THREE.Object3D();
+const warm = new THREE.Color(0xc47a4a);
+const cool = new THREE.Color(0x6e8fb5);
+const violet = new THREE.Color(0x8a7bb8);
+const gold = new THREE.Color(0xf0c24b);
+const teal = new THREE.Color(0x3a6e78);
+const tmpC = new THREE.Color();
+
+// Rectilinear district massing only (Virgil 2026-09-26): unit BoxGeometry × scale.
+// No yaw / chamfer / cylinder silhouettes — planar façades so local UV + room/shop atlas stay square.
+function placeBuilding(x, z, w, h, d, color, _yawIgnored) {
+  if (placed >= INSTANCE_COUNT) return false;
+  // Snap tiny footprints up so pencil towers never read as curved posts
+  const MIN_FACE = 0.72;
+  w = Math.max(w, MIN_FACE);
+  d = Math.max(d, MIN_FACE);
+  // Soft aspect clamp — avoid blade-thin silhouettes that orbit as cylinders
+  if (w / d > 2.4) w = d * 2.4;
+  if (d / w > 2.4) d = w * 2.4;
+  dummy.position.set(x, 0, z);
+  dummy.scale.set(w, h, d);
+  dummy.rotation.set(0, 0, 0); // axis-aligned; faces stay planar for window cells
+  dummy.updateMatrix();
+  mesh.setMatrixAt(placed, dummy.matrix);
+  mesh.setColorAt(placed, color);
+  placed++;
+  return true;
+}
+
+let placed = 0;
+// Seeded PRNG — stable stills / accretion feel without pure Euclidean packing
+function mulberry32(a) {
+  return function () {
+    let t = (a += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry32(0x48415234); // HAR4
+const rng = (a, b) => a + rand() * (b - a);
+
+// Plaza / parking scar pads (empty lots) — darker lot fills
+const scarMat = new THREE.MeshStandardMaterial({
+  color: 0x12151c, roughness: 0.92, metalness: 0.06,
+});
+const scars = new THREE.InstancedMesh(slabGeo, scarMat, 48);
+scars.frustumCulled = false;
+let scarN = 0;
+function addScar(cx, cz, sx, sz) {
+  if (scarN >= 48) return;
+  dummy.position.set(cx, 0.045, cz);
+  dummy.rotation.set(0, 0, 0);
+  dummy.scale.set(sx, 0.04, sz);
+  dummy.updateMatrix();
+  scars.setMatrixAt(scarN++, dummy.matrix);
+}
+
+// Irregular lots: still roads→blocks→lots, but empty / merged / organic heights (pass 4)
+for (let bz = 0; bz < GRID_ROWS; bz++) {
+  for (let bx = 0; bx < GRID_COLS; bx++) {
+    const b = blockRect(bx, bz);
+    const lotW = (BLOCK_W - SETBACK * (LOTS_X + 1)) / LOTS_X;
+    const lotD = (BLOCK_D - SETBACK * (LOTS_Z + 1)) / LOTS_Z;
+    const nearQuay = bz === 0;
+    const hinter = bz >= GRID_ROWS - 1;
+
+    // Slot plan: 2×2; mark empty or merge
+    // slot state: 1 = build, 0 = empty scar, 2 = consumed by merge
+    const slot = [[1, 1], [1, 1]];
+    const roll = rand();
+    if (roll < 0.16) {
+      // empty plaza / parking scar — clear 1–2 lots
+      const elx = Math.floor(rand() * LOTS_X);
+      const elz = Math.floor(rand() * LOTS_Z);
+      slot[elz][elx] = 0;
+      if (rand() < 0.45) slot[elz][1 - elx] = 0;
+    } else if (roll < 0.38) {
+      // merge two lots along X into one double-width low building
+      const mz = Math.floor(rand() * LOTS_Z);
+      slot[mz][0] = 3; // merge anchor
+      slot[mz][1] = 2; // consumed
+    } else if (roll < 0.48) {
+      // merge along Z (depth)
+      const mx = Math.floor(rand() * LOTS_X);
+      slot[0][mx] = 4;
+      slot[1][mx] = 2;
+    }
+
+    // No skewLot / yaw — rectilinear boxes only (curves broke atlas window reads).
+
+    for (let lz = 0; lz < LOTS_Z; lz++) {
+      for (let lx = 0; lx < LOTS_X; lx++) {
+        const st = slot[lz][lx];
+        const lx0 = b.x0 + SETBACK + lx * (lotW + SETBACK);
+        const lz0 = b.z0 + SETBACK + lz * (lotD + SETBACK);
+
+        if (st === 0) {
+          addScar(lx0 + lotW * 0.5, lz0 + lotD * 0.5, lotW * 0.92, lotD * 0.92);
+          continue;
+        }
+        if (st === 2) continue;
+
+        let footprintW, footprintD, cx, cz, hBias;
+        // Discrete footprint scales (planar box silhouettes — no organic jitter that reads curved)
+        const FW = [0.70, 0.78, 0.85, 0.92];
+        const FD = [0.68, 0.76, 0.84, 0.90];
+        const fw = FW[Math.floor(rand() * FW.length)];
+        const fd = FD[Math.floor(rand() * FD.length)];
+        if (st === 3) {
+          // double-width along X, low shop/warehouse
+          footprintW = lotW * 2 + SETBACK;
+          footprintD = lotD * fd;
+          cx = lx0 + (lotW * 2 + SETBACK) * 0.5;
+          cz = lz0 + lotD * 0.5;
+          hBias = 'low';
+        } else if (st === 4) {
+          footprintW = lotW * fw;
+          footprintD = lotD * 2 + SETBACK;
+          cx = lx0 + lotW * 0.5;
+          cz = lz0 + (lotD * 2 + SETBACK) * 0.5;
+          hBias = 'low';
+        } else {
+          footprintW = lotW * fw;
+          footprintD = lotD * fd;
+          cx = lx0 + lotW * 0.5;
+          cz = lz0 + lotD * 0.5;
+          hBias = 'normal';
+        }
+
+        // Organic height variance — short shop next to tall neighbor
+        let h;
+        const hRoll = rand();
+        if (hBias === 'low') {
+          h = rng(1.35, 2.85);
+        } else if (hRoll < 0.2) {
+          h = rng(1.25, 2.55); // short shop / walk-up
+        } else if (hRoll < 0.32) {
+          h = nearQuay ? rng(7.2, 11.2) : rng(6.5, 10.5); // tall neighbor
+        } else if (nearQuay) {
+          h = rng(3.0, 8.2);
+        } else if (hinter) {
+          h = rng(2.2, 6.6);
+        } else {
+          h = rng(2.6, 9.2);
+        }
+
+        const pick = rand();
+        let c;
+        if (hBias === 'low' || h < 2.7) {
+          // ground-ish massing leans warm (shops / bars suggested by light only)
+          c = pick > 0.4 ? tmpC.copy(warm).multiplyScalar(rng(0.8, 1))
+            : pick > 0.2 ? tmpC.copy(gold).multiplyScalar(0.7)
+            : tmpC.copy(violet).multiplyScalar(0.85);
+        } else if (nearQuay) {
+          c = pick > 0.55 ? tmpC.copy(warm).multiplyScalar(rng(0.75, 1))
+            : pick > 0.3 ? tmpC.copy(gold).multiplyScalar(0.65)
+            : tmpC.copy(cool);
+        } else if (hinter) {
+          c = pick > 0.5 ? tmpC.copy(cool).multiplyScalar(0.85)
+            : pick > 0.25 ? tmpC.copy(violet).multiplyScalar(0.9)
+            : tmpC.copy(teal);
+        } else {
+          c = pick > 0.7 ? tmpC.copy(gold).multiplyScalar(0.68)
+            : pick > 0.45 ? cool : pick > 0.22 ? violet : teal;
+          c = tmpC.copy(c);
+        }
+
+        // Axis-aligned box only — planar façades for local UV / occupied-32 + shop atlas.
+        placeBuilding(cx, cz, footprintW, h, footprintD, c, 0);
+      }
+    }
+  }
+}
+
+// Pier / quay edge sheds (between sidewalk and water) — warm small massing
+for (let i = 0; i < 14 && placed < INSTANCE_COUNT; i++) {
+  const x = gridOriginX + 0.6 + i * ((BLOCK_W + STREET_W) * GRID_COLS / 14);
+  const z = gridOriginZ + STREET_W + SIDEWALK_W + rng(0.3, 1.1);
+  placeBuilding(x, z, rng(0.55, 1.05), rng(1.1, 2.8), rng(0.5, 0.95),
+    rand() > 0.4 ? warm : violet, 0);
+}
+
+// 360° hinterland wrap — extra row + side wings so orbit never faces void
+const rearZ = gridOriginZ - GRID_ROWS * cellD - STREET_W * 0.2;
+for (let i = 0; i < 16 && placed < INSTANCE_COUNT; i++) {
+  const x = -districtW * 0.45 + i * (districtW * 0.9 / 15) + rng(-0.2, 0.2);
+  const z = rearZ - rng(1.2, 3.8);
+  const h = rng(2.0, 7.5);
+  const c = rand() > 0.45 ? tmpC.copy(cool).multiplyScalar(0.8)
+    : tmpC.copy(violet).multiplyScalar(0.85);
+  placeBuilding(x, z, rng(0.7, 1.6), h, rng(0.7, 1.5), c, 0);
+}
+// Side wings (±X)
+for (let side = -1; side <= 1; side += 2) {
+  for (let i = 0; i < 8 && placed < INSTANCE_COUNT; i++) {
+    const x = side * (districtW * 0.5 + rng(0.8, 2.4));
+    const z = gridOriginZ - rng(0.5, districtD - 1);
+    placeBuilding(x, z, rng(0.65, 1.4), rng(2.2, 7.2), rng(0.65, 1.35),
+      tmpC.copy(side > 0 ? teal : cool).multiplyScalar(0.82), 0);
+  }
+}
+
+// Fill remaining budget with hinterland scatter (still on negative-Z massing belt)
+while (placed < INSTANCE_COUNT) {
+  const x = rng(-districtW * 0.55, districtW * 0.55);
+  const z = rearZ - rng(0.5, 6.5);
+  placeBuilding(x, z, rng(0.55, 1.3), rng(1.6, 6.5), rng(0.55, 1.2),
+    tmpC.copy(rand() > 0.5 ? cool : violet).multiplyScalar(0.78), 0);
+}
+
+scars.count = scarN;
+scars.instanceMatrix.needsUpdate = true;
+scene.add(scars);
+
+mesh.count = INSTANCE_COUNT;
+mesh.instanceMatrix.needsUpdate = true;
+if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+scene.add(mesh);
+mesh.frustumCulled = false;
+mesh.computeBoundingSphere();
+window.__harborBuildings = (() => {
+  const list = [];
+  const m = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  const s = new THREE.Vector3();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  for (let i = 0; i < placed; i++) {
+    mesh.getMatrixAt(i, m);
+    m.decompose(p, q, s);
+    e.setFromQuaternion(q, 'YXZ');
+    list.push({ i, x: p.x, y: p.y, z: p.z, w: s.x, h: s.y, d: s.z, yaw: e.y });
+  }
+  return list;
+})();
+
+// ——— Ground / district pad (under streets; darker than asphalt) ———
+// Stop at quay/seawall — do NOT cover the outboard basin (was Plane 90×70 @ z=-4
+// spanning to z≈+31, which hid the water plane under an opaque pad).
+const GROUND_Z_MAX = 5.35; // under quay edge, landward of SEAWALL_Z≈5.42
+const GROUND_Z_MIN = -40;
+const groundDepth = GROUND_Z_MAX - GROUND_Z_MIN;
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(90, groundDepth),
+  new THREE.MeshStandardMaterial({ color: 0x080a12, roughness: 0.94, metalness: 0.04 })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.position.set(0, -0.04, (GROUND_Z_MAX + GROUND_Z_MIN) * 0.5);
+scene.add(ground);
+
+// ——— Hero quay slab — wet specular + fake skyline reflection ———
+const quayMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uPointer: { value: new THREE.Vector2(0, 0) },
+    uAmp: { value: freezeMotion ? 0 : 0.1 },
+  },
+  vertexShader: /* glsl */`
+    uniform float uTime;
+    uniform float uAmp;
+    uniform vec2 uPointer;
+    varying vec2 vUv;
+    varying vec3 vPos;
+    varying vec3 vWorldPos;
+    ${NOISE_GLSL}
+    void main(){
+      vUv = uv;
+      vec3 p = position;
+      float n = fbm(uv * 4.0 + uTime * 0.15);
+      p.z += n * uAmp;
+      p.z += sin(uv.x * 12.0 + uTime) * uAmp * 0.35;
+      vec2 d = uv - (uPointer * 0.5 + 0.5);
+      float rip = exp(-dot(d,d)*6.5) * uAmp * 2.2;
+      p.z += rip;
+      vPos = p;
+      vec4 wp = modelMatrix * vec4(p, 1.0);
+      vWorldPos = wp.xyz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform float uTime;
+    uniform vec2 uPointer;
+    varying vec2 vUv;
+    varying vec3 vPos;
+    varying vec3 vWorldPos;
+    ${NOISE_GLSL}
+    void main(){
+      vec3 stone = vec3(0.08, 0.09, 0.13);
+      float grain = fbm(vUv * 18.0 + uTime * 0.05);
+      stone += grain * 0.045;
+      // plank / seam lines along quay
+      float seam = smoothstep(0.02, 0.0, abs(fract(vUv.x * 14.0) - 0.5) - 0.46);
+      stone *= 1.0 - seam * 0.18;
+      float edge = smoothstep(0.025, 0.0, min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y)));
+      stone = mix(stone, vec3(0.35, 0.3, 0.18), edge * 0.25);
+      float wash = fbm(vUv * 3.0 - uPointer * 0.2);
+      stone = mix(stone, vec3(0.54, 0.48, 0.72) * 0.38, wash * 0.32);
+      // Wet deck — kept dim so grazing camera + bloom never wash to white sheet
+      vec3 V = normalize(cameraPosition - vWorldPos);
+      float ndotv = max(dot(vec3(0.,1.,0.), V), 0.0);
+      float fres = pow(1.0 - ndotv, 3.0) * smoothstep(0.08, 0.35, ndotv); // kill edge-on blowout
+      float streak = pow(max(0.0, sin(vUv.x * 40.0 + fbm(vUv * 6.0) * 3.0 + uTime * 0.2)), 14.0);
+      streak *= smoothstep(0.2, 0.55, vUv.y);
+      vec3 wet = vec3(0.22, 0.28, 0.4) * streak * fres * 0.22;
+      float skyline = pow(max(0.0, sin(vUv.x * 22.0) * 0.5 + 0.5), 5.0);
+      skyline *= smoothstep(0.08, 0.3, vUv.y) * (1.0 - smoothstep(0.5, 0.9, vUv.y));
+      vec3 refl = vec3(0.35, 0.4, 0.55) * skyline * 0.08;
+      vec3 col = clamp(stone + wet + refl, 0.0, 0.35); // hard ceiling — asphalt, not floodlight
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+const quay = new THREE.Mesh(new THREE.PlaneGeometry(22, 6, 80, 40), quayMat);
+quay.rotation.x = -Math.PI / 2;
+quay.position.set(0, 0.04, 2.4);
+scene.add(quay);
+
+// ——— Water — Gerstner + Beer-Lambert + Schlick + lantern specular (from water lesson) ———
+// Placement locks unchanged: WATER_NEAR_Z outboard of seawall, Y below deck, dry quay.
+const WATER_W = 24.0;
+const WATER_D = 22.0;
+const WATER_NEAR_Z = 5.92; // past SEAWALL_Z≈5.42 + half-thickness 0.11
+const WATER_Y = -0.38;
+const WATER_WALL_Z = 5.42; // matches SEAWALL_Z below — foam/depth cue
+const WATER_AMP = freezeMotion ? 0.0 : 0.045;
+
+const waterMat = new THREE.ShaderMaterial({
+  lights: false,
+  uniforms: {
+    uTime: { value: 0 },
+    uDepth: { value: 1 },
+    uFresnel: { value: 1 },
+    uFoam: { value: 1 },
+    uReflect: { value: 1 },
+    uAmp: { value: WATER_AMP },
+    uWallZ: { value: WATER_WALL_Z },
+    uWaterY: { value: WATER_Y },
+    uLampA: { value: new THREE.Vector3(-4.8, 1.55, 3.85) },
+    uLampB: { value: new THREE.Vector3(4.8, 1.55, 3.85) },
+    uKeyDir: { value: new THREE.Vector3(0.35, 0.9, 0.2).normalize() },
+    uCamPos: { value: new THREE.Vector3() },
+  },
+  vertexShader: /* glsl */`
+    uniform float uTime;
+    uniform float uAmp;
+    uniform float uWallZ;
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    varying vec3 vWorldN;
+    varying float vCrest;
+    varying float vDepthHint;
+
+    void gerstner(
+      vec2 xz, float dx, float dz, float steep, float amp, float len, float speed, float phase,
+      inout vec3 disp, inout vec3 tang, inout vec3 binorm
+    ){
+      float k = 6.28318530718 / max(len, 0.001);
+      vec2 d = normalize(vec2(dx, dz));
+      float f = k * (dot(d, xz) - speed * uTime) + phase;
+      float s = sin(f);
+      float c = cos(f);
+      float qa = steep * amp;
+      disp.x += d.x * qa * c;
+      disp.y += d.y * qa * c;
+      disp.z += amp * s;
+      tang.x  += -d.x * d.x * steep * s;
+      tang.y  += -d.x * d.y * steep * s;
+      tang.z  +=  d.x * k * amp * c;
+      binorm.x += -d.x * d.y * steep * s;
+      binorm.y += -d.y * d.y * steep * s;
+      binorm.z +=  d.y * k * amp * c;
+    }
+
+    void main(){
+      vUv = uv;
+      vec3 p = position;
+      vec3 disp = vec3(0.0);
+      vec3 tang = vec3(1.0, 0.0, 0.0);
+      vec3 binorm = vec3(0.0, 1.0, 0.0);
+      vec2 xz = p.xy;
+
+      float a = uAmp;
+      // Slightly longer wavelengths for Harbor's wider basin
+      gerstner(xz,  1.00,  0.35, 0.32, a * 0.95, 4.20, 0.48, 0.0, disp, tang, binorm);
+      gerstner(xz, -0.55,  1.00, 0.28, a * 0.58, 2.40, 0.65, 1.3, disp, tang, binorm);
+      gerstner(xz,  0.40, -0.85, 0.40, a * 0.32, 1.35, 0.85, 2.1, disp, tang, binorm);
+      gerstner(xz,  0.90,  0.70, 0.22, a * 0.18, 0.75, 1.20, 0.7, disp, tang, binorm);
+
+      p += disp;
+      vCrest = clamp(disp.z / max(a * 1.8, 0.0001), 0.0, 1.0);
+
+      vec3 nLocal = normalize(cross(tang, binorm));
+      if (nLocal.z < 0.0) nLocal = -nLocal;
+
+      vec4 wp = modelMatrix * vec4(p, 1.0);
+      vWorldPos = wp.xyz;
+      vWorldN = normalize(mat3(modelMatrix) * nLocal);
+      // Depth outboard of seawall (world +Z)
+      vDepthHint = max(0.0, vWorldPos.z - uWallZ);
+
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform float uDepth, uFresnel, uFoam, uReflect, uWallZ, uWaterY, uTime, uAmp;
+    uniform vec3 uLampA, uLampB, uKeyDir, uCamPos;
+    varying vec2 vUv;
+    varying vec3 vWorldPos;
+    varying vec3 vWorldN;
+    varying float vCrest;
+    varying float vDepthHint;
+
+    float hash(vec2 p){
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+    float noise(vec2 p){
+      vec2 i = floor(p); vec2 f = fract(p);
+      float a = hash(i);
+      float b = hash(i + vec2(1.0, 0.0));
+      float c = hash(i + vec2(0.0, 1.0));
+      float d = hash(i + vec2(1.0, 1.0));
+      vec2 u = f * f * (3.0 - 2.0 * f);
+      return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+    }
+    float fbm(vec2 p){
+      float v = 0.0; float a = 0.5;
+      for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.05; a *= 0.5; }
+      return v;
+    }
+    float schlick(float cosTheta, float F0){
+      return F0 + (1.0 - F0) * pow(1.0 - clamp(cosTheta, 0.0, 1.0), 5.0);
+    }
+
+    void main(){
+      vec3 N = normalize(vWorldN);
+      float ampK = clamp(uAmp / 0.045, 0.0, 1.0);
+      N = normalize(mix(vec3(0.0, 1.0, 0.0), N, ampK));
+      vec2 np = vWorldPos.xz * 2.8 + vec2(uTime * 0.08, uTime * 0.05);
+      float n1 = fbm(np);
+      float n2 = fbm(np * 2.3 + 7.1);
+      float bump = mix(0.12, 0.28, ampK);
+      float dx = (n1 - fbm(np + vec2(0.04, 0.0))) * bump * 1.8;
+      float dz = (n2 - fbm(np + vec2(0.0, 0.04))) * bump * 1.8;
+      N = normalize(N + vec3(dx, 0.0, dz));
+      vec3 V = normalize(uCamPos - vWorldPos);
+      float NdotV = max(dot(N, V), 0.0);
+
+      float depthM = clamp(vDepthHint / 10.0, 0.0, 1.0);
+      float path = mix(1.0, 1.0 + (1.0 - NdotV) * 0.35, uDepth);
+      vec3 shallowCol = vec3(0.07, 0.11, 0.14);
+      vec3 midCol     = vec3(0.032, 0.058, 0.088);
+      vec3 deepCol    = vec3(0.010, 0.018, 0.038);
+      vec3 absorb = mix(shallowCol, midCol, smoothstep(0.0, 0.45, depthM));
+      absorb = mix(absorb, deepCol, smoothstep(0.35, 1.0, depthM * path));
+      float nearLamp = exp(-distance(vWorldPos, uLampA) * 0.35)
+                     + 0.7 * exp(-distance(vWorldPos, uLampB) * 0.38);
+      vec3 scatter = vec3(0.09, 0.07, 0.035) * nearLamp * 0.07;
+      vec3 body = absorb + scatter * uDepth;
+      body = mix(vec3(0.06, 0.09, 0.12), body, uDepth);
+
+      float F0 = 0.02;
+      float fres = schlick(NdotV, F0);
+      vec3 skyCol = vec3(0.12, 0.16, 0.24);
+      vec3 horizonCol = vec3(0.18, 0.20, 0.28);
+      float upness = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
+      vec3 reflCol = mix(horizonCol, skyCol, upness);
+      float quayBand = smoothstep(uWallZ + 0.8, uWallZ - 1.5, vWorldPos.z);
+      reflCol = mix(reflCol, vec3(0.08, 0.07, 0.06), quayBand * 0.35 * uReflect);
+      float streakA = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampA.x) * 0.55), 10.0);
+      float streakB = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampB.x) * 0.55), 10.0);
+      float wobble = 0.5 + 0.5 * sin(vWorldPos.z * 2.4 + uTime * 0.55 + N.x * 4.0);
+      vec3 lampRefl = vec3(0.55, 0.42, 0.18) * (streakA * 0.55 + streakB * 0.4) * wobble;
+      reflCol += lampRefl * uReflect;
+
+      float fresW = smoothstep(0.05, 0.85, fres) * uFresnel;
+      vec3 col = mix(body, reflCol, fresW);
+      if (uFresnel < 0.5) col = body;
+
+      vec3 Hkey = normalize(normalize(uKeyDir) + V);
+      float specKey = pow(max(dot(N, Hkey), 0.0), 160.0);
+      vec3 LA = normalize(uLampA - vWorldPos);
+      vec3 LB = normalize(uLampB - vWorldPos);
+      float specA = pow(max(dot(N, normalize(LA + V)), 0.0), 220.0);
+      float specB = pow(max(dot(N, normalize(LB + V)), 0.0), 220.0);
+      float streakMaskA = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampA.x) * 0.35), 3.0);
+      float streakMaskB = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampB.x) * 0.38), 3.0);
+      float attenA = 1.0 / (1.0 + distance(vWorldPos, uLampA) * 0.18);
+      float attenB = 1.0 / (1.0 + distance(vWorldPos, uLampB) * 0.2);
+      vec3 spec = vec3(0.55, 0.62, 0.75) * specKey * 0.28
+                + vec3(1.0, 0.84, 0.45) * (specA * 0.55 + streakMaskA * 0.12 * fres) * attenA
+                + vec3(0.95, 0.74, 0.38) * (specB * 0.4 + streakMaskB * 0.1 * fres) * attenB;
+      col += spec * mix(0.2, 1.0, uReflect);
+
+      float scroll = pow(max(0.0, sin(vWorldPos.x * 5.0 + fbm(vWorldPos.xz * 1.6) * 2.0 + uTime * 0.25)), 22.0);
+      col += vec3(0.50, 0.40, 0.22) * scroll * 0.08 * uReflect * (0.4 + 0.6 * fres);
+
+      col = min(col, vec3(0.24));
+
+      float wallDist = vWorldPos.z - uWallZ;
+      float wallEdge = (1.0 - smoothstep(0.08, 1.15, wallDist)) * smoothstep(-0.08, 0.12, wallDist);
+      float foamNoise = fbm(vec2(vWorldPos.x * 5.0, vWorldPos.z * 3.5 + uTime * 0.5));
+      float chop = 0.55 + 0.45 * sin(vWorldPos.x * 22.0 + uTime * 1.4 + foamNoise * 3.0);
+      float lineFoam = wallEdge * chop * (0.75 + 0.25 * foamNoise);
+      float crestFoam = smoothstep(0.5, 0.9, vCrest) * (0.35 + 0.4 * foamNoise);
+      crestFoam *= smoothstep(0.08, 0.6, depthM);
+      float foam = clamp(lineFoam * 1.2 + crestFoam * 0.5, 0.0, 1.0) * uFoam;
+      vec3 foamCol = vec3(0.48, 0.54, 0.60);
+      col = mix(col, foamCol, foam * 0.9);
+      col = min(col, vec3(0.55));
+
+      float fogF = 1.0 - exp(-0.018 * length(uCamPos - vWorldPos));
+      col = mix(col, vec3(0.02, 0.023, 0.035), fogF * 0.55);
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+});
+waterMat.transparent = false;
+waterMat.depthWrite = true;
+// Dense mesh for Gerstner (Harbor basin wider than lesson — 128×96 keeps cost sane)
+const water = new THREE.Mesh(new THREE.PlaneGeometry(WATER_W, WATER_D, 128, 96), waterMat);
+water.rotation.x = -Math.PI / 2;
+water.position.set(0, WATER_Y, WATER_NEAR_Z + WATER_D * 0.5);
+water.renderOrder = -1;
+scene.add(water);
+
+// ——— Seawall / quay bulkhead (promenade scale) ———
+// Research: pedestrian promenade walls ~0.6–1.2m above walkway (Douglas/Belgian
+// wave-return parapets). Not a flood bunker. depthTest ON so orbit never
+// draws the wall through hinterland towers.
+const SEAWALL_Z = WATER_WALL_Z; // 5.42 — shared with water foam/depth
+const SEAWALL_W = 22.0; // match quay width — do not overhang into side massing
+const quayDeckY = 0.04;
+const parapetH = 0.72; // ~knee-to-waist above promenade
+const faceBottom = -0.22; // waterline
+const faceTop = quayDeckY + parapetH;
+const faceH = faceTop - faceBottom;
+const faceY = (faceBottom + faceTop) * 0.5;
+
+const seawallFaceMat = new THREE.MeshStandardMaterial({
+  color: 0x4a5160, roughness: 0.88, metalness: 0.04,
+});
+const seawallCapMat = new THREE.MeshStandardMaterial({
+  color: 0x6a7180, roughness: 0.7, metalness: 0.08,
+});
+const seawallWetMat = new THREE.MeshStandardMaterial({
+  color: 0x1c2430, roughness: 0.95, metalness: 0.02,
+});
+
+const seawallFace = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W, faceH, 0.22), seawallFaceMat);
+seawallFace.position.set(0, faceY, SEAWALL_Z);
+scene.add(seawallFace);
+
+const seawallWetCourse = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W - 0.1, 0.14, 0.05), seawallWetMat);
+seawallWetCourse.position.set(0, faceBottom + 0.1, SEAWALL_Z + 0.14);
+scene.add(seawallWetCourse);
+
+// Thin coping — sit-able parapet, not a fortress crown
+const seawallCap = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W + 0.25, 0.1, 0.38), seawallCapMat);
+seawallCap.position.set(0, faceTop + 0.05, SEAWALL_Z + 0.04);
+scene.add(seawallCap);
+
+// Debug probe (harbor water/seawall layout)
+window.__harborWater = water;
+window.__harborQuay = quay;
+window.__harborSeawall = seawallFace;
+water.frustumCulled = false;
+
+window.__harborLayout = {
+  waterZ: water.position.z,
+  waterY: water.position.y,
+  waterW: WATER_W,
+  waterD: WATER_D,
+  waterNearZ: WATER_NEAR_Z,
+  waterFarZ: WATER_NEAR_Z + WATER_D,
+  groundZMax: GROUND_Z_MAX,
+  quayZ: quay.position.z,
+  quayNearZ: quay.position.z - 3,
+  quayFarZ: quay.position.z + 3,
+  seawallZ: SEAWALL_Z,
+  seawallOutboardZ: SEAWALL_Z + 0.11,
+  wetCourseZ: SEAWALL_Z + 0.14,
+  dry: WATER_NEAR_Z > SEAWALL_Z + 0.11 && GROUND_Z_MAX < SEAWALL_Z,
+};
+
+
+// ——— Instanced quay furniture: bollards / pier posts / lanterns (≥24) ———
+const FURN_COUNT = 36;
+const bollardGeo = new THREE.CylinderGeometry(0.12, 0.16, 0.55, 8);
+bollardGeo.translate(0, 0.275, 0);
+const postGeo = new THREE.CylinderGeometry(0.055, 0.07, 1.35, 6);
+postGeo.translate(0, 0.675, 0);
+// merge-ish via one InstancedMesh using bollard geo + separate lantern heads
+const furnMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uFogColor: { value: new THREE.Color(0x05060a) },
+    uFogDensity: { value: 0.024 },
+  },
+  vertexShader: /* glsl */`
+    varying vec3 vColor;
+    varying vec3 vWorldPos;
+    varying vec3 vNormalW;
+    varying vec2 vUv;
+    void main(){
+      vUv = uv;
+      vec4 world = instanceMatrix * vec4(position, 1.0);
+      vWorldPos = world.xyz;
+      vNormalW = normalize(mat3(instanceMatrix) * normal);
+      #ifdef USE_INSTANCING_COLOR
+        vColor = instanceColor;
+      #else
+        vColor = vec3(0.3);
+      #endif
+      gl_Position = projectionMatrix * viewMatrix * world;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec3 vColor;
+    varying vec3 vWorldPos;
+    varying vec3 vNormalW;
+    varying vec2 vUv;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
+    void main(){
+      vec3 N = normalize(vNormalW);
+      float ndl = clamp(dot(N, normalize(vec3(0.4, 0.85, 0.25))), 0.15, 1.0);
+      vec3 body = vColor * (0.35 + 0.55 * ndl);
+      // iron rim / cap highlight
+      float cap = smoothstep(0.82, 0.95, vUv.y);
+      body += vec3(0.15, 0.16, 0.2) * cap;
+      float dist = length(vWorldPos - cameraPosition);
+      float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 12.0);
+      gl_FragColor = vec4(mix(body, uFogColor, clamp(fog, 0.0, 0.8)), 1.0);
+    }
+  `,
+});
+const bollards = new THREE.InstancedMesh(bollardGeo, furnMat, FURN_COUNT);
+const posts = new THREE.InstancedMesh(postGeo, furnMat.clone(), 18);
+const iron = new THREE.Color(0x2a2e3a);
+const ironWarm = new THREE.Color(0x3a3228);
+let fi = 0;
+for (let i = 0; i < FURN_COUNT; i++) {
+  const x = -10.5 + i * 0.62 + (Math.random() - 0.5) * 0.08;
+  const z = 4.55 + (i % 2) * 0.35 + (Math.random() - 0.5) * 0.12;
+  dummy.position.set(x, 0.04, z);
+  dummy.scale.set(1, 0.85 + Math.random() * 0.35, 1);
+  dummy.rotation.set(0, Math.random() * 0.4, 0);
+  dummy.updateMatrix();
+  bollards.setMatrixAt(i, dummy.matrix);
+  bollards.setColorAt(i, Math.random() > 0.35 ? iron : ironWarm);
+}
+bollards.instanceMatrix.needsUpdate = true;
+if (bollards.instanceColor) bollards.instanceColor.needsUpdate = true;
+bollards.frustumCulled = false;
+scene.add(bollards);
+
+for (let i = 0; i < 18; i++) {
+  const x = -10 + i * 1.2 + (Math.random() - 0.5) * 0.15;
+  const z = 3.85 + (Math.random() - 0.5) * 0.2;
+  dummy.position.set(x, 0.04, z);
+  dummy.scale.set(1, 0.9 + Math.random() * 0.25, 1);
+  dummy.rotation.set(0, 0, 0);
+  dummy.updateMatrix();
+  posts.setMatrixAt(i, dummy.matrix);
+  posts.setColorAt(i, iron);
+}
+posts.instanceMatrix.needsUpdate = true;
+if (posts.instanceColor) posts.instanceColor.needsUpdate = true;
+posts.frustumCulled = false;
+scene.add(posts);
+
+// Lantern heads — glow via instanceColor (cool/warm), bloom layer
+const lanternGeo = new THREE.SphereGeometry(0.14, 10, 8);
+const lanternMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uPulse: { value: freezeMotion ? 0.7 : 1.0 },
+  },
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexShader: /* glsl */`
+    varying vec3 vColor;
+    varying vec3 vWorldPos;
+    void main(){
+      vec4 world = instanceMatrix * vec4(position, 1.0);
+      vWorldPos = world.xyz;
+      #ifdef USE_INSTANCING_COLOR
+        vColor = instanceColor;
+      #else
+        vColor = vec3(1.0, 0.8, 0.4);
+      #endif
+      gl_Position = projectionMatrix * viewMatrix * world;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform float uTime;
+    uniform float uPulse;
+    varying vec3 vColor;
+    varying vec3 vWorldPos;
+    void main(){
+      float pulse = 0.75 + 0.25 * sin(uTime * 2.4 + vWorldPos.x * 0.8) * uPulse;
+      vec3 col = vColor * (1.4 * pulse);
+      float a = 0.85;
+      gl_FragColor = vec4(col, a);
+    }
+  `,
+});
+const LANTERN_N = 18;
+const lanterns = new THREE.InstancedMesh(lanternGeo, lanternMat, LANTERN_N);
+const lampWarm = new THREE.Color(0xf0c24b);
+const lampCool = new THREE.Color(0x8a9fd4);
+for (let i = 0; i < LANTERN_N; i++) {
+  const x = -10 + i * 1.2;
+  const z = 3.85;
+  dummy.position.set(x, 1.45, z);
+  dummy.scale.setScalar(0.85 + (i % 3) * 0.08);
+  dummy.rotation.set(0, 0, 0);
+  dummy.updateMatrix();
+  lanterns.setMatrixAt(i, dummy.matrix);
+  lanterns.setColorAt(i, i % 3 === 0 ? lampCool : lampWarm);
+}
+lanterns.instanceMatrix.needsUpdate = true;
+if (lanterns.instanceColor) lanterns.instanceColor.needsUpdate = true;
+lanterns.frustumCulled = false;
+lanterns.layers.enable(BLOOM_LAYER);
+scene.add(lanterns);
+
+// ——— Quay physics props (cannon-es · scoped overlay · Journey #20) ———
+// Keep InstancedMesh bollards/posts/lanterns as district massing.
+// Overlay: fixed bollards + hinged lanterns + free crates (grab / toss).
+const physFreeze = freezeMotion; // RM / ?still=1 → no step, static masses
+const physWorld = new CANNON.World({
+  gravity: new CANNON.Vec3(0, physFreeze ? 0 : -9.82, 0),
+});
+physWorld.allowSleep = true;
+physWorld.defaultContactMaterial.friction = 0.42;
+physWorld.defaultContactMaterial.restitution = 0.12;
+const physGroundMat = new CANNON.Material('quay');
+const physCrateMat = new CANNON.Material('crate');
+physWorld.addContactMaterial(new CANNON.ContactMaterial(physGroundMat, physCrateMat, {
+  friction: 0.5,
+  restitution: 0.06,
+}));
+
+const physEntries = []; // { mesh, body, kind, mass, spawn, halfExtents? }
+const physCrates = [];
+const physLanterns = [];
+const physConstraints = [];
+let physConstraintOn = !physFreeze;
+// Soft-spring / wind extension hooks (filled after Signal tip exists)
+const physHooks = {
+  afterWind: null,   // (t, base, dx, dz) => void
+  beforeStep: null,  // () => void — spring.applyForce
+  afterStep: null,   // () => void — sync spring meshes / cables
+  onReset: null,     // () => void
+  onProbe: null,     // () => void — extend __harborPhysics / __springs
+  onFreezeSync: null,// () => void
+};
+
+function physSync(entry) {
+  entry.mesh.position.copy(entry.body.position);
+  entry.mesh.quaternion.copy(entry.body.quaternion);
+}
+
+function physAdd(mesh, body, kind, mass) {
+  scene.add(mesh);
+  physWorld.addBody(body);
+  const entry = {
+    mesh, body, kind, mass,
+    spawn: {
+      position: body.position.clone(),
+      quaternion: body.quaternion.clone(),
+    },
+  };
+  mesh.userData.physEntry = entry;
+  physEntries.push(entry);
+  physSync(entry);
+  return entry;
+}
+
+// Static quay collision slab (matches hero quay deck band)
+const quayDeckBody = new CANNON.Body({
+  mass: 0,
+  material: physGroundMat,
+  shape: new CANNON.Box(new CANNON.Vec3(11, 0.08, 3.2)),
+  position: new CANNON.Vec3(0, -0.04, 2.6),
+});
+physWorld.addBody(quayDeckBody);
+
+// Soft seawall lip stop (prevents crates sliding into basin)
+const seawallLip = new CANNON.Body({
+  mass: 0,
+  material: physGroundMat,
+  shape: new CANNON.Box(new CANNON.Vec3(11, 0.35, 0.14)),
+  position: new CANNON.Vec3(0, 0.2, SEAWALL_Z + 0.05),
+});
+physWorld.addBody(seawallLip);
+
+const ironMatStd = new THREE.MeshStandardMaterial({
+  color: 0x2a2e3a, roughness: 0.88, metalness: 0.22,
+});
+const ironWarmStd = new THREE.MeshStandardMaterial({
+  color: 0x3a3228, roughness: 0.9, metalness: 0.18,
+});
+
+// Fixed bollards (static) — collision posts crates can bounce off
+const PHYS_BOLLARD_POS = [
+  [-3.6, 0.04, 4.55],
+  [-1.2, 0.04, 4.7],
+  [1.8, 0.04, 4.5],
+  [4.2, 0.04, 4.65],
+];
+const physBollardGeo = new THREE.CylinderGeometry(0.13, 0.17, 0.58, 10);
+physBollardGeo.translate(0, 0.29, 0);
+for (let i = 0; i < PHYS_BOLLARD_POS.length; i++) {
+  const [x, y, z] = PHYS_BOLLARD_POS[i];
+  const mesh = new THREE.Mesh(physBollardGeo, i % 2 ? ironWarmStd : ironMatStd);
+  const body = new CANNON.Body({
+    mass: 0,
+    type: CANNON.Body.STATIC,
+    material: physGroundMat,
+    shape: new CANNON.Box(new CANNON.Vec3(0.15, 0.29, 0.15)),
+    position: new CANNON.Vec3(x, y + 0.29, z),
+  });
+  physAdd(mesh, body, 'bollard', 0);
+}
+
+// Hide a few instanced bollards near physics ones (avoid z-fight doubles)
+(function hideOverlappingBollards() {
+  const tmp = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  for (let i = 0; i < FURN_COUNT; i++) {
+    bollards.getMatrixAt(i, tmp);
+    pos.setFromMatrixPosition(tmp);
+    for (const [px, , pz] of PHYS_BOLLARD_POS) {
+      const dx = pos.x - px;
+      const dz = pos.z - pz;
+      if (dx * dx + dz * dz < 0.22 * 0.22) {
+        dummy.position.copy(pos);
+        dummy.scale.set(0.001, 0.001, 0.001);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        bollards.setMatrixAt(i, dummy.matrix);
+        break;
+      }
+    }
+  }
+  bollards.instanceMatrix.needsUpdate = true;
+})();
+
+// Hinged quay lanterns (select) — post + arm static, lantern PointToPoint
+const PHYS_LANTERN_DEFS = [
+  { post: [-5.4, 0.04, 3.85], armLen: 0.75, warm: true },
+  { post: [2.4, 0.04, 3.85], armLen: 0.7, warm: false },
+];
+const physPostGeo = new THREE.CylinderGeometry(0.05, 0.065, 1.4, 8);
+physPostGeo.translate(0, 0.7, 0);
+const physArmGeo = new THREE.BoxGeometry(1, 0.06, 0.06);
+const physLanternGeo = new THREE.BoxGeometry(0.22, 0.3, 0.22);
+const physLanternMatWarm = new THREE.MeshStandardMaterial({
+  color: 0xf0c24b, roughness: 0.42, metalness: 0.12,
+  emissive: 0xf0c24b, emissiveIntensity: 0.75,
+});
+const physLanternMatCool = new THREE.MeshStandardMaterial({
+  color: 0x8a9fd4, roughness: 0.45, metalness: 0.1,
+  emissive: 0x8a7bb8, emissiveIntensity: 0.55,
+});
+
+for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
+  const def = PHYS_LANTERN_DEFS[i];
+  const [px, py, pz] = def.post;
+  const postH = 1.4;
+  const armY = py + postH - 0.08;
+  const armTipX = px + def.armLen * 0.5;
+
+  const postMesh = new THREE.Mesh(physPostGeo, ironMatStd);
+  const postBody = new CANNON.Body({
+    mass: 0,
+    material: physGroundMat,
+    shape: new CANNON.Box(new CANNON.Vec3(0.06, postH * 0.5, 0.06)),
+    position: new CANNON.Vec3(px, py + postH * 0.5, pz),
+  });
+  physAdd(postMesh, postBody, 'post', 0);
+
+  const armMesh = new THREE.Mesh(physArmGeo, ironMatStd.clone());
+  armMesh.scale.x = def.armLen;
+  const armBody = new CANNON.Body({
+    mass: 0,
+    shape: new CANNON.Box(new CANNON.Vec3(def.armLen * 0.5, 0.03, 0.03)),
+    position: new CANNON.Vec3(armTipX, armY, pz),
+  });
+  physAdd(armMesh, armBody, 'arm', 0);
+
+  const lx = px + def.armLen + 0.02;
+  const ly = armY - 0.38;
+  const lanternMesh = new THREE.Mesh(
+    physLanternGeo,
+    def.warm ? physLanternMatWarm : physLanternMatCool
+  );
+  lanternMesh.layers.enable(BLOOM_LAYER);
+  const lamp = new THREE.PointLight(def.warm ? 0xffc978 : 0xa8b8e0, 1.4, 8, 2);
+  lanternMesh.add(lamp);
+
+  const lanternMass = 0.55;
+  const lanternBody = new CANNON.Body({
+    mass: physFreeze ? 0 : lanternMass,
+    material: physCrateMat,
+    shape: new CANNON.Box(new CANNON.Vec3(0.11, 0.15, 0.11)),
+    position: new CANNON.Vec3(lx, ly, pz),
+    linearDamping: 0.12,
+    angularDamping: 0.14,
+    allowSleep: true,
+  });
+  if (physFreeze) lanternBody.type = CANNON.Body.STATIC;
+  const lanternEntry = physAdd(lanternMesh, lanternBody, 'lantern', lanternMass);
+  lanternEntry.halfExtents = new CANNON.Vec3(0.11, 0.15, 0.11);
+  lanternEntry.armBody = armBody;
+  lanternEntry.pivotA = new CANNON.Vec3(def.armLen * 0.5, 0, 0);
+  lanternEntry.pivotB = new CANNON.Vec3(0, 0.16, 0);
+  physLanterns.push(lanternEntry);
+
+  if (!physFreeze) {
+    const c = new CANNON.PointToPointConstraint(
+      armBody, lanternEntry.pivotA, lanternBody, lanternEntry.pivotB
+    );
+    physWorld.addConstraint(c);
+    physConstraints.push(c);
+    lanternEntry.constraint = c;
+  }
+
+  // Hide matching instanced lantern head + post near this hinge
+  (function hideInstancedLamp() {
+    const tmp = new THREE.Matrix4();
+    const pos = new THREE.Vector3();
+    for (let j = 0; j < LANTERN_N; j++) {
+      lanterns.getMatrixAt(j, tmp);
+      pos.setFromMatrixPosition(tmp);
+      if (Math.abs(pos.x - px) < 0.35 && Math.abs(pos.z - pz) < 0.35) {
+        dummy.position.copy(pos);
+        dummy.scale.set(0.001, 0.001, 0.001);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        lanterns.setMatrixAt(j, dummy.matrix);
+      }
+    }
+    lanterns.instanceMatrix.needsUpdate = true;
+    for (let j = 0; j < 18; j++) {
+      posts.getMatrixAt(j, tmp);
+      pos.setFromMatrixPosition(tmp);
+      if (Math.abs(pos.x - px) < 0.35 && Math.abs(pos.z - pz) < 0.35) {
+        dummy.position.copy(pos);
+        dummy.scale.set(0.001, 0.001, 0.001);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        posts.setMatrixAt(j, dummy.matrix);
+      }
+    }
+    posts.instanceMatrix.needsUpdate = true;
+  })();
+}
+
+// Free crates (2–4) — grab + toss
+const HARBOR_CRATE_DEFS = [
+  { size: [0.55, 0.55, 0.55], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2 },
+  { size: [0.7, 0.4, 0.55], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35 },
+  { size: [0.45, 0.45, 0.45], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55 },
+  { size: [0.6, 0.5, 0.5], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1 },
+];
+
+function makeHarborCrate(def) {
+  const [sx, sy, sz] = def.size;
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(sx, sy, sz),
+    new THREE.MeshStandardMaterial({
+      color: def.color,
+      roughness: 0.74,
+      metalness: 0.08,
+      emissive: def.emissive,
+      emissiveIntensity: def.ei,
+    })
+  );
+  const body = new CANNON.Body({
+    mass: physFreeze ? 0 : def.mass,
+    material: physCrateMat,
+    shape: new CANNON.Box(new CANNON.Vec3(sx / 2, sy / 2, sz / 2)),
+    position: new CANNON.Vec3(def.pos[0], def.pos[1], def.pos[2]),
+    linearDamping: 0.14,
+    angularDamping: 0.2,
+    allowSleep: true,
+  });
+  body.quaternion.setFromEuler(0, def.yaw, 0);
+  if (physFreeze) {
+    body.type = CANNON.Body.STATIC;
+    body.velocity.set(0, 0, 0);
+    body.angularVelocity.set(0, 0, 0);
+    // Park on deck for stills
+    body.position.y = sy / 2 + 0.06;
+  }
+  const entry = physAdd(mesh, body, 'crate', def.mass);
+  entry.halfExtents = new CANNON.Vec3(sx / 2, sy / 2, sz / 2);
+  // Refresh spawn after still park
+  entry.spawn.position.copy(body.position);
+  entry.spawn.quaternion.copy(body.quaternion);
+  physCrates.push(entry);
+  return entry;
+}
+for (const def of HARBOR_CRATE_DEFS) makeHarborCrate(def);
+
+// Grab / toss interaction (physics-props pattern)
+const physRay = new THREE.Raycaster();
+const physPointer = new THREE.Vector2();
+const physDragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const physHit = new THREE.Vector3();
+const physGrabTarget = new THREE.Vector3();
+let physGrab = null;
+let physSelected = null;
+
+function physNdc(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  physPointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  physPointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+}
+
+function physPick(e) {
+  physNdc(e);
+  physRay.setFromCamera(physPointer, camera);
+  const meshes = physCrates.map((c) => c.mesh).concat(physLanterns.map((l) => l.mesh));
+  const hits = physRay.intersectObjects(meshes, false);
+  return hits.length ? hits[0] : null;
+}
+
+function physBeginGrab(e) {
+  if (physFreeze || walkMode || tourMode) return false;
+  const hit = physPick(e);
+  if (!hit) return false;
+  const entry = hit.object.userData.physEntry;
+  if (!entry || entry.mass <= 0) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  controls.enabled = false;
+  const worldHit = hit.point.clone();
+  const localOffset = new CANNON.Vec3();
+  entry.body.pointToLocalFrame(
+    new CANNON.Vec3(worldHit.x, worldHit.y, worldHit.z),
+    localOffset
+  );
+  physDragPlane.constant = -worldHit.y;
+  physGrab = { entry, localOffset, planeY: worldHit.y };
+  physSelected = entry;
+  entry.body.wakeUp();
+  entry.body.angularVelocity.scale(0.4, entry.body.angularVelocity);
+  return true;
+}
+
+function physMoveGrab(e) {
+  if (!physGrab) return;
+  physNdc(e);
+  physRay.setFromCamera(physPointer, camera);
+  physDragPlane.constant = -physGrab.planeY;
+  if (!physRay.ray.intersectPlane(physDragPlane, physHit)) return;
+  physGrabTarget.copy(physHit);
+  const body = physGrab.entry.body;
+  const grabWorld = new CANNON.Vec3();
+  body.pointToWorldFrame(physGrab.localOffset, grabWorld);
+  const gain = 18;
+  const damp = 6;
+  body.velocity.set(
+    (physGrabTarget.x - grabWorld.x) * gain - body.velocity.x * damp * 0.05,
+    (physGrabTarget.y - grabWorld.y) * gain - body.velocity.y * damp * 0.05,
+    (physGrabTarget.z - grabWorld.z) * gain - body.velocity.z * damp * 0.05
+  );
+}
+
+function physEndGrab() {
+  if (!physGrab) return;
+  const body = physGrab.entry.body;
+  const speed = body.velocity.length();
+  if (speed > 0.05) {
+    body.applyImpulse(
+      new CANNON.Vec3(body.velocity.x * 0.1, body.velocity.y * 0.1, body.velocity.z * 0.1),
+      physGrab.localOffset
+    );
+  }
+  physGrab = null;
+  if (!walkMode && !tourMode) controls.enabled = true;
+}
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 && e.pointerType === 'mouse') return;
+  physBeginGrab(e);
+}, true);
+addEventListener('pointermove', physMoveGrab);
+addEventListener('pointerup', physEndGrab);
+addEventListener('pointercancel', physEndGrab);
+
+function physToss() {
+  if (physFreeze) return;
+  const pool = physCrates.filter((c) => c.mass > 0);
+  if (!pool.length) return;
+  const entry = (physSelected && physSelected.kind === 'crate' && physSelected.mass > 0)
+    ? physSelected
+    : pool[Math.floor(Math.random() * pool.length)];
+  const body = entry.body;
+  body.wakeUp();
+  const he = entry.halfExtents || new CANNON.Vec3(0.25, 0.25, 0.25);
+  const relativeOffset = new CANNON.Vec3(
+    (Math.random() - 0.5) * he.x * 2,
+    (Math.random() - 0.5) * he.y * 2,
+    (Math.random() - 0.5) * he.z * 2
+  );
+  // Bias toss toward basin (+Z) a little
+  const impulse = new CANNON.Vec3(
+    (Math.random() - 0.5) * 4.5,
+    1.8 + Math.random() * 2.4,
+    1.5 + Math.random() * 3.5
+  );
+  body.applyImpulse(impulse, relativeOffset);
+  body.angularVelocity.set(
+    (Math.random() - 0.5) * 9,
+    (Math.random() - 0.5) * 9,
+    (Math.random() - 0.5) * 9
+  );
+  physSelected = entry;
+  // Soft lantern tip
+  for (const L of physLanterns) {
+    if (!L.constraint) continue;
+    L.body.wakeUp();
+    L.body.applyImpulse(
+      new CANNON.Vec3((Math.random() - 0.5) * 0.55, 0, (Math.random() - 0.5) * 0.55),
+      new CANNON.Vec3(0, 0.12, 0)
+    );
+  }
+}
+
+function physReset() {
+  for (const entry of physEntries) {
+    if (entry.kind === 'bollard' || entry.kind === 'post' || entry.kind === 'arm') continue;
+    const s = entry.spawn;
+    entry.body.position.copy(s.position);
+    entry.body.quaternion.copy(s.quaternion);
+    entry.body.velocity.set(0, 0, 0);
+    entry.body.angularVelocity.set(0, 0, 0);
+    if (!physFreeze && entry.mass > 0) {
+      entry.body.type = CANNON.Body.DYNAMIC;
+      entry.body.mass = entry.mass;
+      entry.body.updateMassProperties();
+      entry.body.wakeUp();
+    }
+    physSync(entry);
+  }
+  physSelected = null;
+  if (typeof physHooks.onReset === 'function') physHooks.onReset();
+}
+
+function physSetConstraint(on) {
+  if (physFreeze) return;
+  physConstraintOn = !!on;
+  const btn = document.getElementById('props-constraint');
+  if (btn) {
+    btn.classList.toggle('on', physConstraintOn);
+    btn.setAttribute('aria-pressed', physConstraintOn ? 'true' : 'false');
+  }
+  for (const L of physLanterns) {
+    if (physConstraintOn) {
+      if (!L.constraint) {
+        L.constraint = new CANNON.PointToPointConstraint(
+          L.armBody, L.pivotA, L.body, L.pivotB
+        );
+        physWorld.addConstraint(L.constraint);
+        physConstraints.push(L.constraint);
+      }
+      L.body.wakeUp();
+    } else {
+      if (L.constraint) {
+        physWorld.removeConstraint(L.constraint);
+        const ix = physConstraints.indexOf(L.constraint);
+        if (ix >= 0) physConstraints.splice(ix, 1);
+        L.constraint = null;
+      }
+      L.body.wakeUp();
+    }
+  }
+  refreshHarborPhysicsProbe();
+}
+
+// ——— Scene wind (crates + hinged lanterns; bollards / InstancedMesh untouched) ———
+const WIND_CARDINALS = [
+  { name: 'E', x: 1, z: 0 },
+  { name: 'NE', x: 0.707, z: -0.707 },
+  { name: 'N', x: 0, z: -1 },
+  { name: 'NW', x: -0.707, z: -0.707 },
+  { name: 'W', x: -1, z: 0 },
+  { name: 'SW', x: -0.707, z: 0.707 },
+  { name: 'S', x: 0, z: 1 },
+  { name: 'SE', x: 0.707, z: 0.707 },
+];
+const WIND_STR_STEPS = [0.45, 0.9, 1.4, 2.2]; // strength index → force scale
+const WIND_CRATE_SCALE = 12;   // ×strength×gust → Newtons (must beat quay friction ~μN≈5)
+const WIND_LANTERN_SCALE = 3.2; // soft sway (visible nod); hinge stays intact
+const harborWind = {
+  on: !physFreeze,
+  dirIdx: 0, // default E — along quay
+  strIdx: 2,
+  strength: WIND_STR_STEPS[2],
+  gust: 1,
+  dir: new CANNON.Vec3(1, 0, 0),
+  forceScratch: new CANNON.Vec3(),
+  torqueScratch: new CANNON.Vec3(),
+  offsetScratch: new CANNON.Vec3(),
+};
+
+function windLabel() {
+  if (!harborWind.on) return 'Wind off';
+  const c = WIND_CARDINALS[harborWind.dirIdx];
+  const dots = '·'.repeat(harborWind.strIdx + 1);
+  return `Wind ${c.name} ${dots}`;
+}
+
+function windRefreshDir() {
+  const c = WIND_CARDINALS[harborWind.dirIdx];
+  harborWind.dir.set(c.x, 0, c.z);
+  const btn = document.getElementById('props-wind');
+  if (btn) btn.textContent = windLabel();
+}
+
+function windRefreshStr() {
+  harborWind.strength = WIND_STR_STEPS[harborWind.strIdx];
+  const btn = document.getElementById('props-wind');
+  if (btn) btn.textContent = windLabel();
+}
+
+function windSetOn(on) {
+  harborWind.on = !!on && !physFreeze;
+  const btn = document.getElementById('props-wind');
+  if (btn) {
+    btn.classList.toggle('on', harborWind.on);
+    btn.setAttribute('aria-pressed', harborWind.on ? 'true' : 'false');
+    btn.textContent = windLabel();
+    if (physFreeze) btn.disabled = true;
+  }
+  refreshHarborPhysicsProbe();
+}
+
+function windCycleDir(delta) {
+  const n = WIND_CARDINALS.length;
+  harborWind.dirIdx = (harborWind.dirIdx + delta + n) % n;
+  windRefreshDir();
+  refreshHarborPhysicsProbe();
+}
+
+function windCycleStr(delta) {
+  const n = WIND_STR_STEPS.length;
+  harborWind.strIdx = Math.max(0, Math.min(n - 1, harborWind.strIdx + delta));
+  windRefreshStr();
+  refreshHarborPhysicsProbe();
+}
+
+windRefreshDir();
+windRefreshStr();
+windSetOn(harborWind.on);
+
+function windApplyForces(t) {
+  if (physFreeze || !harborWind.on || harborWind.strength <= 0) {
+    harborWind.gust = 0;
+    return;
+  }
+  // Alive gust: slow sine + quieter secondary (not a constant shove)
+  const gust = 0.72
+    + 0.22 * Math.sin(t * 1.35)
+    + 0.12 * Math.sin(t * 0.41 + 1.7)
+    + 0.08 * Math.sin(t * 2.85 + 0.4);
+  harborWind.gust = gust;
+  const base = harborWind.strength * gust;
+  const dx = harborWind.dir.x;
+  const dz = harborWind.dir.z;
+
+  // Free crates — continuous linear force at COM (wake so they stay lively)
+  for (const entry of physCrates) {
+    if (entry.mass <= 0) continue;
+    const body = entry.body;
+    if (body.type !== CANNON.Body.DYNAMIC) continue;
+    // Light crates drift more; force scaled to overcome quay friction
+    const massFade = 0.55 + 0.45 * (1.2 / Math.max(entry.mass, 0.4));
+    const f = base * WIND_CRATE_SCALE * massFade;
+    harborWind.forceScratch.set(dx * f, f * 0.02, dz * f);
+    body.wakeUp();
+    body.applyForce(harborWind.forceScratch, harborWind.offsetScratch.set(0, 0, 0));
+  }
+
+  // Hinged lanterns — soft lateral force + tiny torque; keep hinge intact
+  for (const L of physLanterns) {
+    if (L.mass <= 0) continue;
+    const body = L.body;
+    if (body.type !== CANNON.Body.DYNAMIC) continue;
+    const soft = base * WIND_LANTERN_SCALE;
+    harborWind.forceScratch.set(dx * soft, soft * 0.05, dz * soft);
+    // Apply slightly below COM so it sways rather than translating hard
+    harborWind.offsetScratch.set(0, -0.1, 0);
+    body.wakeUp();
+    body.applyForce(harborWind.forceScratch, harborWind.offsetScratch);
+    // Gentle torque so the lamp nods in wind (PointToPoint holds)
+    harborWind.torqueScratch.set(-dz * soft * 0.35, 0, dx * soft * 0.35);
+    body.applyTorque(harborWind.torqueScratch);
+  }
+  if (typeof physHooks.afterWind === 'function') {
+    physHooks.afterWind(t, base, dx, dz);
+  }
+
+}
+
+function physStep() {
+  if (physFreeze) {
+    for (const entry of physEntries) {
+      entry.body.velocity.set(0, 0, 0);
+      entry.body.angularVelocity.set(0, 0, 0);
+      physSync(entry);
+    }
+    if (typeof physHooks.onFreezeSync === 'function') physHooks.onFreezeSync();
+    return;
+  }
+  windApplyForces(performance.now() * 0.001);
+  if (typeof physHooks.beforeStep === 'function') physHooks.beforeStep();
+  physWorld.fixedStep();
+  for (const entry of physEntries) physSync(entry);
+  if (typeof physHooks.afterStep === 'function') physHooks.afterStep();
+  if ((physStep._n = (physStep._n || 0) + 1) % 5 === 0) refreshHarborPhysicsProbe();
+}
+
+function refreshHarborPhysicsProbe() {
+  const card = WIND_CARDINALS[harborWind.dirIdx];
+  const windProbe = {
+    on: harborWind.on && !physFreeze,
+    strength: harborWind.strength,
+    strIdx: harborWind.strIdx,
+    cardinal: card.name,
+    dir: { x: harborWind.dir.x, y: 0, z: harborWind.dir.z },
+    gust: harborWind.gust,
+    freeze: physFreeze,
+  };
+  window.__wind = windProbe;
+  window.__harborPhysics = {
+    engine: 'cannon-es',
+    freeze: physFreeze,
+    bodies: physEntries.length,
+    bollards: physEntries.filter((e) => e.kind === 'bollard').length,
+    lanterns: physLanterns.length,
+    crates: physCrates.length,
+    constraints: physConstraints.filter(Boolean).length,
+    constraintKinds: physConstraintOn
+      ? physLanterns.map(() => 'PointToPoint')
+      : [],
+    constraintOn: physConstraintOn,
+    staticGround: 2, // quay slab + seawall lip
+    wind: windProbe,
+    cratePos: physCrates.map((c) => ({
+      x: +c.body.position.x.toFixed(3),
+      y: +c.body.position.y.toFixed(3),
+      z: +c.body.position.z.toFixed(3),
+    })),
+    lanternPos: physLanterns.map((L) => ({
+      x: +L.body.position.x.toFixed(3),
+      y: +L.body.position.y.toFixed(3),
+      z: +L.body.position.z.toFixed(3),
+    })),
+  };
+  if (typeof physHooks.onProbe === 'function') physHooks.onProbe();
+}
+refreshHarborPhysicsProbe();
+
+window.addEventListener('noctuary-props-toss', physToss);
+window.addEventListener('noctuary-props-reset', physReset);
+const propsTossBtn = document.getElementById('props-toss');
+const propsResetBtn = document.getElementById('props-reset');
+const propsConstraintBtn = document.getElementById('props-constraint');
+if (propsTossBtn) propsTossBtn.addEventListener('click', physToss);
+if (propsResetBtn) propsResetBtn.addEventListener('click', physReset);
+if (propsConstraintBtn) {
+  propsConstraintBtn.addEventListener('click', () => physSetConstraint(!physConstraintOn));
+  if (physFreeze) {
+    propsConstraintBtn.classList.remove('on');
+    propsConstraintBtn.setAttribute('aria-pressed', 'false');
+    propsConstraintBtn.disabled = true;
+  }
+}
+
+const propsWindBtn = document.getElementById('props-wind');
+if (propsWindBtn) {
+  // Click toggles. Dir/strength stay on keys (,/. · [/]) so one Wind pill stays clean.
+  propsWindBtn.addEventListener('click', () => windSetOn(!harborWind.on));
+}
+window.addEventListener('noctuary-wind-toggle', () => windSetOn(!harborWind.on));
+window.addEventListener('noctuary-wind-dir', (ev) => windCycleDir(ev.detail || 1));
+window.addEventListener('noctuary-wind-str', (ev) => windCycleStr(ev.detail || 1));
+
+// Soft toast: brief exhibit-only (no button row). Hidden whenever HUD chrome shows actions.
+const propsHint = document.getElementById('props-hint');
+function syncPropsHint(forceShow) {
+  if (!propsHint) return;
+  if (showHud) { propsHint.classList.remove('on'); return; }
+  if (forceShow) propsHint.classList.add('on');
+  else propsHint.classList.remove('on');
+}
+if (propsHint && !physFreeze && !showHud) {
+  propsHint.classList.add('on');
+  setTimeout(() => { if (!showHud) propsHint.classList.remove('on'); }, 4200);
+}
+// ——— Signal beacon — product hero ShaderMaterial + halo ring ———
+const signalGroup = new THREE.Group();
+signalGroup.position.set(-6.5, 0, 3.2);
+scene.add(signalGroup);
+
+const signalMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uPulse: { value: 1 },
+  },
+  transparent: true,
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    varying vec3 vNormalW;
+    varying vec3 vWorldPos;
+    void main(){
+      vUv = uv;
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorldPos = wp.xyz;
+      vNormalW = normalize(mat3(modelMatrix) * normal);
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform float uTime;
+    uniform float uPulse;
+    varying vec2 vUv;
+    varying vec3 vNormalW;
+    varying vec3 vWorldPos;
+    void main(){
+      vec3 N = normalize(vNormalW);
+      float ndl = clamp(dot(N, normalize(vec3(0.3, 0.8, 0.4))), 0.2, 1.0);
+      vec3 body = vec3(0.12, 0.13, 0.18) * (0.5 + 0.5 * ndl);
+      // vertical gold core
+      float core = smoothstep(0.35, 0.0, abs(vUv.x - 0.5)) * (0.55 + 0.45 * uPulse);
+      vec3 goldC = vec3(0.94, 0.76, 0.29);
+      body = mix(body, goldC * 1.6, core * 0.85);
+      // tip flare
+      float tip = smoothstep(0.72, 1.0, vUv.y);
+      body += goldC * tip * (1.1 + 0.5 * uPulse);
+      float rim = pow(1.0 - max(dot(N, normalize(cameraPosition - vWorldPos)), 0.0), 2.0);
+      body += goldC * rim * 0.35 * uPulse;
+      gl_FragColor = vec4(body, 1.0);
+    }
+  `,
+});
+const beacon = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.09, 0.15, 4.2, 12),
+  signalMat
+);
+beacon.position.y = 2.1;
+beacon.layers.enable(BLOOM_LAYER);
+signalGroup.add(beacon);
+
+const haloMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uPulse: { value: 1 },
+  },
+  transparent: true,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+  blending: THREE.AdditiveBlending,
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main(){
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform float uTime;
+    uniform float uPulse;
+    varying vec2 vUv;
+    void main(){
+      vec2 c = vUv - 0.5;
+      float d = length(c) * 2.0;
+      float ring = smoothstep(0.55, 0.72, d) * smoothstep(1.05, 0.82, d);
+      float pulse = 0.55 + 0.45 * uPulse;
+      float a = ring * pulse * 0.85;
+      vec3 col = vec3(0.94, 0.76, 0.29) * (0.9 + 0.3 * sin(uTime * 1.5));
+      // soft inner glow
+      float glow = exp(-d * d * 2.2) * 0.35 * pulse;
+      col += vec3(1.0, 0.85, 0.45) * glow;
+      a = max(a, glow);
+      gl_FragColor = vec4(col, a);
+    }
+  `,
+});
+const halo = new THREE.Mesh(new THREE.RingGeometry(0.55, 1.35, 48), haloMat);
+halo.rotation.x = -Math.PI / 2;
+halo.position.y = 0.08;
+halo.layers.enable(BLOOM_LAYER);
+signalGroup.add(halo);
+
+const tipGlow = new THREE.Mesh(
+  new THREE.SphereGeometry(0.22, 12, 10),
+  new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uPulse: { value: 1 } },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */`
+      varying vec3 vN;
+      void main(){
+        vN = normalize(normalMatrix * normal);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform float uPulse;
+      varying vec3 vN;
+      void main(){
+        float f = pow(1.0 - abs(vN.z), 1.5);
+        vec3 col = vec3(1.0, 0.85, 0.4) * (1.2 * uPulse);
+        gl_FragColor = vec4(col, 0.75 + 0.2 * f);
+      }
+    `,
+  })
+);
+tipGlow.position.y = 4.25;
+tipGlow.layers.enable(BLOOM_LAYER);
+signalGroup.add(tipGlow);
+
+const beaconLight = new THREE.PointLight(0xf0c24b, 16, 22, 2);
+beaconLight.position.set(0, 4.0, 0);
+signalGroup.add(beaconLight);
+
+const signalWorld = new THREE.Vector3();
+const signalChip = document.getElementById('signal-chip');
+
+// ——— Soft springs (cannon-es Spring · tip / cables / banners) ———
+// Soft distance constraints — NOT atlas wire. Atlases are a later pass.
+const SPRING_COLLISION_GROUP = 4;
+const SPRING_COLLISION_MASK = 0; // springy props ignore collisions (stay lively under wind)
+const physSpringList = []; // CANNON.Spring[]
+const physSpringBodies = []; // dynamic entries { mesh, body, kind, mass, spawn }
+const physCableVisuals = []; // { line, positions Float32Array, getA(), getB() }
+const physBannerSegs = []; // banner panel entries (wind targets)
+let physSpringsOn = !physFreeze;
+const springScratchA = new CANNON.Vec3();
+const springScratchB = new CANNON.Vec3();
+const springThreeA = new THREE.Vector3();
+const springThreeB = new THREE.Vector3();
+const springMid = new THREE.Vector3();
+const springAxis = new THREE.Vector3();
+const springQuat = new THREE.Quaternion();
+const springYUp = new THREE.Vector3(0, 1, 0);
+
+function springMakeBody(mesh, body, kind, mass) {
+  if (mesh) {
+    scene.add(mesh);
+    mesh.userData.springKind = kind;
+  }
+  body.collisionFilterGroup = SPRING_COLLISION_GROUP;
+  body.collisionFilterMask = SPRING_COLLISION_MASK;
+  physWorld.addBody(body);
+  const entry = {
+    mesh, body, kind, mass,
+    spawn: {
+      position: body.position.clone(),
+      quaternion: body.quaternion.clone(),
+    },
+  };
+  if (mesh) mesh.userData.physEntry = entry;
+  physSpringBodies.push(entry);
+  if (mesh) {
+    mesh.position.copy(body.position);
+    mesh.quaternion.copy(body.quaternion);
+  }
+  return entry;
+}
+
+function springAdd(bodyA, bodyB, opts) {
+  const s = new CANNON.Spring(bodyA, bodyB, opts);
+  physSpringList.push(s);
+  return s;
+}
+
+function springMakeCable(getA, getB, color) {
+  const positions = new Float32Array(6);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.LineBasicMaterial({
+    color: color || 0xc4b49a,
+    transparent: true,
+    opacity: 0.78,
+    depthWrite: false,
+  });
+  const line = new THREE.Line(geo, mat);
+  line.frustumCulled = false;
+  scene.add(line);
+  // Thin cylinder companion (reads better than a 1px line at distance)
+  const cylGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 5);
+  const cylMat = new THREE.MeshStandardMaterial({
+    color: color || 0x8a8070, roughness: 0.72, metalness: 0.28,
+  });
+  const cyl = new THREE.Mesh(cylGeo, cylMat);
+  scene.add(cyl);
+  const vis = { line, cyl, positions, getA, getB };
+  physCableVisuals.push(vis);
+  return vis;
+}
+
+function springSyncCables() {
+  for (const vis of physCableVisuals) {
+    vis.getA(springThreeA);
+    vis.getB(springThreeB);
+    const p = vis.positions;
+    p[0] = springThreeA.x; p[1] = springThreeA.y; p[2] = springThreeA.z;
+    p[3] = springThreeB.x; p[4] = springThreeB.y; p[5] = springThreeB.z;
+    vis.line.geometry.attributes.position.needsUpdate = true;
+    springMid.addVectors(springThreeA, springThreeB).multiplyScalar(0.5);
+    springAxis.subVectors(springThreeB, springThreeA);
+    const len = Math.max(springAxis.length(), 0.001);
+    vis.cyl.position.copy(springMid);
+    vis.cyl.scale.set(1, len, 1);
+    springQuat.setFromUnitVectors(springYUp, springAxis.normalize());
+    vis.cyl.quaternion.copy(springQuat);
+    vis.cyl.visible = physSpringsOn || physFreeze;
+    vis.line.visible = physSpringsOn || physFreeze;
+  }
+}
+
+// —— Signal tip: soft spring (sways on wind; not rigid PointToPoint) ——
+const tipAnchorWorld = new THREE.Vector3();
+signalGroup.getWorldPosition(tipAnchorWorld);
+tipAnchorWorld.y += 4.28;
+const tipStatic = new CANNON.Body({
+  mass: 0,
+  type: CANNON.Body.STATIC,
+  position: new CANNON.Vec3(tipAnchorWorld.x, tipAnchorWorld.y, tipAnchorWorld.z),
+});
+physWorld.addBody(tipStatic);
+tipStatic.collisionFilterGroup = SPRING_COLLISION_GROUP;
+tipStatic.collisionFilterMask = SPRING_COLLISION_MASK;
+
+const tipMass = 0.12;
+const tipBody = new CANNON.Body({
+  mass: physFreeze ? 0 : tipMass,
+  shape: new CANNON.Sphere(0.16),
+  position: new CANNON.Vec3(tipAnchorWorld.x, tipAnchorWorld.y - 0.18, tipAnchorWorld.z),
+  linearDamping: 0.12,
+  angularDamping: 0.18,
+  allowSleep: false,
+});
+if (physFreeze) tipBody.type = CANNON.Body.STATIC;
+// Re-parent tipGlow onto scene so world sync is honest
+signalGroup.remove(tipGlow);
+const tipEntry = springMakeBody(tipGlow, tipBody, 'signalTip', tipMass);
+const tipSpring = springAdd(tipStatic, tipBody, {
+  restLength: 0.18,
+  stiffness: 28,
+  damping: 1.35,
+  localAnchorA: new CANNON.Vec3(0, 0, 0),
+  localAnchorB: new CANNON.Vec3(0, 0, 0),
+});
+springMakeCable(
+  (out) => { out.set(tipStatic.position.x, tipStatic.position.y, tipStatic.position.z); },
+  (out) => { out.set(tipBody.position.x, tipBody.position.y, tipBody.position.z); },
+  0xf0c24b
+);
+// Keep beacon light near tip
+beaconLight.position.set(0, 4.0, 0); // still parented to signalGroup (mast)
+
+// —— Guy cables: mid-mast → bollard tops with hanging bob (two springs each) ——
+const GUY_DEFS = [
+  {
+    mast: [-6.5, 2.35, 3.2],
+    bollard: [-3.6, 0.72, 4.55],
+    color: 0xb8a88c,
+  },
+  {
+    mast: [-6.5, 1.85, 3.2],
+    bollard: [-1.2, 0.72, 4.7],
+    color: 0x9a8e78,
+  },
+];
+for (const gd of GUY_DEFS) {
+  const aBody = new CANNON.Body({
+    mass: 0, type: CANNON.Body.STATIC,
+    position: new CANNON.Vec3(gd.mast[0], gd.mast[1], gd.mast[2]),
+  });
+  aBody.collisionFilterGroup = SPRING_COLLISION_GROUP;
+  aBody.collisionFilterMask = SPRING_COLLISION_MASK;
+  physWorld.addBody(aBody);
+  const bBody = new CANNON.Body({
+    mass: 0, type: CANNON.Body.STATIC,
+    position: new CANNON.Vec3(gd.bollard[0], gd.bollard[1], gd.bollard[2]),
+  });
+  bBody.collisionFilterGroup = SPRING_COLLISION_GROUP;
+  bBody.collisionFilterMask = SPRING_COLLISION_MASK;
+  physWorld.addBody(bBody);
+  const mx = (gd.mast[0] + gd.bollard[0]) * 0.5;
+  const my = (gd.mast[1] + gd.bollard[1]) * 0.5 - 0.22;
+  const mz = (gd.mast[2] + gd.bollard[2]) * 0.5;
+  const bobMesh = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 8, 6),
+    new THREE.MeshStandardMaterial({ color: gd.color, roughness: 0.65, metalness: 0.35 })
+  );
+  const bobMass = 0.12;
+  const bobBody = new CANNON.Body({
+    mass: physFreeze ? 0 : bobMass,
+    shape: new CANNON.Sphere(0.05),
+    position: new CANNON.Vec3(mx, my, mz),
+    linearDamping: 0.22,
+    angularDamping: 0.3,
+    allowSleep: false,
+  });
+  if (physFreeze) bobBody.type = CANNON.Body.STATIC;
+  springMakeBody(bobMesh, bobBody, 'cableBob', bobMass);
+  const restA = Math.hypot(gd.mast[0] - mx, gd.mast[1] - my, gd.mast[2] - mz);
+  const restB = Math.hypot(gd.bollard[0] - mx, gd.bollard[1] - my, gd.bollard[2] - mz);
+  springAdd(aBody, bobBody, { restLength: restA, stiffness: 55, damping: 2.0 });
+  springAdd(bBody, bobBody, { restLength: restB, stiffness: 55, damping: 2.0 });
+  springMakeCable(
+    (out) => out.set(aBody.position.x, aBody.position.y, aBody.position.z),
+    (out) => out.set(bobBody.position.x, bobBody.position.y, bobBody.position.z),
+    gd.color
+  );
+  springMakeCable(
+    (out) => out.set(bobBody.position.x, bobBody.position.y, bobBody.position.z),
+    (out) => out.set(bBody.position.x, bBody.position.y, bBody.position.z),
+    gd.color
+  );
+}
+
+// —— Banners: linked rigid segments + springs (cloth-like) ——
+const BANNER_DEFS = [
+  {
+    pole: [5.55, 0.04, 3.55],
+    yaw: -0.35,
+    w: 0.62, h: 0.36, segs: 3,
+    color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.12,
+  },
+  {
+    pole: [-4.15, 0.04, 4.15],
+    yaw: 0.55,
+    w: 0.55, h: 0.34, segs: 3,
+    color: 0x8a7bb8, emissive: 0x8a7bb8, ei: 0.1,
+  },
+];
+const bannerClothMat = (def) => new THREE.MeshStandardMaterial({
+  color: def.color,
+  roughness: 0.82,
+  metalness: 0.04,
+  emissive: def.emissive,
+  emissiveIntensity: def.ei,
+  side: THREE.DoubleSide,
+});
+
+for (const bd of BANNER_DEFS) {
+  const [px, py, pz] = bd.pole;
+  const poleH = 2.15;
+  const poleMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.035, 0.045, poleH, 8),
+    ironMatStd
+  );
+  poleMesh.position.set(px, py + poleH * 0.5, pz);
+  scene.add(poleMesh);
+  const poleBody = new CANNON.Body({
+    mass: 0, type: CANNON.Body.STATIC,
+    shape: new CANNON.Box(new CANNON.Vec3(0.04, poleH * 0.5, 0.04)),
+    position: new CANNON.Vec3(px, py + poleH * 0.5, pz),
+  });
+  physWorld.addBody(poleBody);
+
+  const armLen = bd.w + 0.08;
+  const armY = py + poleH - 0.06;
+  const cos = Math.cos(bd.yaw);
+  const sin = Math.sin(bd.yaw);
+  const armMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(armLen, 0.045, 0.045),
+    ironWarmStd
+  );
+  armMesh.position.set(px + cos * armLen * 0.5, armY, pz + sin * armLen * 0.5);
+  armMesh.rotation.y = -bd.yaw;
+  scene.add(armMesh);
+  const armBody = new CANNON.Body({
+    mass: 0, type: CANNON.Body.STATIC,
+    shape: new CANNON.Box(new CANNON.Vec3(armLen * 0.5, 0.025, 0.025)),
+    position: new CANNON.Vec3(px + cos * armLen * 0.5, armY, pz + sin * armLen * 0.5),
+  });
+  armBody.quaternion.setFromEuler(0, -bd.yaw, 0);
+  physWorld.addBody(armBody);
+
+  const segEntries = [];
+  const segMass = 0.09;
+  const mat = bannerClothMat(bd);
+  for (let i = 0; i < bd.segs; i++) {
+    const cy = armY - (i + 0.5) * bd.h - 0.02;
+    const cx = px + cos * (armLen * 0.55);
+    const cz = pz + sin * (armLen * 0.55);
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(bd.w, bd.h * 0.92, 0.03),
+      mat
+    );
+    if (i === 0) mesh.layers.enable(BLOOM_LAYER);
+    const body = new CANNON.Body({
+      mass: physFreeze ? 0 : segMass,
+      shape: new CANNON.Box(new CANNON.Vec3(bd.w * 0.5, bd.h * 0.46, 0.02)),
+      position: new CANNON.Vec3(cx, cy, cz),
+      linearDamping: 0.28,
+      angularDamping: 0.4,
+      allowSleep: false,
+    });
+    body.quaternion.setFromEuler(0, -bd.yaw, 0);
+    if (physFreeze) body.type = CANNON.Body.STATIC;
+    const entry = springMakeBody(mesh, body, 'bannerSeg', segMass);
+    entry.bannerIdx = physBannerSegs.length;
+    entry.segIdx = i;
+    segEntries.push(entry);
+    physBannerSegs.push(entry);
+  }
+  // Soft hang: PointToPoint keeps segments attached; Spring adds wind give
+  const armTipLocal = new CANNON.Vec3(armLen * 0.42, 0, 0);
+  const topLocalB = new CANNON.Vec3(0, bd.h * 0.45, 0);
+  if (!physFreeze) {
+    const hinge = new CANNON.PointToPointConstraint(
+      armBody, armTipLocal, segEntries[0].body, topLocalB
+    );
+    physWorld.addConstraint(hinge);
+    physConstraints.push(hinge);
+  }
+  armBody.pointToWorldFrame(armTipLocal, springScratchA);
+  segEntries[0].body.pointToWorldFrame(topLocalB, springScratchB);
+  springAdd(armBody, segEntries[0].body, {
+    restLength: Math.max(0.01, springScratchA.distanceTo(springScratchB)),
+    stiffness: 18,
+    damping: 2.0,
+    localAnchorA: armTipLocal,
+    localAnchorB: topLocalB,
+  });
+  springMakeCable(
+    (out) => {
+      armBody.pointToWorldFrame(armTipLocal, springScratchA);
+      out.set(springScratchA.x, springScratchA.y, springScratchA.z);
+    },
+    (out) => {
+      const b = segEntries[0].body;
+      out.set(b.position.x, b.position.y + bd.h * 0.4, b.position.z);
+    },
+    0x6a6470
+  );
+  for (let i = 0; i < bd.segs - 1; i++) {
+    const locA = new CANNON.Vec3(0, -bd.h * 0.45, 0);
+    const locB = new CANNON.Vec3(0, bd.h * 0.45, 0);
+    if (!physFreeze) {
+      const hinge = new CANNON.PointToPointConstraint(
+        segEntries[i].body, locA, segEntries[i + 1].body, locB
+      );
+      physWorld.addConstraint(hinge);
+      physConstraints.push(hinge);
+    }
+    segEntries[i].body.pointToWorldFrame(locA, springScratchA);
+    segEntries[i + 1].body.pointToWorldFrame(locB, springScratchB);
+    springAdd(segEntries[i].body, segEntries[i + 1].body, {
+      restLength: Math.max(0.01, springScratchA.distanceTo(springScratchB)),
+      stiffness: 14,
+      damping: 1.8,
+      localAnchorA: locA,
+      localAnchorB: locB,
+    });
+  }
+}
+
+function springApplyForces() {
+  if (physFreeze || !physSpringsOn) return;
+  for (const s of physSpringList) s.applyForce();
+}
+
+function springWindPush(base, dx, dz) {
+  if (physFreeze || !physSpringsOn || !harborWind.on) return;
+  // Signal tip — lively lateral sway
+  if (tipBody.type === CANNON.Body.DYNAMIC) {
+    const soft = base * 5.5;
+    tipBody.wakeUp();
+    tipBody.applyForce(
+      harborWind.forceScratch.set(dx * soft, soft * 0.08, dz * soft),
+      harborWind.offsetScratch.set(0, 0, 0)
+    );
+  }
+  // Cable bobs
+  for (const entry of physSpringBodies) {
+    if (entry.kind !== 'cableBob' || entry.body.type !== CANNON.Body.DYNAMIC) continue;
+    const soft = base * 1.6;
+    entry.body.wakeUp();
+    entry.body.applyForce(
+      harborWind.forceScratch.set(dx * soft, soft * 0.05, dz * soft),
+      harborWind.offsetScratch.set(0, 0, 0)
+    );
+  }
+  // Banner panels — lower segs catch more wind (cloth feel)
+  for (const entry of physBannerSegs) {
+    if (entry.body.type !== CANNON.Body.DYNAMIC) continue;
+    const catchF = 0.55 + entry.segIdx * 0.35;
+    const soft = base * 4.0 * catchF;
+    entry.body.wakeUp();
+    entry.body.applyForce(
+      harborWind.forceScratch.set(dx * soft, soft * 0.03, dz * soft),
+      harborWind.offsetScratch.set(0, 0, 0)
+    );
+    harborWind.torqueScratch.set(-dz * soft * 0.15, 0, dx * soft * 0.15);
+    entry.body.applyTorque(harborWind.torqueScratch);
+  }
+}
+
+function springSetOn(on) {
+  physSpringsOn = !!on && !physFreeze;
+  const btn = document.getElementById('props-springs');
+  if (btn) {
+    btn.classList.toggle('on', physSpringsOn);
+    btn.setAttribute('aria-pressed', physSpringsOn ? 'true' : 'false');
+    if (physFreeze) btn.disabled = true;
+  }
+  if (!physSpringsOn) {
+    for (const entry of physSpringBodies) {
+      entry.body.velocity.set(0, 0, 0);
+      entry.body.angularVelocity.set(0, 0, 0);
+      if (entry.mass > 0 && !physFreeze) {
+        // Park at spawn when springs disabled (no force integration)
+        entry.body.position.copy(entry.spawn.position);
+        entry.body.quaternion.copy(entry.spawn.quaternion);
+      }
+      if (entry.mesh) {
+        entry.mesh.position.copy(entry.body.position);
+        entry.mesh.quaternion.copy(entry.body.quaternion);
+      }
+    }
+  } else if (!physFreeze) {
+    for (const entry of physSpringBodies) {
+      if (entry.mass > 0) {
+        entry.body.type = CANNON.Body.DYNAMIC;
+        entry.body.mass = entry.mass;
+        entry.body.updateMassProperties();
+        entry.body.wakeUp();
+      }
+    }
+  }
+  springSyncCables();
+  refreshHarborPhysicsProbe();
+}
+
+function springReset() {
+  for (const entry of physSpringBodies) {
+    entry.body.position.copy(entry.spawn.position);
+    entry.body.quaternion.copy(entry.spawn.quaternion);
+    entry.body.velocity.set(0, 0, 0);
+    entry.body.angularVelocity.set(0, 0, 0);
+    if (!physFreeze && entry.mass > 0 && physSpringsOn) {
+      entry.body.type = CANNON.Body.DYNAMIC;
+      entry.body.mass = entry.mass;
+      entry.body.updateMassProperties();
+      entry.body.wakeUp();
+    }
+    if (entry.mesh) {
+      entry.mesh.position.copy(entry.body.position);
+      entry.mesh.quaternion.copy(entry.body.quaternion);
+    }
+  }
+  springSyncCables();
+}
+
+function springSyncMeshes() {
+  for (const entry of physSpringBodies) {
+    // Soft safety: park only if NaN / teleported; otherwise soft-cap speed
+    const bp = entry.body.position;
+    const speed = entry.body.velocity.length();
+    if (!Number.isFinite(bp.x) || !Number.isFinite(bp.y) || !Number.isFinite(bp.z)
+      || Math.abs(bp.x) > 40 || Math.abs(bp.y) > 40 || Math.abs(bp.z) > 40) {
+      entry.body.position.copy(entry.spawn.position);
+      entry.body.quaternion.copy(entry.spawn.quaternion);
+      entry.body.velocity.set(0, 0, 0);
+      entry.body.angularVelocity.set(0, 0, 0);
+    } else if (speed > 10) {
+      entry.body.velocity.scale(10 / speed, entry.body.velocity);
+    }
+    if (entry.mesh) {
+      entry.mesh.position.copy(entry.body.position);
+      entry.mesh.quaternion.copy(entry.body.quaternion);
+    }
+  }
+  if (tipBody && beaconLight) {
+    beaconLight.position.set(
+      tipBody.position.x - signalGroup.position.x,
+      tipBody.position.y - signalGroup.position.y - 0.15,
+      tipBody.position.z - signalGroup.position.z
+    );
+  }
+  springSyncCables();
+}
+
+function springFillProbe() {
+  const tipPos = tipBody
+    ? {
+        x: +tipBody.position.x.toFixed(3),
+        y: +tipBody.position.y.toFixed(3),
+        z: +tipBody.position.z.toFixed(3),
+      }
+    : null;
+  const bannerTips = physBannerSegs
+    .filter((e) => e.segIdx === 0)
+    .map((e) => ({
+      x: +e.body.position.x.toFixed(3),
+      y: +e.body.position.y.toFixed(3),
+      z: +e.body.position.z.toFixed(3),
+    }));
+  const springsProbe = {
+    on: physSpringsOn && !physFreeze,
+    freeze: physFreeze,
+    count: physSpringList.length,
+    bodies: physSpringBodies.length,
+    cables: physCableVisuals.length,
+    banners: BANNER_DEFS.length,
+    bannerSegs: physBannerSegs.length,
+    tip: tipPos,
+    bannerTips,
+    kinds: ['signalTip', 'cableBob', 'bannerSeg'],
+  };
+  window.__springs = springsProbe;
+  if (window.__harborPhysics) {
+    window.__harborPhysics.springs = springsProbe;
+    window.__harborPhysics.springCount = physSpringList.length;
+    const kinds = (window.__harborPhysics.constraintKinds || []).slice();
+    // Strip prior Spring tags then re-add if on
+    const base = kinds.filter((k) => k !== 'Spring');
+    if (physSpringsOn && !physFreeze) {
+      for (let i = 0; i < physSpringList.length; i++) base.push('Spring');
+    }
+    window.__harborPhysics.constraintKinds = base;
+  }
+}
+
+physHooks.afterWind = (t, base, dx, dz) => {
+  springWindPush(base, dx, dz);
+};
+physHooks.beforeStep = () => {
+  springApplyForces();
+};
+physHooks.afterStep = () => {
+  springSyncMeshes();
+};
+physHooks.onFreezeSync = () => {
+  for (const entry of physSpringBodies) {
+    entry.body.velocity.set(0, 0, 0);
+    entry.body.angularVelocity.set(0, 0, 0);
+    if (entry.mesh) {
+      entry.mesh.position.copy(entry.body.position);
+      entry.mesh.quaternion.copy(entry.body.quaternion);
+    }
+  }
+  springSyncCables();
+};
+physHooks.onReset = () => {
+  springReset();
+};
+physHooks.onProbe = () => {
+  springFillProbe();
+};
+window.__springLive = {
+  tipBody,
+  bannerSegs: physBannerSegs,
+  springsOn: () => physSpringsOn,
+  sample() {
+    return {
+      tip: {
+        x: tipBody.position.x,
+        y: tipBody.position.y,
+        z: tipBody.position.z,
+        vx: tipBody.velocity.x,
+        vy: tipBody.velocity.y,
+        vz: tipBody.velocity.z,
+      },
+      banners: physBannerSegs.map((e) => ({
+        i: e.segIdx,
+        x: e.body.position.x,
+        y: e.body.position.y,
+        z: e.body.position.z,
+        vx: e.body.velocity.x,
+      })),
+      on: physSpringsOn,
+    };
+  },
+};
+window.__frameQuaySprings = function (mode) {
+  // mode: 'signal' | 'banners' | 'wide' | 'atlas' | 'shop' | 'seawall' | 'windows' | edges/apt*
+  // Allow proof framing even under ?still=1 (rotate may be locked)
+  const prevRotate = controls.enableRotate;
+  const prevMin = controls.minDistance;
+  controls.enableRotate = true;
+  controls.minDistance = 0.05;
+  if (mode === 'banners') {
+    camera.position.set(8.5, 3.8, 8.2);
+    controls.target.set(5.2, 1.6, 3.6);
+  } else if (mode === 'wide') {
+    camera.position.set(4, 6.5, 12);
+    controls.target.set(-1, 1.8, 3.2);
+  } else if (mode === 'atlas') {
+    // Street-close on façades: ground shop band + upper room panes
+    camera.position.set(6.2, 2.4, 7.8);
+    controls.target.set(1.2, 2.8, -1.5);
+  } else if (mode === 'shop') {
+    // Tighter on ground-floor shop band
+    camera.position.set(4.8, 1.55, 6.4);
+    controls.target.set(0.6, 1.35, -0.8);
+  } else if (mode === 'seawall') {
+    // Water-side proof: basin outboard of seawall, quay dry
+    camera.position.set(11.5, 4.2, 14.5);
+    controls.target.set(0.5, 0.4, 5.6);
+  } else if (mode === 'windows') {
+    // Rectilinear façade + atlas panes head-on
+    camera.position.set(5.4, 2.1, 6.8);
+    controls.target.set(0.4, 2.2, -0.6);
+  } else if (mode === 'edges') {
+    // Elevated oblique skyline — straight box silhouettes (less worm's-eye warp)
+    camera.position.set(11.5, 9.5, 14.0);
+    controls.target.set(-0.8, 3.5, -1.2);
+  } else if (mode === 'mullions') {
+    // Close façade grid — straight mullions, nearly head-on
+    camera.position.set(1.8, 3.2, 3.4);
+    controls.target.set(0.1, 3.1, -1.6);
+  } else if (mode === 'aptA') {
+    // Ultra-close head-on lit panes — fenestra rooms must read
+    camera.position.set(0.9, 3.55, 1.85);
+    controls.target.set(0.15, 3.5, -1.7);
+  } else if (mode === 'aptB') {
+    // Second close façade / different rooms
+    camera.position.set(2.6, 2.9, 1.55);
+    controls.target.set(2.0, 2.85, -2.2);
+  } else if (mode === 'aptOblique') {
+    // Slight oblique close — furniture lines must stay straight
+    camera.position.set(2.4, 3.3, 2.6);
+    controls.target.set(0.4, 3.25, -1.6);
+  } else {
+    camera.position.set(-1.5, 4.2, 9.5);
+    controls.target.set(-5.2, 2.4, 3.5);
+  }
+  controls.update();
+  controls.minDistance = prevMin;
+  controls.enableRotate = prevRotate;
+  renderFrame();
+};
+window.__shotCam = function (pos, target) {
+  const prevRotate = controls.enableRotate;
+  const prevMin = controls.minDistance;
+  controls.enableRotate = true;
+  controls.minDistance = 0.05;
+  camera.position.set(pos[0], pos[1], pos[2]);
+  controls.target.set(target[0], target[1], target[2]);
+  controls.update();
+  controls.minDistance = prevMin;
+  controls.enableRotate = prevRotate;
+  renderFrame();
+};
+window.__harborView = { camera, controls, frame: window.__frameQuaySprings, shot: window.__shotCam };
+
+
+springSetOn(physSpringsOn);
+springSyncCables();
+refreshHarborPhysicsProbe();
+
+const propsSpringsBtn = document.getElementById('props-springs');
+if (propsSpringsBtn) {
+  propsSpringsBtn.addEventListener('click', () => springSetOn(!physSpringsOn));
+  if (physFreeze) {
+    propsSpringsBtn.classList.remove('on');
+    propsSpringsBtn.setAttribute('aria-pressed', 'false');
+    propsSpringsBtn.disabled = true;
+  }
+}
+window.addEventListener('noctuary-springs-toggle', () => springSetOn(!physSpringsOn));
+
+// ——— Ping-pong FBO — denser mist + wind bias + Signal ember channel ———
+const FBO_SIZE = 64;
+const fboA = new THREE.WebGLRenderTarget(FBO_SIZE, FBO_SIZE, {
+  type: THREE.HalfFloatType,
+  minFilter: THREE.NearestFilter,
+  magFilter: THREE.NearestFilter,
+  format: THREE.RGBAFormat,
+});
+const fboB = fboA.clone();
+let fboRead = fboA;
+let fboWrite = fboB;
+let fboFlip = false;
+
+const fboScene = new THREE.Scene();
+const fboCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+const fboMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTex: { value: null },
+    uTime: { value: 0 },
+    uPointer: { value: new THREE.Vector2(0, 0) },
+    uSeed: { value: freezeMotion ? 1.0 : 0.0 },
+    uSignalUV: { value: new THREE.Vector2(0.28, 0.42) },
+    uSignalBright: { value: 1.0 },
+    uWindBias: { value: new THREE.Vector2(0.045, 0.008) },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D uTex;
+    uniform float uTime;
+    uniform vec2 uPointer;
+    uniform float uSeed;
+    uniform vec2 uSignalUV;
+    uniform float uSignalBright;
+    uniform vec2 uWindBias;
+    varying vec2 vUv;
+    ${NOISE_GLSL}
+    void main(){
+      if (uSeed > 0.5) {
+        float d = fbm(vUv * 4.5) * 1.15;
+        float emb = exp(-dot(vUv - uSignalUV, vUv - uSignalUV) * 18.0) * 0.55;
+        gl_FragColor = vec4(clamp(d,0.,1.), emb, 0.25, 1.0);
+        return;
+      }
+      // scene wind bias (Harbor wind → mist/ember drift)
+      vec2 wind = uWindBias;
+      vec2 vel = vec2(
+        noise(vUv * 3.0 + uTime * 0.08) - 0.5,
+        noise(vUv * 3.0 + 17.0 + uTime * 0.07) - 0.5
+      );
+      vel += wind;
+      vel += (uPointer - vUv * 2.0 + 1.0) * 0.012;
+      vec2 uv2 = fract(vUv - vel * 0.02);
+      vec4 prev = texture2D(uTex, uv2);
+      float inject = exp(-dot(vUv - (uPointer * 0.5 + 0.5), vUv - (uPointer * 0.5 + 0.5)) * 36.0) * 0.4;
+      // Signal brightens nearby ember / spark channel (g)
+      float sig = exp(-dot(vUv - uSignalUV, vUv - uSignalUV) * 22.0) * uSignalBright;
+      float ember = (inject * 0.55 + sig * 0.7) * (0.55 + 0.45 * sin(uTime * 3.2));
+      float dens = prev.r * 0.982 + inject * 0.14 + noise(vUv * 8.0 + uTime) * 0.01 + sig * 0.04;
+      dens = clamp(dens, 0.0, 1.0);
+      float g = clamp(prev.g * 0.965 + ember * 0.5, 0.0, 1.0);
+      float b = clamp(prev.b * 0.978 + sig * 0.08, 0.0, 1.0);
+      gl_FragColor = vec4(dens, g, b, 1.0);
+    }
+  `,
+});
+const fboQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), fboMat);
+fboScene.add(fboQuad);
+
+fboMat.uniforms.uSeed.value = 1.0;
+fboMat.uniforms.uTex.value = fboRead.texture;
+renderer.setRenderTarget(fboWrite);
+renderer.render(fboScene, fboCam);
+renderer.setRenderTarget(null);
+{ const t = fboRead; fboRead = fboWrite; fboWrite = t; fboFlip = !fboFlip; }
+fboMat.uniforms.uSeed.value = freezeMotion ? 1.0 : 0.0;
+
+const MIST_N = 1200;
+const mistPos = new Float32Array(MIST_N * 3);
+const mistUV = new Float32Array(MIST_N * 2);
+const cols = 36;
+const rows = Math.ceil(MIST_N / cols);
+for (let i = 0; i < MIST_N; i++) {
+  const u = (i % cols) / (cols - 1);
+  const v = Math.floor(i / cols) / Math.max(rows - 1, 1);
+  mistUV[i * 2] = u;
+  mistUV[i * 2 + 1] = v;
+  mistPos[i * 3] = (u - 0.5) * 30;
+  mistPos[i * 3 + 1] = 0.35 + v * 7.2;
+  mistPos[i * 3 + 2] = 3.5 + (v - 0.5) * 12;
+}
+const mistGeo = new THREE.BufferGeometry();
+mistGeo.setAttribute('position', new THREE.BufferAttribute(mistPos, 3));
+mistGeo.setAttribute('aUv', new THREE.BufferAttribute(mistUV, 2));
+
+const mistMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTex: { value: fboRead.texture },
+    uTime: { value: 0 },
+    uPixelRatio: { value: Math.min(devicePixelRatio, 2) },
+  },
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexShader: /* glsl */`
+    attribute vec2 aUv;
+    uniform sampler2D uTex;
+    uniform float uTime;
+    uniform float uPixelRatio;
+    varying float vAlpha;
+    varying vec3 vCol;
+    void main(){
+      vec4 dens = texture2D(uTex, aUv);
+      vec3 p = position;
+      p.y += dens.r * 2.1;
+      p.x += (dens.g - 0.25) * 2.4 + dens.b * 0.8;
+      p.z += sin(uTime * 0.3 + aUv.x * 6.0) * dens.r * 0.35;
+      vec4 mv = modelViewMatrix * vec4(p, 1.0);
+      gl_Position = projectionMatrix * mv;
+      float s = 5.0 + dens.r * 32.0 + dens.g * 22.0;
+      gl_PointSize = s * uPixelRatio * (1.2 / -mv.z);
+      vAlpha = dens.r * 0.62 + dens.g * 0.42;
+      vCol = mix(vec3(0.54, 0.48, 0.72), vec3(0.94, 0.76, 0.29), dens.g);
+      vCol = mix(vCol, vec3(1.0, 0.55, 0.28), dens.b * 0.55);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    varying float vAlpha;
+    varying vec3 vCol;
+    void main(){
+      vec2 c = gl_PointCoord - 0.5;
+      float d = length(c);
+      if (d > 0.5) discard;
+      float a = smoothstep(0.5, 0.08, d) * vAlpha;
+      gl_FragColor = vec4(vCol, a);
+    }
+  `,
+});
+const mist = new THREE.Points(mistGeo, mistMat);
+scene.add(mist);
+
+// ——— Selective bloom (layers + darken non-bloomed → bloom RT → composite) ———
+const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+const darkPointsMat = new THREE.PointsMaterial({ color: 0x000000, size: 0.001, opacity: 0, transparent: true });
+const savedMats = new Map();
+
+function darkenNonBloomed(obj) {
+  if (obj.isMesh && bloomLayer.test(obj.layers) === false) {
+    savedMats.set(obj.uuid, obj.material);
+    obj.material = darkMaterial;
+  } else if (obj.isPoints && bloomLayer.test(obj.layers) === false) {
+    savedMats.set(obj.uuid, obj.material);
+    obj.material = darkPointsMat;
+  }
+}
+function restoreBloomed(obj) {
+  const m = savedMats.get(obj.uuid);
+  if (m !== undefined) {
+    obj.material = m;
+    savedMats.delete(obj.uuid);
+  }
+}
+
+const renderScenePass = new RenderPass(scene, camera);
+
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.55, 0.35, 0.72);
+bloomPass.threshold = 0.72; // quay/water stay out of bloom; lanterns/windows/Signal in
+bloomPass.strength = freezeMotion ? 0 : 0.55;
+bloomPass.radius = 0.35;
+
+const bloomComposer = new EffectComposer(renderer);
+bloomComposer.renderToScreen = false;
+bloomComposer.addPass(renderScenePass);
+bloomComposer.addPass(bloomPass);
+
+const mixPass = new ShaderPass(
+  new THREE.ShaderMaterial({
+    uniforms: {
+      baseTexture: { value: null },
+      bloomTexture: { value: bloomComposer.renderTarget2.texture },
+    },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      void main(){
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: /* glsl */`
+      uniform sampler2D baseTexture;
+      uniform sampler2D bloomTexture;
+      varying vec2 vUv;
+      void main(){
+        vec4 base = texture2D(baseTexture, vUv);
+        vec4 bloom = texture2D(bloomTexture, vUv);
+        gl_FragColor = vec4(base.rgb + bloom.rgb, max(base.a, bloom.a));
+      }
+    `,
+  }),
+  'baseTexture'
+);
+mixPass.needsSwap = true;
+
+const finalComposer = new EffectComposer(renderer);
+finalComposer.addPass(new RenderPass(scene, camera));
+finalComposer.addPass(mixPass);
+finalComposer.addPass(new OutputPass());
+
+// still / RM: skip heavy bloom — single composer path without selective
+const stillComposer = new EffectComposer(renderer);
+stillComposer.addPass(new RenderPass(scene, camera));
+const softBloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0, 0.4, 0.9);
+softBloom.enabled = false;
+stillComposer.addPass(softBloom);
+stillComposer.addPass(new OutputPass());
+
+function renderFrame() {
+  if (freezeMotion) {
+    stillComposer.render();
+    return;
+  }
+  const bg = scene.background;
+  const fog = scene.fog;
+  scene.background = null;
+  scene.fog = null;
+  scene.traverse(darkenNonBloomed);
+  bloomComposer.render();
+  scene.traverse(restoreBloomed);
+  scene.background = bg;
+  scene.fog = fog;
+  finalComposer.render();
+}
+
+// ——— Resize ———
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  bloomComposer.setSize(innerWidth, innerHeight);
+  finalComposer.setSize(innerWidth, innerHeight);
+  stillComposer.setSize(innerWidth, innerHeight);
+  bloomPass.setSize(innerWidth, innerHeight);
+  mistMat.uniforms.uPixelRatio.value = Math.min(devicePixelRatio, 2);
+});
+
+
+// ——— Citizen first-person walk (PointerLock) ———
+// Eye height scaled to storey (~0.58) on street cell near quay.
+const walkHint = document.getElementById('walk-hint');
+const walkControls = new PointerLockControls(camera, renderer.domElement);
+walkControls.disconnect(); // start disconnected; Orbit owns the canvas
+
+const WALK_SPAWN = new THREE.Vector3(
+  0,
+  EYE_H,
+  gridOriginZ + STREET_W * 0.5 // first quay-side street center (~1.925)
+);
+const walkKeys = { f: false, b: false, l: false, r: false, sprint: false };
+const walkRay = new THREE.Raycaster();
+walkRay.near = 0;
+walkRay.far = 0.42;
+const _wOrigin = new THREE.Vector3();
+const _wDir = new THREE.Vector3();
+const _wForward = new THREE.Vector3();
+const _wRight = new THREE.Vector3();
+const WALK_DIRS = [
+  new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(-1, 0, 0),
+  new THREE.Vector3(0, 0, 1),
+  new THREE.Vector3(0, 0, -1),
+];
+const BODY_R = 0.22;
+const CHEST_Y = EYE_H * 0.72;
+const collideMeshes = [mesh];
+if (typeof quay !== 'undefined' && quay) collideMeshes.push(quay);
+
+let walkMode = false;
+const orbitSave = {
+  pos: new THREE.Vector3(),
+  target: new THREE.Vector3(),
+  fov: ORBIT_FOV,
+};
+
+function walkBlockedAt(x, z) {
+  // Soft district / water bounds (quay deck ~z 2.4, water beyond seawall ~5+)
+  if (z > 5.15 || z < rearZ - 2.0) return true;
+  if (Math.abs(x) > districtW * 0.58) return true;
+  _wOrigin.set(x, CHEST_Y, z);
+  for (let i = 0; i < 4; i++) {
+    walkRay.set(_wOrigin, WALK_DIRS[i]);
+    walkRay.far = BODY_R;
+    const hits = walkRay.intersectObjects(collideMeshes, false);
+    if (hits.length && hits[0].distance < BODY_R) return true;
+  }
+  return false;
+}
+
+function tryWalkStep(dx, dz) {
+  const x0 = camera.position.x;
+  const z0 = camera.position.z;
+  const nx = x0 + dx;
+  const nz = z0 + dz;
+  if (!walkBlockedAt(nx, nz)) {
+    camera.position.x = nx;
+    camera.position.z = nz;
+  } else if (!walkBlockedAt(nx, z0)) {
+    camera.position.x = nx;
+  } else if (!walkBlockedAt(x0, nz)) {
+    camera.position.z = nz;
+  }
+  camera.position.y = EYE_H;
+}
+
+function updateWalk(dt) {
+  if (!walkMode) return;
+  camera.position.y = EYE_H;
+  if (!walkControls.isLocked) return;
+  // Compressed scene units (EYE_H≈0.58 ≈ citizen): was ~0.85/1.55 — too fast vs eye.
+  const speed = (walkKeys.sprint ? 0.88 : 0.50) * dt;
+  let fwd = 0;
+  let strafe = 0;
+  if (walkKeys.f) fwd += 1;
+  if (walkKeys.b) fwd -= 1;
+  if (walkKeys.r) strafe += 1;
+  if (walkKeys.l) strafe -= 1;
+  if (fwd === 0 && strafe === 0) return; // idle: base EYE_H already restored
+  // Move relative to look yaw (PointerLock yaw on camera)
+  walkControls.getDirection(_wForward);
+  _wForward.y = 0;
+  if (_wForward.lengthSq() < 1e-6) _wForward.set(0, 0, -1);
+  else _wForward.normalize();
+  _wRight.crossVectors(_wForward, camera.up).normalize();
+  _wDir.set(0, 0, 0);
+  _wDir.addScaledVector(_wForward, fwd);
+  _wDir.addScaledVector(_wRight, strafe);
+  if (_wDir.lengthSq() < 1e-6) return;
+  _wDir.normalize().multiplyScalar(speed);
+  tryWalkStep(_wDir.x, _wDir.z);
+  // Light head-bob while moving + locked (night-street gait)
+  camera.position.y = EYE_H + Math.sin(clock.elapsedTime * 9.0) * 0.008;
+}
+
+function setWalkMode(on) {
+  if (on === walkMode) {
+    if (on && walkHint) walkHint.classList.add('on');
+    return;
+  }
+  if (on) stopTour(false);
+  walkMode = on;
+  try { localStorage.setItem(WALK_KEY, on ? 'on' : 'off'); } catch (_) {}
+  if (on) {
+    orbitSave.pos.copy(camera.position);
+    orbitSave.target.copy(controls.target);
+    orbitSave.fov = camera.fov;
+    controls.autoRotate = false;
+    controls.enabled = false;
+    walkControls.enabled = true;
+    walkControls.connect();
+    camera.fov = WALK_FOV;
+    camera.updateProjectionMatrix();
+    // Street spawn — look into district (−Z)
+    camera.position.copy(WALK_SPAWN);
+    camera.rotation.set(0, 0, 0);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(WALK_SPAWN.x, EYE_H, WALK_SPAWN.z - 4);
+    camera.position.y = EYE_H;
+    // Nudge if spawn somehow overlaps (rare)
+    if (walkBlockedAt(camera.position.x, camera.position.z)) {
+      camera.position.z = gridOriginZ + STREET_W * 0.5;
+      camera.position.x = 0;
+      for (let k = 0; k < 8 && walkBlockedAt(camera.position.x, camera.position.z); k++) {
+        camera.position.x += (k % 2 === 0 ? 1 : -1) * 0.5 * (1 + (k >> 1));
+      }
+    }
+    if (walkHint) {
+      walkHint.textContent = 'Citizen · WASD · click to look · V to exit';
+      walkHint.classList.add('on');
+    }
+  } else {
+    if (walkControls.isLocked) walkControls.unlock();
+    walkControls.enabled = false;
+    walkControls.disconnect();
+    controls.enabled = true;
+    camera.position.copy(orbitSave.pos);
+    controls.target.copy(orbitSave.target);
+    camera.fov = orbitSave.fov || ORBIT_FOV;
+    camera.updateProjectionMatrix();
+    controls.update();
+    if (walkHint) walkHint.classList.remove('on');
+    walkKeys.f = walkKeys.b = walkKeys.l = walkKeys.r = walkKeys.sprint = false;
+  }
+}
+
+window.addEventListener('noctuary-toggle-walk', () => setWalkMode(!walkMode));
+
+renderer.domElement.addEventListener('click', () => {
+  if (walkMode && !walkControls.isLocked) walkControls.lock();
+});
+
+addEventListener('keydown', (e) => {
+  if (!walkMode) return;
+  if (e.target && /input|textarea|select/i.test(e.target.tagName)) return;
+  switch (e.code) {
+    case 'KeyW': case 'ArrowUp': walkKeys.f = true; e.preventDefault(); break;
+    case 'KeyS': case 'ArrowDown': walkKeys.b = true; e.preventDefault(); break;
+    case 'KeyA': case 'ArrowLeft': walkKeys.l = true; e.preventDefault(); break;
+    case 'KeyD': case 'ArrowRight': walkKeys.r = true; e.preventDefault(); break;
+    case 'ShiftLeft': case 'ShiftRight': walkKeys.sprint = true; break;
+  }
+});
+addEventListener('keyup', (e) => {
+  switch (e.code) {
+    case 'KeyW': case 'ArrowUp': walkKeys.f = false; break;
+    case 'KeyS': case 'ArrowDown': walkKeys.b = false; break;
+    case 'KeyA': case 'ArrowLeft': walkKeys.l = false; break;
+    case 'KeyD': case 'ArrowRight': walkKeys.r = false; break;
+    case 'ShiftLeft': case 'ShiftRight': walkKeys.sprint = false; break;
+  }
+});
+
+// ——— Citizen auto-tour (?tour=1 / key T) — no PointerLock ———
+const tourHint = document.getElementById('tour-hint');
+const tourLogEl = document.getElementById('tour-log');
+window.__harborTourLog = [];
+
+const TOUR_SEG_S = 1.5;
+let tourMode = false;
+let tourIdx = 0;
+let tourT = 0;
+let tourWaypoints = [];
+
+function buildTourWaypoints() {
+  // Polyline around first block (bx=0,bz=0) at street centers, eye height.
+  const b = blockRect(0, 0);
+  const quayZ = gridOriginZ + STREET_W * 0.5;
+  const northZ = gridOriginZ - cellD + STREET_W * 0.5;
+  const westX = gridOriginX - STREET_W * 0.5;
+  const eastX = gridOriginX - STREET_W * 0.5 + cellW;
+  const midX = (b.x0 + b.x1) * 0.5;
+  const midZ = (b.z0 + b.z1) * 0.5;
+  const y = EYE_H;
+  // look targets: block center or along street façades
+  const cx = midX;
+  const cz = midZ;
+  return [
+    { p: [midX, y, quayZ], look: [midX, y, cz], note: 'Quay street · face south façade' },
+    { p: [(midX + eastX) * 0.5, y, quayZ], look: [midX, y, b.z1], note: 'Quay eastbound · approach SE corner' },
+    { p: [eastX, y, quayZ], look: [b.x1, y, b.z1], note: 'SE corner · watch edge kill / shared seed' },
+    { p: [eastX, y, (quayZ + midZ) * 0.5], look: [b.x1, y, midZ], note: 'East street · +X façade' },
+    { p: [eastX, y, midZ], look: [cx, y, cz], note: 'East mid · look into block' },
+    { p: [eastX, y, (midZ + northZ) * 0.5], look: [b.x1, y, midZ], note: 'East northbound · approach NE' },
+    { p: [eastX, y, northZ], look: [b.x1, y, b.z0], note: 'NE corner' },
+    { p: [midX, y, northZ], look: [cx, y, b.z0], note: 'North street · rear façade' },
+    { p: [westX, y, northZ], look: [b.x0, y, b.z0], note: 'NW corner' },
+    { p: [westX, y, midZ], look: [cx, y, cz], note: 'West street · −X façade (same rooms as +Z?)' },
+    { p: [westX, y, quayZ], look: [b.x0, y, b.z1], note: 'SW corner · back to quay' },
+    { p: [midX, y, quayZ], look: [midX, y, cz], note: 'Quay return · tour end' },
+  ];
+}
+
+function tourLog(msg) {
+  window.__harborTourLog.push(msg);
+  console.log('[harbor-tour]', msg);
+}
+
+function fillTourChecklist() {
+  const lines = [
+    'CITIZEN TOUR CHECKLIST (auto)',
+    '=============================',
+    `Eye height EYE_H = ${EYE_H.toFixed(3)}  CHEST_Y = ${CHEST_Y.toFixed(3)}  BODY_R = ${BODY_R.toFixed(3)}`,
+    `Waypoints: ${tourWaypoints.length} · segment ${TOUR_SEG_S}s · no PointerLock`,
+    '',
+    'Heuristic / code-known:',
+    '• [x] Shared 3D room seed from lpM cellX/Y/Z (+ vId) — not façade UV cell',
+    '• [x] Corner back-wall band: thin edgeKill + sideMute=1 near edge/glancing + camM.x damp',
+    '• [x] Distance LOD impostor (lodFlat mix to flat back atlas 16–36u)',
+    '• [x] Night-street gait: walk 0.50 / sprint 0.88 + head-bob',
+    '• [x] Street widths: SIDEWALK_W 0.50 · STREET_W 1.65',
+    '• [x] Collision chest = EYE_H*0.72 (was stale 1.15)',
+    '• [x] Face-map default + V walk unchanged',
+    '',
+    'Parent (manual / screenshots):',
+    '• [ ] Walk past a corner — same room lit/seed from +X and +Z?',
+    '• [ ] Vertical edges read as solid wall / mullion (no reoriented room)?',
+    '• [ ] Street-level eye height feels citizen-scale vs storey?',
+    '• [ ] WASD walk + click look still works (V)?',
+    '',
+    'Log:',
+    ...window.__harborTourLog.map((m) => `• ${m}`),
+  ];
+  const body = lines.join('\n');
+  if (tourLogEl) {
+    tourLogEl.textContent = body;
+    tourLogEl.classList.add('on');
+  }
+  document.title = 'Harbor tour done · shared-seed + edge kill';
+  tourLog('checklist written to #tour-log');
+}
+
+function stopTour(restoreOrbit = true) {
+  if (!tourMode) return;
+  tourMode = false;
+  if (tourHint) tourHint.classList.remove('on');
+  if (restoreOrbit && !walkMode) {
+    controls.enabled = true;
+    camera.position.copy(orbitSave.pos);
+    controls.target.copy(orbitSave.target);
+    camera.fov = orbitSave.fov || ORBIT_FOV;
+    camera.updateProjectionMatrix();
+    controls.update();
+  }
+}
+
+function startTour() {
+  if (tourMode) return;
+  // Exit pointer-lock walk if active (tour is non-lock citizen path)
+  if (walkMode) {
+    if (walkControls.isLocked) walkControls.unlock();
+    walkControls.enabled = false;
+    walkControls.disconnect();
+    walkMode = false;
+    try { localStorage.setItem(WALK_KEY, 'off'); } catch (_) {}
+    if (walkHint) walkHint.classList.remove('on');
+    walkKeys.f = walkKeys.b = walkKeys.l = walkKeys.r = walkKeys.sprint = false;
+  }
+  tourWaypoints = buildTourWaypoints();
+  tourIdx = 0;
+  tourT = 0;
+  tourMode = true;
+  window.__harborTourLog = [];
+  if (tourLogEl) {
+    tourLogEl.classList.remove('on');
+    tourLogEl.textContent = '';
+  }
+  orbitSave.pos.copy(camera.position);
+  orbitSave.target.copy(controls.target);
+  orbitSave.fov = camera.fov;
+  controls.autoRotate = false;
+  controls.enabled = false;
+  camera.fov = WALK_FOV;
+  camera.updateProjectionMatrix();
+  const w0 = tourWaypoints[0];
+  camera.position.set(w0.p[0], EYE_H, w0.p[2]);
+  camera.up.set(0, 1, 0);
+  camera.lookAt(w0.look[0], w0.look[1], w0.look[2]);
+  if (walkHint) walkHint.classList.remove('on');
+  if (tourHint) {
+    tourHint.textContent = `Tour 1/${tourWaypoints.length} · ${w0.note}`;
+    tourHint.classList.add('on');
+  }
+  tourLog(`start · ${tourWaypoints.length} waypoints · EYE_H=${EYE_H}`);
+  tourLog(w0.note);
+}
+
+function updateTour(dt) {
+  if (!tourMode || tourWaypoints.length < 2) return;
+  tourT += dt;
+  const i0 = Math.min(tourIdx, tourWaypoints.length - 1);
+  const i1 = Math.min(tourIdx + 1, tourWaypoints.length - 1);
+  const a = tourWaypoints[i0];
+  const b = tourWaypoints[i1];
+  let u = tourT / TOUR_SEG_S;
+  if (u >= 1) {
+    tourIdx++;
+    tourT = 0;
+    u = 0;
+    if (tourIdx >= tourWaypoints.length - 1) {
+      camera.position.set(b.p[0], EYE_H, b.p[2]);
+      camera.lookAt(b.look[0], b.look[1], b.look[2]);
+      tourLog(b.note);
+      tourLog('complete');
+      if (tourHint) tourHint.textContent = 'Tour complete · see #tour-log · V to walk · T to replay';
+      fillTourChecklist();
+      // Stay at final street eye view; V enters walk, T replays. Orbit restored on walk exit.
+      tourMode = false;
+      if (walkHint) {
+        walkHint.textContent = 'Tour done · V walk · T replay';
+        walkHint.classList.add('on');
+      }
+      return;
+    }
+    const n = tourWaypoints[tourIdx];
+    tourLog(n.note);
+    if (tourHint) {
+      tourHint.textContent = `Tour ${tourIdx + 1}/${tourWaypoints.length} · ${n.note}`;
+    }
+  }
+  const iA = Math.min(tourIdx, tourWaypoints.length - 1);
+  const iB = Math.min(tourIdx + 1, tourWaypoints.length - 1);
+  const A = tourWaypoints[iA];
+  const B = tourWaypoints[iB];
+  const uu = Math.min(1, tourT / TOUR_SEG_S);
+  // smoothstep
+  const s = uu * uu * (3 - 2 * uu);
+  camera.position.set(
+    A.p[0] + (B.p[0] - A.p[0]) * s,
+    EYE_H,
+    A.p[2] + (B.p[2] - A.p[2]) * s
+  );
+  const lx = A.look[0] + (B.look[0] - A.look[0]) * s;
+  const ly = A.look[1] + (B.look[1] - A.look[1]) * s;
+  const lz = A.look[2] + (B.look[2] - A.look[2]) * s;
+  camera.lookAt(lx, ly, lz);
+}
+
+window.addEventListener('noctuary-start-tour', () => startTour());
+
+// Boot from ?walk=1 / localStorage after meshes exist — tour wins if ?tour
+const tourWanted = params.has('tour');
+if (tourWanted) startTour();
+else if (walkWanted) setWalkMode(true);
+
+// ——— Debug HUD (?debug=1) ———
+const debugHud = document.getElementById('debug-hud');
+const debugRay = new THREE.Raycaster();
+const _dbgDir = new THREE.Vector3();
+const _dbgEuler = new THREE.Euler();
+let dbgFaceHint = '—';
+let dbgRoomHint = '—';
+let dbgHitDist = '—';
+let dbgInst = '—';
+
+function hash3js(x, y, z) {
+  // Match shader hash3 enough for room index preview (not bit-identical).
+  let n = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function updateDebugHud(fps) {
+  if (!debugMode || !debugHud) return;
+  debugHud.classList.add('on');
+  camera.getWorldDirection(_dbgDir);
+  _dbgEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+  const yaw = ((_dbgEuler.y * 180) / Math.PI).toFixed(1);
+  const pitch = ((_dbgEuler.x * 180) / Math.PI).toFixed(1);
+  // Ray into façades for room seed preview
+  debugRay.set(camera.position, _dbgDir);
+  debugRay.far = 28;
+  const hits = debugRay.intersectObjects(collideMeshes, false);
+  if (hits.length) {
+    const h = hits[0];
+    dbgHitDist = h.distance.toFixed(2);
+    dbgInst = (h.instanceId != null) ? String(h.instanceId) : '—';
+    const p = h.point;
+    // Approximate shared room cell like shader (metre grid)
+    const cellX = Math.floor(p.x / 1.2);
+    const cellY = Math.floor(p.y / 0.95);
+    const cellZ = Math.floor(p.z / 1.2);
+    const h0 = hash3js(cellX + 0.17, cellY + 0.09, cellZ + 0.05);
+    const ri = Math.floor(h0 * 7) % 7;
+    dbgRoomHint = `${ri}:${ROOM_FACE_NAMES[ri] || '?'}`;
+    // Face hint from normal world
+    const n = h.face ? h.face.normal.clone() : new THREE.Vector3(0, 0, 1);
+    if (h.object && h.object.isInstancedMesh && h.instanceId != null) {
+      // world normal approx from camera-to-hit
+      const toward = camera.position.clone().sub(p).normalize();
+      const ax = Math.abs(toward.x), ay = Math.abs(toward.y), az = Math.abs(toward.z);
+      if (ay > ax && ay > az) dbgFaceHint = toward.y > 0 ? 'floor~' : 'ceil~';
+      else if (ax > az) dbgFaceHint = 'side-X';
+      else dbgFaceHint = 'façade-Z';
+    } else {
+      dbgFaceHint = 'hit';
+    }
+  } else {
+    dbgHitDist = '—';
+    dbgInst = '—';
+    dbgRoomHint = '—';
+    dbgFaceHint = '—';
+  }
+  const mode = tourMode ? 'tour' : (walkMode ? 'walk' : 'orbit');
+  debugHud.textContent =
+    `Harbor debug\n` +
+    `fps      ${fps}\n` +
+    `mode     ${mode}\n` +
+    `faces    ${facesMode ? 'on' : 'off'} · rooms 7\n` +
+    `eye      ${camera.position.x.toFixed(2)} ${camera.position.y.toFixed(2)} ${camera.position.z.toFixed(2)}\n` +
+    `eyeH     ${EYE_H.toFixed(2)} (locked)\n` +
+    `yaw/pit  ${yaw}° / ${pitch}°\n` +
+    `look     ${_dbgDir.x.toFixed(2)} ${_dbgDir.y.toFixed(2)} ${_dbgDir.z.toFixed(2)}\n` +
+    `hitDist  ${dbgHitDist}  inst ${dbgInst}\n` +
+    `room~    ${dbgRoomHint}\n` +
+    `face~    ${dbgFaceHint}\n` +
+    `keys     V walk · T tour · ?debug=1`;
+}
+
+// ——— Animate ———
+const clock = new THREE.Clock();
+let frames = 0;
+let fpsAcc = 0;
+let fpsShow = 0;
+const fpsEl = document.getElementById('fps');
+const fboEl = document.getElementById('fbo-state');
+const motifEl = document.getElementById('motif');
+const bloomModeEl = document.getElementById('bloom-mode');
+bloomModeEl.textContent = freezeMotion ? 'off' : 'selective';
+
+function pingPong(t, pulse) {
+  if (freezeMotion) {
+    mistMat.uniforms.uTex.value = fboRead.texture;
+    fboEl.textContent = 'frozen';
+    return;
+  }
+  fboMat.uniforms.uTex.value = fboRead.texture;
+  fboMat.uniforms.uTime.value = t;
+  fboMat.uniforms.uPointer.value.set(pointerSmooth.x * 0.5 + 0.5, pointerSmooth.y * 0.5 + 0.5);
+  fboMat.uniforms.uSignalBright.value = 0.75 + 0.45 * pulse;
+  // Cheap mist/ember drift from scene wind (crates+lanterns are primary)
+  if (typeof harborWind !== 'undefined') {
+    const live = harborWind.on && !physFreeze;
+    const g = live ? (0.035 + 0.025 * harborWind.strength * Math.max(0.4, harborWind.gust)) : 0;
+    fboMat.uniforms.uWindBias.value.set(
+      live ? harborWind.dir.x * g : 0.0,
+      live ? harborWind.dir.z * g * 0.35 : 0.0
+    );
+  }
+  renderer.setRenderTarget(fboWrite);
+  renderer.render(fboScene, fboCam);
+  renderer.setRenderTarget(null);
+  const tmp = fboRead; fboRead = fboWrite; fboWrite = tmp;
+  fboFlip = !fboFlip;
+  mistMat.uniforms.uTex.value = fboRead.texture;
+  fboEl.textContent = fboFlip ? 'B→A' : 'A→B';
+}
+
+function tick() {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = freezeMotion ? 1.25 : clock.elapsedTime;
+
+  pointerSmooth.lerp(pointer, freezeMotion ? 1 : 1 - Math.exp(-6 * dt));
+
+  const pulse = freezeMotion ? 0.72 : 0.55 + 0.45 * Math.sin(t * 2.1);
+
+  buildingMat.uniforms.uTime.value = t;
+  asphaltMat.uniforms.uTime.value = t;
+  quayMat.uniforms.uTime.value = t;
+  waterMat.uniforms.uTime.value = t;
+  waterMat.uniforms.uCamPos.value.copy(camera.position);
+  waterMat.uniforms.uAmp.value = freezeMotion ? 0.0 : WATER_AMP;
+  // Quay lantern specular anchors (row at z≈3.85) — refresh if phys lanterns move later
+  waterMat.uniforms.uLampA.value.set(-4.8, 1.55, 3.85);
+  waterMat.uniforms.uLampB.value.set(4.8, 1.55, 3.85);
+  quayMat.uniforms.uPointer.value.copy(pointerSmooth);
+  mistMat.uniforms.uTime.value = t;
+  lanternMat.uniforms.uTime.value = t;
+  lanternMat.uniforms.uPulse.value = freezeMotion ? 0.7 : 1.0;
+  signalMat.uniforms.uTime.value = t;
+  signalMat.uniforms.uPulse.value = pulse;
+  haloMat.uniforms.uTime.value = t;
+  haloMat.uniforms.uPulse.value = pulse;
+  tipGlow.material.uniforms.uTime.value = t;
+  tipGlow.material.uniforms.uPulse.value = pulse;
+
+  if (!freezeMotion) {
+    motifIdx = Math.floor(t / 4) % MOTIFS.length;
+    motifEl.textContent = MOTIFS[motifIdx];
+    fill.intensity = 24 + 8 * Math.sin(t * 0.8);
+    beaconLight.intensity = 12 + 8 * pulse;
+    // Idle auto-orbit only with ?spin=1 (default off — inspect window parallax by hand)
+    const allowSpin = params.has('spin') && !walkMode && !tourMode;
+    if (allowSpin && !pointerDown) {
+      idleOrbit += dt;
+      if (idleOrbit > 1.2) {
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.35;
+      }
+    } else {
+      if (!allowSpin) idleOrbit = 0;
+      if (pointerDown) idleOrbit = 0;
+      controls.autoRotate = false;
+    }
+  } else {
+    motifEl.textContent = 'Harbor';
+    controls.autoRotate = false;
+  }
+
+  if (tourMode) updateTour(dt);
+  else if (walkMode) updateWalk(dt);
+  if (debugMode) updateDebugHud(fpsShow);
+
+  // Signal proximity HUD chip
+  signalGroup.getWorldPosition(signalWorld);
+  const dist = camera.position.distanceTo(signalWorld);
+  const near = dist < 14.5;
+  signalChip.classList.toggle('on', near && !stillMode);
+  if (near) motifEl.textContent = 'Signal';
+
+  pingPong(t, pulse);
+
+  // Quay physics props (cannon-es) — skip under RM / ?still=1
+  if (typeof physStep === 'function') physStep();
+
+  if (!walkMode && !tourMode) controls.update();
+  renderFrame();
+
+  frames++;
+  fpsAcc += dt;
+  if (fpsAcc >= 0.5) {
+    fpsShow = Math.round(frames / fpsAcc);
+    fpsEl.textContent = String(fpsShow);
+    frames = 0;
+    fpsAcc = 0;
+  }
+
+  if (!stillMode) requestAnimationFrame(tick);
+}
+
+if (stillMode) {
+  let n = 0;
+  const settle = () => {
+    tick();
+    n++;
+    if (n < 8) requestAnimationFrame(settle);
+  };
+  settle();
+} else {
+  requestAnimationFrame(tick);
+}
+  </script>
+</body>
+</html>

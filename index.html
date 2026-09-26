@@ -1508,6 +1508,12 @@ cityscapeLink.href = 'cityscape.html';
 cityscapeLink.title = 'Night quay cityscape';
 cityscapeLink.innerHTML = 'Cityscape <kbd>C</kbd>';
 chipsEl.appendChild(cityscapeLink);
+const harborLink = document.createElement('a');
+harborLink.className = 'mode-chip';
+harborLink.href = 'harbor.html';
+harborLink.title = 'Harbor district night';
+harborLink.innerHTML = 'Harbor <kbd>H</kbd>';
+chipsEl.appendChild(harborLink);
 
 function setVectors(on) {
   showVectors = on;
@@ -1572,6 +1578,10 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'r') { resetParticles(); e.preventDefault(); }
   else if (k === 'c' && !e.metaKey && !e.ctrlKey && !e.altKey) {
     location.href = 'cityscape.html';
+    e.preventDefault();
+  }
+  else if (k === 'h' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    location.href = 'harbor.html';
     e.preventDefault();
   }
   else if (k === ' ' || e.code === 'Space') { setPaused(!paused); e.preventDefault(); }
