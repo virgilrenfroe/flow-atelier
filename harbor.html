@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
@@ -22,7 +22,8 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper);
     font-family: var(--font-sans); }
-  canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none;
+    position: fixed; inset: 0; z-index: 0; }
   .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
   .topbar {
     /* Left cluster only — top-right reserved for #props-actions (one quay control row) */
@@ -107,9 +108,10 @@
   }
   #props-hint.on { opacity: 0.72; }
   #props-actions {
-    position: fixed; right: 18px; top: 18px; z-index: 5;
+    position: fixed; right: 18px; top: 18px; z-index: 20;
     display: none; gap: 8px; flex-wrap: wrap; justify-content: flex-end;
     pointer-events: auto;
+    transform: translateZ(0);
   }
   #props-actions.show { display: flex; }
   #props-actions .pill {
@@ -117,9 +119,45 @@
     color: var(--paper); border-radius: 999px; padding: 8px 12px;
     font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.12em;
     text-transform: uppercase; cursor: pointer; backdrop-filter: blur(12px);
+    pointer-events: auto; touch-action: manipulation; white-space: nowrap;
+    -webkit-tap-highlight-color: transparent;
   }
   #props-actions .pill:hover { border-color: rgba(240,194,75,0.45); color: var(--accent); }
   #props-actions .pill.on { border-color: rgba(240,194,75,0.5); color: var(--accent); }
+  /* Touch strip extras (Hud, Walk, Tour, wind dir/strength). Desktop keeps keys. */
+  #props-actions .touch-only { display: none; }
+  #walk-pad {
+    display: none;
+    position: fixed;
+    z-index: 41;
+    left: max(12px, env(safe-area-inset-left));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    width: 156px;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    pointer-events: auto;
+    touch-action: none;
+    transform: translateZ(0);
+  }
+  #walk-pad button {
+    min-height: 52px;
+    border-radius: 16px;
+    border: 1px solid var(--line);
+    background: rgba(5,6,10,0.66);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    letter-spacing: 0;
+    backdrop-filter: blur(12px);
+    pointer-events: auto;
+    touch-action: none;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  #walk-pad button[data-move="f"],
+  #walk-pad button[data-move="b"] { grid-column: 1 / -1; }
+  #walk-pad button.on { border-color: rgba(240,194,75,0.55); color: var(--accent); }
   #tour-hint {
     position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 6;
     font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
@@ -159,6 +197,35 @@
     .hero { top: 11vh; }
     .pills { max-width: 58vw; }
   }
+  /* Touch / narrow: quay pills stay visible in exhibit (no H key).
+     Hero, tech pills, and bottom HUD stay hidden until Hud / H / ?hud=1. */
+  @media (max-width: 720px), (pointer: coarse) {
+    #props-actions {
+      display: flex;
+      left: max(12px, env(safe-area-inset-left));
+      right: max(12px, env(safe-area-inset-right));
+      top: max(12px, env(safe-area-inset-top));
+      z-index: 40;
+      gap: 8px;
+      justify-content: flex-end;
+      pointer-events: auto;
+    }
+    #props-actions .pill {
+      min-height: 44px;
+      padding: 12px 16px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+    }
+    #props-actions .touch-only {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    body.walking #walk-pad { display: grid; }
+    body.walking #walk-hint { bottom: 196px; z-index: 42; }
+    #tour-hint.on { top: 200px; bottom: auto; }
+    body:not(.exhibit) .hero { top: 38vh; }
+  }
 </style>
 </head>
 <body class="exhibit">
@@ -193,13 +260,24 @@
   </div>
   <div id="walk-hint" aria-live="polite">Citizen · WASD · click to look · V to exit</div>
   <div id="props-hint" aria-live="polite">Quay · toss into basin · B blast</div>
-  <div id="props-actions" aria-label="Quay physics">
+  <div id="props-actions" aria-label="Harbor effects">
+    <button class="pill touch-only" id="hud-toggle" type="button" aria-pressed="false" title="Show exhibit chrome">Hud</button>
+    <button class="pill touch-only" id="walk-toggle" type="button" aria-pressed="false" title="Citizen walk (V)">Walk</button>
+    <button class="pill touch-only" id="tour-toggle" type="button" aria-pressed="false" title="Street tour (T)">Tour</button>
     <button class="pill on" id="props-constraint" type="button" title="Toggle lantern hinge" aria-pressed="true">Constraint</button>
     <button class="pill" id="props-toss" type="button" title="Toss crate (Space)">Toss</button>
     <button class="pill" id="props-reset" type="button" title="Reset props (R)">Reset</button>
-    <button class="pill on" id="props-wind" type="button" title="Toggle wind (N) · dir ,/. · strength [/]" aria-pressed="true" aria-label="Wind">Wind E ···</button>
+    <button class="pill on" id="props-wind" type="button" title="Toggle wind (N)" aria-pressed="true" aria-label="Wind">Wind E ···</button>
+    <button class="pill touch-only" id="wind-dir" type="button" title="Cycle wind direction (, / .)">Dir</button>
+    <button class="pill touch-only" id="wind-str" type="button" title="Cycle wind strength ([ / ])">Gust</button>
     <button class="pill on" id="props-springs" type="button" title="Toggle soft springs (G)" aria-pressed="true">Springs</button>
     <button class="pill" id="props-blast" type="button" title="Basin blast impulse (B)">Blast</button>
+  </div>
+  <div id="walk-pad" aria-label="Citizen move">
+    <button type="button" data-move="f" aria-label="Forward">▲</button>
+    <button type="button" data-move="l" aria-label="Strafe left">◀</button>
+    <button type="button" data-move="r" aria-label="Strafe right">▶</button>
+    <button type="button" data-move="b" aria-label="Back">▼</button>
   </div>
   <div id="tour-hint" aria-live="polite">Tour</div>
   <pre id="tour-log" aria-live="polite"></pre>
@@ -254,6 +332,38 @@ function readHudPref() {
   } catch (_) {}
   return false; // default exhibit
 }
+// Phones have no H key. Coarse pointer or a narrow viewport always shows #props-actions
+// (CSS), including body.exhibit. This flag only suppresses the keyboard toast.
+const quayTouchQuery = matchMedia('(max-width: 720px), (pointer: coarse)');
+function quayTouchControls() {
+  return quayTouchQuery.matches;
+}
+function syncHudToggle(show) {
+  const btn = document.getElementById('hud-toggle');
+  if (!btn) return;
+  btn.classList.toggle('on', !!show);
+  btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+  btn.title = show ? 'Hide exhibit chrome' : 'Show exhibit chrome';
+}
+function syncWalkToggle(on) {
+  const btn = document.getElementById('walk-toggle');
+  if (btn) {
+    btn.classList.toggle('on', !!on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  document.body.classList.toggle('walking', !!on && quayTouchControls());
+}
+function syncTourToggle(on) {
+  const btn = document.getElementById('tour-toggle');
+  if (!btn) return;
+  btn.classList.toggle('on', !!on);
+  btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+quayTouchQuery.addEventListener('change', () => {
+  const walkBtn = document.getElementById('walk-toggle');
+  const on = !!(walkBtn && walkBtn.classList.contains('on'));
+  document.body.classList.toggle('walking', on && quayTouchControls());
+});
 function applyHud(show) {
   document.body.classList.toggle('exhibit', !show);
   const chrome = document.getElementById('chrome');
@@ -263,13 +373,37 @@ function applyHud(show) {
   }
   const propsAct = document.getElementById('props-actions');
   if (propsAct) propsAct.classList.toggle('show', !!show);
+  syncHudToggle(show);
   // props-hint is exhibit-only toast — never restate actions when buttons are visible
   const ph = document.getElementById('props-hint');
-  if (ph && show) ph.classList.remove('on');
+  if (ph && (show || quayTouchControls())) ph.classList.remove('on');
   try { localStorage.setItem(HUD_KEY, show ? 'on' : 'off'); } catch (_) {}
 }
 let showHud = readHudPref();
 applyHud(showHud);
+const hudToggleBtn = document.getElementById('hud-toggle');
+if (hudToggleBtn) {
+  hudToggleBtn.addEventListener('click', () => {
+    showHud = !showHud;
+    applyHud(showHud);
+  });
+}
+const walkToggleBtn = document.getElementById('walk-toggle');
+if (walkToggleBtn) {
+  walkToggleBtn.addEventListener('click', () => {
+    window.dispatchEvent(new CustomEvent('noctuary-toggle-walk'));
+  });
+}
+const tourToggleBtn = document.getElementById('tour-toggle');
+if (tourToggleBtn) {
+  tourToggleBtn.addEventListener('click', () => {
+    if (typeof tourMode !== 'undefined' && tourMode) {
+      if (typeof stopTour === 'function') stopTour(true);
+    } else {
+      window.dispatchEvent(new CustomEvent('noctuary-start-tour'));
+    }
+  });
+}
 
 // Citizen walk: ?walk=1 / localStorage noctuary-harbor-walk / key V
 const WALK_KEY = 'noctuary-harbor-walk';
@@ -2841,8 +2975,24 @@ if (propsConstraintBtn) {
 
 const propsWindBtn = document.getElementById('props-wind');
 if (propsWindBtn) {
-  // Click toggles. Dir/strength stay on keys (,/. · [/]) so one Wind pill stays clean.
+  // Click toggles. Dir/strength keys stay ,/. and [/]; touch strip cycles the same events.
   propsWindBtn.addEventListener('click', () => windSetOn(!harborWind.on));
+}
+const windDirBtn = document.getElementById('wind-dir');
+const windStrBtn = document.getElementById('wind-str');
+if (windDirBtn) {
+  windDirBtn.addEventListener('click', () => {
+    window.dispatchEvent(new CustomEvent('noctuary-wind-dir', { detail: 1 }));
+  });
+  if (physFreeze) windDirBtn.disabled = true;
+}
+if (windStrBtn) {
+  windStrBtn.addEventListener('click', () => {
+    const n = WIND_STR_STEPS.length;
+    const detail = harborWind.strIdx >= n - 1 ? -(n - 1) : 1;
+    window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail }));
+  });
+  if (physFreeze) windStrBtn.disabled = true;
 }
 window.addEventListener('noctuary-wind-toggle', () => windSetOn(!harborWind.on));
 window.addEventListener('noctuary-wind-dir', (ev) => windCycleDir(ev.detail || 1));
@@ -2858,11 +3008,11 @@ if (propsBlastBtn) {
 const propsHint = document.getElementById('props-hint');
 function syncPropsHint(forceShow) {
   if (!propsHint) return;
-  if (showHud) { propsHint.classList.remove('on'); return; }
+  if (showHud || quayTouchControls()) { propsHint.classList.remove('on'); return; }
   if (forceShow) propsHint.classList.add('on');
   else propsHint.classList.remove('on');
 }
-if (propsHint && !physFreeze && !showHud) {
+if (propsHint && !physFreeze && !showHud && !quayTouchControls()) {
   propsHint.classList.add('on');
   setTimeout(() => { if (!showHud) propsHint.classList.remove('on'); }, 4200);
 }
@@ -3956,7 +4106,9 @@ function tryWalkStep(dx, dz) {
 function updateWalk(dt) {
   if (!walkMode) return;
   camera.position.y = EYE_H;
-  if (!walkControls.isLocked) return;
+  // Touch has no pointer lock. The pad drives walkKeys; drag on the view looks.
+  const touchDrive = quayTouchControls();
+  if (!walkControls.isLocked && !touchDrive) return;
   // Compressed scene units (EYE_H≈0.58 ≈ citizen): was ~0.85/1.55 — too fast vs eye.
   const speed = (walkKeys.sprint ? 0.88 : 0.50) * dt;
   let fwd = 0;
@@ -3985,10 +4137,12 @@ function updateWalk(dt) {
 function setWalkMode(on) {
   if (on === walkMode) {
     if (on && walkHint) walkHint.classList.add('on');
+    syncWalkToggle(on);
     return;
   }
   if (on) stopTour(false);
   walkMode = on;
+  syncWalkToggle(on);
   try { localStorage.setItem(WALK_KEY, on ? 'on' : 'off'); } catch (_) {}
   if (on) {
     orbitSave.pos.copy(camera.position);
@@ -4015,7 +4169,9 @@ function setWalkMode(on) {
       }
     }
     if (walkHint) {
-      walkHint.textContent = 'Citizen · WASD · click to look · V to exit';
+      walkHint.textContent = quayTouchControls()
+        ? 'Citizen · drag to look · pad to move'
+        : 'Citizen · WASD · click to look · V to exit';
       walkHint.classList.add('on');
     }
   } else {
@@ -4036,8 +4192,64 @@ function setWalkMode(on) {
 window.addEventListener('noctuary-toggle-walk', () => setWalkMode(!walkMode));
 
 renderer.domElement.addEventListener('click', () => {
-  if (walkMode && !walkControls.isLocked) walkControls.lock();
+  if (walkMode && !walkControls.isLocked && !quayTouchControls()) walkControls.lock();
 });
+
+// Touch look — yaw/pitch without pointer lock (iOS lock() is a dead end).
+const lookEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+let lookPid = null;
+let lookLast = null;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (!walkMode || !quayTouchControls()) return;
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  lookPid = e.pointerId;
+  lookLast = { x: e.clientX, y: e.clientY };
+  lookEuler.setFromQuaternion(camera.quaternion, 'YXZ');
+  try { renderer.domElement.setPointerCapture(e.pointerId); } catch (_) {}
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  if (lookPid !== e.pointerId || !lookLast) return;
+  const dx = e.clientX - lookLast.x;
+  const dy = e.clientY - lookLast.y;
+  lookLast.x = e.clientX;
+  lookLast.y = e.clientY;
+  if (!dx && !dy) return;
+  lookEuler.y -= dx * 0.0045;
+  lookEuler.x -= dy * 0.0045;
+  const lim = Math.PI / 2 - 0.08;
+  lookEuler.x = Math.max(-lim, Math.min(lim, lookEuler.x));
+  camera.quaternion.setFromEuler(lookEuler);
+});
+function endTouchLook(e) {
+  if (lookPid !== e.pointerId) return;
+  lookPid = null;
+  lookLast = null;
+}
+renderer.domElement.addEventListener('pointerup', endTouchLook);
+renderer.domElement.addEventListener('pointercancel', endTouchLook);
+
+const walkPad = document.getElementById('walk-pad');
+if (walkPad) {
+  walkPad.querySelectorAll('button[data-move]').forEach((btn) => {
+    const key = btn.getAttribute('data-move');
+    const down = (e) => {
+      if (!walkMode) return;
+      e.preventDefault();
+      e.stopPropagation();
+      walkKeys[key] = true;
+      btn.classList.add('on');
+      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+    };
+    const up = (e) => {
+      walkKeys[key] = false;
+      btn.classList.remove('on');
+    };
+    btn.addEventListener('pointerdown', down);
+    btn.addEventListener('pointerup', up);
+    btn.addEventListener('pointercancel', up);
+    btn.addEventListener('lostpointercapture', up);
+  });
+}
 
 addEventListener('keydown', (e) => {
   if (!walkMode) return;
@@ -4142,6 +4354,7 @@ function fillTourChecklist() {
 function stopTour(restoreOrbit = true) {
   if (!tourMode) return;
   tourMode = false;
+  syncTourToggle(false);
   if (tourHint) tourHint.classList.remove('on');
   if (restoreOrbit && !walkMode) {
     controls.enabled = true;
@@ -4161,6 +4374,7 @@ function startTour() {
     walkControls.enabled = false;
     walkControls.disconnect();
     walkMode = false;
+    syncWalkToggle(false);
     try { localStorage.setItem(WALK_KEY, 'off'); } catch (_) {}
     if (walkHint) walkHint.classList.remove('on');
     walkKeys.f = walkKeys.b = walkKeys.l = walkKeys.r = walkKeys.sprint = false;
@@ -4192,6 +4406,7 @@ function startTour() {
   }
   tourLog(`start · ${tourWaypoints.length} waypoints · EYE_H=${EYE_H}`);
   tourLog(w0.note);
+  syncTourToggle(true);
 }
 
 function updateTour(dt) {
@@ -4215,8 +4430,11 @@ function updateTour(dt) {
       fillTourChecklist();
       // Stay at final street eye view; V enters walk, T replays. Orbit restored on walk exit.
       tourMode = false;
+      syncTourToggle(false);
       if (walkHint) {
-        walkHint.textContent = 'Tour done · V walk · T replay';
+        walkHint.textContent = quayTouchControls()
+          ? 'Tour done · Walk to stroll · Tour to replay'
+          : 'Tour done · V walk · T replay';
         walkHint.classList.add('on');
       }
       return;
