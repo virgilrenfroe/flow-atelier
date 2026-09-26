@@ -215,6 +215,23 @@
     text-shadow: 0 0 10px rgba(57, 255, 20, 0.4);
   }
 
+  /* Listen: Star of David — 6 points + center. Field stays in front of the reading. */
+  .listen-star {
+    display: none;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+  body.mode-listen .listen-star { display: block; }
+  .listen-star svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
   .audio-rail {
     right: 10px; top: 44px; gap: 5px;
     max-width: min(168px, 28vw);
@@ -323,6 +340,9 @@
         <button type="button" data-semi="11">B</button>
       </div>
     </div>
+    <div class="listen-star" id="listenStar" aria-hidden="true">
+      <svg id="listenStarSvg" aria-hidden="true"></svg>
+    </div>
     <div class="modes" id="mode-chips" aria-label="Modes"></div>
     <p class="note"><a href="archive/flow-pre-corners.html">Previous build</a></p>
     
@@ -393,7 +413,7 @@ const MODES = [
     label: 'Listen',
     short: 'listen',
     title: 'Listen field',
-    body: 'Pulse energy thickens the field and hardens the curl. Neon lanes follow the mix. A live storm lifts magenta turbulence and mirrored corners.',
+    body: 'Two overlapping triangles make a Star of David. Tip brightness and edge color carry the pulse.',
   },
 ];
 
@@ -767,9 +787,34 @@ const PULSE_FALLBACK = {
 };
 let pulseDrive = {
   energy: 0.7, speed: 0.5, turb: 0.4, glow: 0.3, mirror: 0.5,
-  intensity: 0.35, catOn: true, lanes: [], corners: [1, 1, 1, 1],
+  intensity: 0.35, catOn: true, lanes: [], seatN: [],
   asks: 25, fresh: 4, source: 'seed',
 };
+/* Star of David: two equilateral triangles on one circle.
+   Up: Triangle (top), Wilmington (lower right), Charlotte (lower left).
+   Down: Greenville (upper right), Fayetteville (bottom), Asheville (upper left).
+   Center seat is Triad. Six trades color the six sides; general glows in the overlap. */
+const METROS = [
+  { id: 'triangle', ang: -90 },
+  { id: 'greenville', ang: -30 },
+  { id: 'wilmington', ang: 30 },
+  { id: 'fayetteville', ang: 90 },
+  { id: 'charlotte', ang: 150 },
+  { id: 'asheville', ang: 210 },
+  { id: 'triad', ang: null },
+];
+const TRI_UP = ['triangle', 'wilmington', 'charlotte'];
+const TRI_DOWN = ['greenville', 'fayetteville', 'asheville'];
+const TRADE_EDGES = [
+  { id: 'electrical', a: 'triangle', b: 'wilmington' },
+  { id: 'plumbing', a: 'wilmington', b: 'charlotte' },
+  { id: 'hvac', a: 'charlotte', b: 'triangle' },
+  { id: 'roof', a: 'greenville', b: 'fayetteville' },
+  { id: 'flooring', a: 'fayetteville', b: 'asheville' },
+  { id: 'paint', a: 'asheville', b: 'greenville' },
+];
+const TRADE_CORE = 'general';
+let listenGeom = null;
 
 function clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
 function askEnergy(count) {
@@ -778,8 +823,8 @@ function askEnergy(count) {
 }
 function driveKey(d) {
   const lw = (d.lanes || []).map((l) => (l.w || 0).toFixed(4)).join(',');
-  const cw = (d.corners || []).map((c) => Number(c).toFixed(3)).join(',');
-  return [d.asks, d.fresh, d.catOn ? 1 : 0, Number(d.intensity).toFixed(3), lw, cw].join('|');
+  const sw = (d.seatN || []).join(',');
+  return [d.asks, d.fresh, d.catOn ? 1 : 0, Number(d.intensity).toFixed(3), lw, sw].join('|');
 }
 function applyPulse(data, source) {
   const src = data && typeof data === 'object' ? data : {};
@@ -807,29 +852,22 @@ function applyPulse(data, source) {
   for (let i = 0; i < TRADE_LANES.length; i++) {
     acc += weights[i] / sum;
     lanes.push({
+      id: TRADE_LANES[i].id,
       rgb: TRADE_LANES[i].rgb,
+      n: weights[i],
       t: i === TRADE_LANES.length - 1 ? 1 : acc,
       w: weights[i] / sum,
     });
   }
   const metros = src.metros && typeof src.metros === 'object' ? src.metros : {};
-  const groups = [
-    (Number(metros.triad) || 0) + (Number(metros.asheville) || 0),
-    (Number(metros.triangle) || 0) + (Number(metros.greenville) || 0),
-    (Number(metros.charlotte) || 0) + (Number(metros.fayetteville) || 0),
-    (Number(metros.wilmington) || 0),
-  ];
-  let gsum = 0;
-  for (let i = 0; i < groups.length; i++) gsum += Math.max(0, groups[i]);
-  const corners = gsum > 0
-    ? groups.map((g) => 0.18 + (Math.max(0, g) / gsum) * 1.7)
-    : [1, 1, 1, 1];
+  const seatN = METROS.map((m) => Math.max(0, Number(metros[m.id]) || 0));
   const next = {
-    energy, speed, turb, glow, mirror, intensity, catOn, lanes, corners,
+    energy, speed, turb, glow, mirror, intensity, catOn, lanes, seatN,
     asks, fresh, source: source || 'seed',
   };
   const changed = driveKey(pulseDrive) !== driveKey(next);
   pulseDrive = next;
+  if (typeof layoutListenStar === 'function') layoutListenStar();
   if (MODES[modeIdx] && MODES[modeIdx].id === 'listen') {
     trailAlpha = 0.052 + Math.min(0.035, pulseDrive.turb * 0.028);
     if (changed && W > 0) resetParticles();
@@ -842,16 +880,26 @@ function pickLane() {
   for (let i = 0; i < lanes.length; i++) if (u <= lanes[i].t) return i;
   return lanes.length - 1;
 }
-function pickCorner() {
-  const c = pulseDrive.corners;
+function tradeLane(id) {
+  const lanes = pulseDrive.lanes || [];
+  for (let i = 0; i < lanes.length; i++) if (lanes[i].id === id) return lanes[i];
+  return { id, rgb: [125, 249, 255], n: 0, w: 0 };
+}
+function heatOf(n, maxN) {
+  if (!(maxN > 0)) return 0;
+  return Math.max(0, Math.min(1, n / maxN));
+}
+function pickSeat() {
+  const n = pulseDrive.seatN || [];
   let sum = 0;
-  for (let i = 0; i < c.length; i++) sum += c[i];
-  let u = Math.random() * (sum || 1);
-  for (let i = 0; i < c.length; i++) {
-    u -= c[i];
+  for (let i = 0; i < n.length; i++) sum += n[i];
+  if (sum <= 0) return (Math.random() * Math.max(n.length, 1)) | 0;
+  let u = Math.random() * sum;
+  for (let i = 0; i < n.length; i++) {
+    u -= n[i];
     if (u <= 0) return i;
   }
-  return 0;
+  return Math.max(0, n.length - 1);
 }
 function laneRgbAt(u) {
   const lanes = pulseDrive.lanes;
@@ -927,18 +975,19 @@ function listenPotential(x, y, time) {
   return psi;
 }
 function listenCornerSwirl(x, y) {
-  const pts = [[0, 0, 0], [W, 0, 1], [0, H, 2], [W, H, 3]];
+  const g = listenGeom;
+  if (!g || !g.seats) return { x: 0, y: 0 };
   let vx = 0, vy = 0;
   const minD = Math.max(1, Math.min(W, H));
-  for (let i = 0; i < 4; i++) {
-    const cx = pts[i][0], cy = pts[i][1], idx = pts[i][2];
-    const dx = x - cx, dy = y - cy;
-    const r = Math.hypot(dx, dy) + 40;
-    const weight = pulseDrive.corners[idx] || 0.25;
-    const amp = (1.8 + pulseDrive.mirror * 8 + pulseDrive.turb * 5) * (0.4 + 0.6 * Math.min(weight, 1.6));
-    const fall = Math.pow(minD / r, 0.32 + pulseDrive.turb * 0.12);
-    vx += (-dy / r) * amp * fall;
-    vy += (dx / r) * amp * fall;
+  for (let i = 0; i < g.seats.length; i++) {
+    const s = g.seats[i];
+    const dx = x - s.cx, dy = y - s.cy;
+    const rad = Math.hypot(dx, dy) + 48;
+    const weight = 0.22 + (s.heat || 0) * 1.35;
+    const amp = (1.05 + pulseDrive.mirror * 5.5 + pulseDrive.turb * 3.6) * weight;
+    const fall = Math.pow(minD / rad, 0.34);
+    vx += (-dy / rad) * amp * fall;
+    vy += (dx / rad) * amp * fall;
   }
   return { x: vx, y: vy };
 }
@@ -1177,17 +1226,17 @@ function spawnOne(opts = {}) {
   if (opts.x != null) {
     x = opts.x; y = opts.y;
   } else if (mode === 'listen') {
-    home = pickCorner();
-    const right = home === 1 || home === 3;
-    const bottom = home >= 2;
-    if (Math.random() < 0.2) {
+    home = pickSeat();
+    const s = listenGeom && listenGeom.seats && listenGeom.seats[home];
+    if (!s || Math.random() < 0.16) {
       x = Math.random() * W;
       y = Math.random() * H;
     } else {
-      const lx = Math.pow(Math.random(), 1.35);
-      const ly = Math.pow(Math.random(), 1.35);
-      x = right ? W * (0.22 + (1 - lx) * 0.74) : W * (0.04 + lx * 0.74);
-      y = bottom ? H * (0.22 + (1 - ly) * 0.74) : H * (0.04 + ly * 0.74);
+      const spread = (0.05 + (1 - (s.heat || 0)) * 0.045) * Math.min(W, H);
+      const a = Math.random() * Math.PI * 2;
+      const rr = Math.pow(Math.random(), 0.72) * spread;
+      x = s.cx + Math.cos(a) * rr;
+      y = s.cy + Math.sin(a) * rr;
     }
   } else if (mode === 'mirror') {
     // Corner-weighted, with a uniform tail so the center is crossed immediately.
@@ -1280,6 +1329,138 @@ function resetParticles() {
   }
 }
 
+function layoutListenStar() {
+  const svg = document.getElementById('listenStarSvg');
+  const w = Math.max(1, innerWidth);
+  const h = Math.max(1, innerHeight);
+  const cx = w * 0.5;
+  const cy = h * 0.46;
+  const r = Math.min(w, h) * (w < 760 ? 0.28 : 0.34);
+  const seatN = pulseDrive.seatN && pulseDrive.seatN.length === METROS.length
+    ? pulseDrive.seatN
+    : METROS.map(() => 0);
+  let maxSeat = 0;
+  let maxTrade = 0;
+  for (let i = 0; i < seatN.length; i++) if (seatN[i] > maxSeat) maxSeat = seatN[i];
+  const lanes = pulseDrive.lanes || [];
+  for (let i = 0; i < lanes.length; i++) if ((lanes[i].n || 0) > maxTrade) maxTrade = lanes[i].n;
+  const seats = METROS.map((m, i) => {
+    const heat = heatOf(seatN[i] || 0, maxSeat);
+    const ang = m.ang == null ? 0 : m.ang * Math.PI / 180;
+    const x = m.ang == null ? cx : cx + Math.cos(ang) * r;
+    const y = m.ang == null ? cy : cy + Math.sin(ang) * r;
+    return { id: m.id, ang: m.ang, heat, n: seatN[i] || 0, x, y, cx: x * dpr, cy: y * dpr };
+  });
+  listenGeom = { cx, cy, r, w, h, seats };
+  if (!svg) return;
+
+  const byId = {};
+  for (let i = 0; i < seats.length; i++) byId[seats[i].id] = seats[i];
+  const edgePt = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  const triPts = (ids) => ids.map((id) => byId[id]);
+  const upPts = triPts(TRI_UP);
+  const downPts = triPts(TRI_DOWN);
+  /* Intersection of the two triangles — filled only, never stroked, so the center
+     reads as the overlap inside the star rather than a hexagon outline. */
+  const overlap = [];
+  for (let i = 0; i < upPts.length; i++) {
+    const a = upPts[i];
+    const b = upPts[(i + 1) % upPts.length];
+    overlap.push(edgePt(a, b, 1 / 3));
+    overlap.push(edgePt(a, b, 2 / 3));
+  }
+  overlap.sort((p, q) => Math.atan2(p.y - cy, p.x - cx) - Math.atan2(q.y - cy, q.x - cx));
+
+  const NS = 'http://www.w3.org/2000/svg';
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const addPoly = (pts, opts) => {
+    const el = document.createElementNS(NS, 'polygon');
+    el.setAttribute('points', pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '));
+    el.setAttribute('fill', opts.fill || 'none');
+    el.setAttribute('stroke', opts.stroke || 'none');
+    if (opts.width) el.setAttribute('stroke-width', String(opts.width));
+    el.setAttribute('stroke-linejoin', 'miter');
+    el.setAttribute('stroke-miterlimit', '3');
+    el.setAttribute('stroke-linecap', 'butt');
+    if (opts.opacity != null) el.setAttribute('opacity', String(opts.opacity));
+    if (opts.shape) el.dataset.shape = opts.shape;
+    svg.appendChild(el);
+    return el;
+  };
+  const addLine = (x1, y1, x2, y2, stroke, width, opacity) => {
+    const el = document.createElementNS(NS, 'line');
+    el.setAttribute('x1', x1.toFixed(1));
+    el.setAttribute('y1', y1.toFixed(1));
+    el.setAttribute('x2', x2.toFixed(1));
+    el.setAttribute('y2', y2.toFixed(1));
+    el.setAttribute('stroke', stroke);
+    el.setAttribute('stroke-width', String(width));
+    el.setAttribute('stroke-linecap', 'butt');
+    el.setAttribute('opacity', String(opacity));
+    svg.appendChild(el);
+    return el;
+  };
+
+  const coreLane = tradeLane(TRADE_CORE);
+  const coreHeat = heatOf(coreLane.n || 0, maxTrade);
+  const coreCol = `rgb(${coreLane.rgb[0]},${coreLane.rgb[1]},${coreLane.rgb[2]})`;
+  const glow = addPoly(overlap, {
+    fill: coreCol,
+    opacity: 0.05 + coreHeat * 0.1,
+    shape: 'overlap',
+  });
+  glow.dataset.trade = TRADE_CORE;
+  glow.dataset.heat = coreHeat.toFixed(3);
+
+  /* The star itself: one triangle pointing up, one pointing down. */
+  addPoly(upPts, {
+    stroke: 'rgba(242,235,224,0.92)',
+    width: 2.4,
+    opacity: 0.42,
+    shape: 'triangle-up',
+  });
+  addPoly(downPts, {
+    stroke: 'rgba(242,235,224,0.92)',
+    width: 2.4,
+    opacity: 0.42,
+    shape: 'triangle-down',
+  });
+
+  for (let i = 0; i < TRADE_EDGES.length; i++) {
+    const spec = TRADE_EDGES[i];
+    const lane = tradeLane(spec.id);
+    const heat = heatOf(lane.n || 0, maxTrade);
+    const a = byId[spec.a];
+    const b = byId[spec.b];
+    const col = `rgb(${lane.rgb[0]},${lane.rgb[1]},${lane.rgb[2]})`;
+    const core = 1.35 + heat * 2.4;
+    addLine(a.x, a.y, b.x, b.y, col, core * 2.6, 0.14 + heat * 0.28);
+    const edge = addLine(a.x, a.y, b.x, b.y, col, core, 0.55 + heat * 0.4);
+    edge.dataset.trade = spec.id;
+    edge.dataset.heat = heat.toFixed(3);
+    edge.dataset.width = core.toFixed(2);
+    edge.dataset.kind = 'edge';
+  }
+
+  const addDot = (x, y, rad, fill, opacity, heat) => {
+    const el = document.createElementNS(NS, 'circle');
+    el.setAttribute('cx', x.toFixed(1));
+    el.setAttribute('cy', y.toFixed(1));
+    el.setAttribute('r', rad.toFixed(1));
+    el.setAttribute('fill', fill);
+    el.setAttribute('opacity', String(opacity));
+    el.dataset.tip = '1';
+    el.dataset.heat = heat.toFixed(3);
+    svg.appendChild(el);
+  };
+  for (let i = 0; i < seats.length; i++) {
+    const s = seats[i];
+    addDot(s.x, s.y, 7 + s.heat * 36, 'rgb(242,235,224)', 0.05 + s.heat * 0.32, s.heat);
+    addDot(s.x, s.y, 1.5 + s.heat * 3.4, 'rgb(255,252,245)', 0.32 + s.heat * 0.68, s.heat);
+  }
+}
+
 function setMode(idx) {
   modeIdx = ((idx % MODES.length) + MODES.length) % MODES.length;
   const m = MODES[modeIdx];
@@ -1294,8 +1475,12 @@ function setMode(idx) {
     : m.id === 'listen' ? (0.052 + Math.min(0.035, pulseDrive.turb * 0.028))
     : 0.055;
   const hint = document.getElementById('gestureHint');
+  document.body.classList.toggle('mode-listen', m.id === 'listen');
+  const star = document.getElementById('listenStar');
+  if (star) star.setAttribute('aria-hidden', m.id === 'listen' ? 'false' : 'true');
   if (m.id === 'listen') {
     if (hint) hint.classList.add('hidden');
+    layoutListenStar();
   } else if ((m.id === 'music' || m.id === 'mirror') && !audioPlaying && !reduceMotion) {
     if (hint) hint.classList.remove('hidden');
   }
@@ -1555,14 +1740,13 @@ function step(dt) {
 
     // Mild pointer swirl in curl / attrib. Mirror folds the pointer into the sim
     // so a stir in any corner bends all four stamps together.
-    if (mode === 'listen') {
-      const hx = (p.home % 2 === 1) ? W * 0.78 : W * 0.22;
-      const hy = (p.home >= 2) ? H * 0.78 : H * 0.22;
-      const w = 1.6 + (pulseDrive.corners[p.home] || 0.3) * 1.1;
-      const pull = w * (8 + pulseDrive.energy * 6);
+    if (mode === 'listen' && listenGeom && listenGeom.seats) {
+      const s = listenGeom.seats[p.home] || listenGeom.seats[listenGeom.seats.length - 1];
+      const w = 1.15 + (s.heat || 0) * 2.1;
+      const pull = w * (5.5 + pulseDrive.energy * 4.5);
       f = {
-        x: f.x + ((hx - p.x) / Math.max(W, 1)) * pull,
-        y: f.y + ((hy - p.y) / Math.max(H, 1)) * pull,
+        x: f.x + ((s.cx - p.x) / Math.max(W, 1)) * pull,
+        y: f.y + ((s.cy - p.y) / Math.max(H, 1)) * pull,
       };
     }
 
@@ -1774,6 +1958,7 @@ function resize() {
   canvas.style.width = innerWidth + 'px';
   canvas.style.height = innerHeight + 'px';
   syncMaskHintPos();
+  layoutListenStar();
   rebuildMask();
   resetParticles();
 }
