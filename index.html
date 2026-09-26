@@ -209,6 +209,11 @@
   }
   .modes:hover, .modes:focus-within { opacity: 0.92; }
   .mode-chip { padding: 4px 7px; font-size: 8px; letter-spacing: 0.06em; }
+  a.mode-chip { text-decoration: none; }
+  a.mode-chip kbd {
+    font-family: var(--font-mono); font-size: 8px; opacity: 0.55;
+    margin-left: 4px; letter-spacing: 0.04em; text-transform: none;
+  }
   .mode-chip.listen.on {
     border-color: rgba(0, 245, 255, 0.7);
     color: #7DF9FF;
@@ -1496,6 +1501,13 @@ MODES.forEach((m, i) => {
   b.addEventListener('click', () => setMode(i));
   chipsEl.appendChild(b);
 });
+/* Separate three.js page — not a particle mode, so it stays out of MODES. */
+const cityscapeLink = document.createElement('a');
+cityscapeLink.className = 'mode-chip';
+cityscapeLink.href = 'cityscape.html';
+cityscapeLink.title = 'Night quay cityscape';
+cityscapeLink.innerHTML = 'Cityscape <kbd>C</kbd>';
+chipsEl.appendChild(cityscapeLink);
 
 function setVectors(on) {
   showVectors = on;
@@ -1558,6 +1570,10 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'e') { exportSVG(); e.preventDefault(); }
   else if (k === 'a') { toggleSong(); e.preventDefault(); }
   else if (k === 'r') { resetParticles(); e.preventDefault(); }
+  else if (k === 'c' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    location.href = 'cityscape.html';
+    e.preventDefault();
+  }
   else if (k === ' ' || e.code === 'Space') { setPaused(!paused); e.preventDefault(); }
   else if (k >= '1' && k <= '9') {
     const n = Number(k) - 1;
