@@ -1,0 +1,63 @@
+{
+  "schema": "oneshopbooks.listen-pulse/v1",
+  "generated_at": "2026-09-25T15:10:00-04:00",
+  "window_hours": 336,
+  "ask_count": 25,
+  "ask_count_note": "PM watch hire-intent: Nextdoor GSO 16, Craigslist new 3, Facebook 6",
+  "catastrophe": {
+    "active": true,
+    "ask_count": 1,
+    "intensity": 0.35
+  },
+  "trades": {
+    "roof": 2,
+    "hvac": 2,
+    "electrical": 7,
+    "plumbing": 6,
+    "flooring": 1,
+    "paint": 0,
+    "general": 7
+  },
+  "metros": {
+    "triad": 14,
+    "wilmington": 1,
+    "charlotte": 3,
+    "triangle": 2,
+    "asheville": 3,
+    "fayetteville": 2,
+    "greenville": 0
+  },
+  "freshness": {
+    "under_24h": 4,
+    "under_72h": 8,
+    "older": 13
+  },
+  "ui_rules": {
+    "never_show_source_names": true,
+    "never_show_urls_or_posters": true,
+    "label_ok": [
+      "Listen",
+      "Pulse",
+      "Field"
+    ]
+  },
+  "mapping_hints": {
+    "ask_count": "particle density + curl strength (normalize ~0\u201340 asks \u2192 0.2\u20131.0)",
+    "trades": "lane/hue weights; electrical=cool, plumbing=teal, hvac=amber, roof=warm red, general=neutral",
+    "catastrophe.active": "turbulence + mirror energy boost; intensity scales storm feel",
+    "metros": "optional spatial bias / corner weight if Quad mode; else ignore",
+    "freshness.under_24h": "speed / reactivity of curves"
+  },
+  "palette": {
+    "mode": "neon",
+    "electrical": "#39FF14",
+    "plumbing": "#00F5FF",
+    "hvac": "#FFB800",
+    "roof": "#FF073A",
+    "flooring": "#BF00FF",
+    "paint": "#FF6EC7",
+    "general": "#7DF9FF",
+    "catastrophe_glow": "#FF00FF",
+    "bg_hint": "near-black"
+  }
+}

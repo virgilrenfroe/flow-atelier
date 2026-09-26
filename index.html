@@ -204,11 +204,16 @@
   .hud .r { gap: 8px; }
 
   .modes {
-    bottom: 10px; gap: 3px; max-width: min(640px, 70vw);
+    bottom: 10px; gap: 3px; max-width: min(820px, 86vw);
     opacity: 0.55; transform: translateX(-50%) scale(0.78); transform-origin: bottom center;
   }
   .modes:hover, .modes:focus-within { opacity: 0.92; }
   .mode-chip { padding: 4px 7px; font-size: 8px; letter-spacing: 0.06em; }
+  .mode-chip.listen.on {
+    border-color: rgba(0, 245, 255, 0.7);
+    color: #7DF9FF;
+    text-shadow: 0 0 10px rgba(57, 255, 20, 0.4);
+  }
 
   .audio-rail {
     right: 10px; top: 44px; gap: 5px;
@@ -382,6 +387,13 @@ const MODES = [
     short: 'music',
     title: 'Corridor song → field',
     body: '“A Song with a Hole in It” drives curl zoom (bass), speed (volume), trail hue (bands), and beat respawns. Toggles stay live on every mode once audio is running. Keys / MIDI steer angle.',
+  },
+  {
+    id: 'listen',
+    label: 'Listen',
+    short: 'listen',
+    title: 'Listen field',
+    body: 'Pulse energy thickens the field and hardens the curl. Neon lanes follow the mix. A live storm lifts magenta turbulence and mirrored corners.',
   },
 ];
 
@@ -733,6 +745,233 @@ function fbm(x, y, oct = 3) {
   return s / n;
 }
 
+/* ── Listen pulse → same curl / particle field (not a dashboard) ──── */
+const PULSE_SEED_URL = './demo-assets/listen-pulse-seed.json';
+const CATA_GLOW = [255, 0, 255];
+const TRADE_LANES = [
+  { id: 'electrical', rgb: [57, 255, 20] },
+  { id: 'plumbing', rgb: [0, 245, 255] },
+  { id: 'hvac', rgb: [255, 184, 0] },
+  { id: 'roof', rgb: [255, 7, 58] },
+  { id: 'flooring', rgb: [191, 0, 255] },
+  { id: 'paint', rgb: [255, 110, 199] },
+  { id: 'general', rgb: [125, 249, 255] },
+];
+/* Numbers match demo-assets/listen-pulse-seed.json so the field is alive before fetch. */
+const PULSE_FALLBACK = {
+  ask_count: 25,
+  catastrophe: { active: true, ask_count: 1, intensity: 0.35 },
+  trades: { roof: 2, hvac: 2, electrical: 7, plumbing: 6, flooring: 1, paint: 0, general: 7 },
+  metros: { triad: 14, wilmington: 1, charlotte: 3, triangle: 2, asheville: 3, fayetteville: 2, greenville: 0 },
+  freshness: { under_24h: 4, under_72h: 8, older: 13 },
+};
+let pulseDrive = {
+  energy: 0.7, speed: 0.5, turb: 0.4, glow: 0.3, mirror: 0.5,
+  intensity: 0.35, catOn: true, lanes: [], corners: [1, 1, 1, 1],
+  asks: 25, fresh: 4, source: 'seed',
+};
+
+function clamp01(v) { return Math.max(0, Math.min(1, Number(v) || 0)); }
+function askEnergy(count) {
+  /* ~0–40 asks → 0.2–1.0 density and curl strength */
+  return 0.2 + clamp01((Number(count) || 0) / 40) * 0.8;
+}
+function driveKey(d) {
+  const lw = (d.lanes || []).map((l) => (l.w || 0).toFixed(4)).join(',');
+  const cw = (d.corners || []).map((c) => Number(c).toFixed(3)).join(',');
+  return [d.asks, d.fresh, d.catOn ? 1 : 0, Number(d.intensity).toFixed(3), lw, cw].join('|');
+}
+function applyPulse(data, source) {
+  const src = data && typeof data === 'object' ? data : {};
+  const asks = Number(src.ask_count) || 0;
+  const energy = askEnergy(asks);
+  const fresh = Number(src.freshness && src.freshness.under_24h) || 0;
+  const speed = 0.25 + clamp01(fresh / 12) * 0.75;
+  const cat = src.catastrophe && typeof src.catastrophe === 'object' ? src.catastrophe : {};
+  const catOn = !!cat.active;
+  const rawI = Number(cat.intensity);
+  const intensity = catOn ? clamp01(Number.isFinite(rawI) ? rawI : 0.4) : 0;
+  const turb = catOn ? (0.28 + intensity * 0.85) : 0.05;
+  const glow = catOn ? Math.min(0.72, 0.16 + intensity * 0.5) : 0.02;
+  const mirror = catOn ? (0.28 + intensity * 0.7) : 0.06;
+  const trades = src.trades && typeof src.trades === 'object' ? src.trades : {};
+  const weights = TRADE_LANES.map((l) => Math.max(0, Number(trades[l.id]) || 0));
+  let sum = 0;
+  for (let i = 0; i < weights.length; i++) sum += weights[i];
+  if (sum <= 0) {
+    for (let i = 0; i < weights.length; i++) weights[i] = 1;
+    sum = weights.length;
+  }
+  const lanes = [];
+  let acc = 0;
+  for (let i = 0; i < TRADE_LANES.length; i++) {
+    acc += weights[i] / sum;
+    lanes.push({
+      rgb: TRADE_LANES[i].rgb,
+      t: i === TRADE_LANES.length - 1 ? 1 : acc,
+      w: weights[i] / sum,
+    });
+  }
+  const metros = src.metros && typeof src.metros === 'object' ? src.metros : {};
+  const groups = [
+    (Number(metros.triad) || 0) + (Number(metros.asheville) || 0),
+    (Number(metros.triangle) || 0) + (Number(metros.greenville) || 0),
+    (Number(metros.charlotte) || 0) + (Number(metros.fayetteville) || 0),
+    (Number(metros.wilmington) || 0),
+  ];
+  let gsum = 0;
+  for (let i = 0; i < groups.length; i++) gsum += Math.max(0, groups[i]);
+  const corners = gsum > 0
+    ? groups.map((g) => 0.18 + (Math.max(0, g) / gsum) * 1.7)
+    : [1, 1, 1, 1];
+  const next = {
+    energy, speed, turb, glow, mirror, intensity, catOn, lanes, corners,
+    asks, fresh, source: source || 'seed',
+  };
+  const changed = driveKey(pulseDrive) !== driveKey(next);
+  pulseDrive = next;
+  if (MODES[modeIdx] && MODES[modeIdx].id === 'listen') {
+    trailAlpha = 0.052 + Math.min(0.035, pulseDrive.turb * 0.028);
+    if (changed && W > 0) resetParticles();
+  }
+}
+function pickLane() {
+  const lanes = pulseDrive.lanes;
+  if (!lanes.length) return 0;
+  const u = Math.random();
+  for (let i = 0; i < lanes.length; i++) if (u <= lanes[i].t) return i;
+  return lanes.length - 1;
+}
+function pickCorner() {
+  const c = pulseDrive.corners;
+  let sum = 0;
+  for (let i = 0; i < c.length; i++) sum += c[i];
+  let u = Math.random() * (sum || 1);
+  for (let i = 0; i < c.length; i++) {
+    u -= c[i];
+    if (u <= 0) return i;
+  }
+  return 0;
+}
+function laneRgbAt(u) {
+  const lanes = pulseDrive.lanes;
+  if (!lanes.length) return [125, 249, 255];
+  const x = Math.max(0, Math.min(0.999, u));
+  for (let i = 0; i < lanes.length; i++) if (x <= lanes[i].t) return lanes[i].rgb;
+  return lanes[lanes.length - 1].rgb;
+}
+function resolvePulseUrl() {
+  /* Same-origin only. ?pulse=/path.json is the live hook; cross-origin is ignored. */
+  const q = params.get('pulse');
+  if (!q) return PULSE_SEED_URL;
+  if (/^\s*(javascript|data|blob):/i.test(q)) return null;
+  try {
+    const u = new URL(q, location.href);
+    if (u.origin !== location.origin) return null;
+    return u.pathname + u.search;
+  } catch (err) {
+    return null;
+  }
+}
+function loadPulse() {
+  const url = resolvePulseUrl();
+  if (!url) {
+    console.warn('pulse URL must be same-origin; using seed');
+    return Promise.resolve();
+  }
+  return fetch(url, { cache: 'no-store' })
+    .then((res) => {
+      if (!res.ok) throw new Error(String(res.status));
+      return res.json();
+    })
+    .then((data) => {
+      applyPulse(data, url === PULSE_SEED_URL ? 'seed' : 'live');
+    })
+    .catch(() => {
+      console.warn('pulse fetch failed; using seed');
+    });
+}
+applyPulse(PULSE_FALLBACK, 'seed');
+
+function listenRGB(p) {
+  if (p.storm) {
+    const flick = 0.82 + 0.18 * Math.sin(t * 5.5 + (p.seed || 0));
+    return [(255 * flick) | 0, (16 + 36 * (1 - pulseDrive.intensity)) | 0, 255];
+  }
+  const lane = pulseDrive.lanes[p.lane] || { rgb: [125, 249, 255] };
+  let r = lane.rgb[0], g = lane.rgb[1], b = lane.rgb[2];
+  const w = pulseDrive.glow * 0.2 * (0.7 + 0.3 * Math.sin(t * 1.3 + (p.seed || 0)));
+  r = r + (CATA_GLOW[0] - r) * w;
+  g = g + (CATA_GLOW[1] - g) * w;
+  b = b + (CATA_GLOW[2] - b) * w;
+  return [r | 0, g | 0, b | 0];
+}
+function listenPotential(x, y, time) {
+  const energy = pulseDrive.energy;
+  const turb = pulseDrive.turb;
+  const tempo = 0.55 + pulseDrive.speed * 1.65 + turb * 0.45;
+  const freq = 6.2 + energy * 3.2 + turb * 7.5;
+  const nx = (x / Math.max(W, 1)) * freq;
+  const ny = (y / Math.max(H, 1)) * freq;
+  let psi =
+    fbm(nx * 0.48 + time * 0.04 * tempo, ny * 0.48 - time * 0.03 * tempo, 3) * (1.15 + energy * 0.7) +
+    Math.sin(nx * 0.62 + ny * 0.36 + time * 0.24 * tempo) * (0.2 + energy * 0.18) +
+    Math.sin(nx * -0.44 + ny * 0.8 - time * 0.16 * tempo) * 0.16;
+  if (turb > 0.12) {
+    const f2 = 1.25 + turb * 4.8;
+    const amp = 0.12 + turb * 1.05;
+    psi += Math.sin(nx * f2 + ny * (0.45 + turb) + time * 0.72 * tempo) * amp;
+    psi += Math.sin(nx * (-0.5 * f2) + ny * (0.9 + turb * 2.1) - time * 0.5 * tempo) * amp * 0.72;
+    psi += Math.sin((nx + ny) * (1.8 + pulseDrive.intensity * 3.4) + time * (0.9 + pulseDrive.speed)) * pulseDrive.intensity * 0.85;
+  }
+  return psi;
+}
+function listenCornerSwirl(x, y) {
+  const pts = [[0, 0, 0], [W, 0, 1], [0, H, 2], [W, H, 3]];
+  let vx = 0, vy = 0;
+  const minD = Math.max(1, Math.min(W, H));
+  for (let i = 0; i < 4; i++) {
+    const cx = pts[i][0], cy = pts[i][1], idx = pts[i][2];
+    const dx = x - cx, dy = y - cy;
+    const r = Math.hypot(dx, dy) + 40;
+    const weight = pulseDrive.corners[idx] || 0.25;
+    const amp = (1.8 + pulseDrive.mirror * 8 + pulseDrive.turb * 5) * (0.4 + 0.6 * Math.min(weight, 1.6));
+    const fall = Math.pow(minD / r, 0.32 + pulseDrive.turb * 0.12);
+    vx += (-dy / r) * amp * fall;
+    vy += (dx / r) * amp * fall;
+  }
+  return { x: vx, y: vy };
+}
+function applySteer(vx, vy, s) {
+  if (!(audioFx.steer && steerHeld > 0.02)) return { x: vx, y: vy };
+  const mag = Math.hypot(vx, vy) || s * 0.2;
+  const blend = Math.min(0.85, steerHeld * 0.75);
+  const sx = Math.cos(steerAngle) * mag;
+  const sy = Math.sin(steerAngle) * mag;
+  return {
+    x: vx * (1 - blend) + sx * blend,
+    y: vy * (1 - blend) + sy * blend,
+  };
+}
+function listenCurl(x, y, time) {
+  const e = 4.5;
+  const ddx = (listenPotential(x + e, y, time) - listenPotential(x - e, y, time)) / (2 * e);
+  const ddy = (listenPotential(x, y + e, time) - listenPotential(x, y - e, time)) / (2 * e);
+  const s = Math.min(W, H) * (0.22 + pulseDrive.energy * 0.42);
+  return applySteer(ddy * s, -ddx * s, s);
+}
+function listenFlow(x, y, time) {
+  const c = listenCurl(x, y, time);
+  const s = listenCornerSwirl(x, y);
+  const f = { x: c.x + s.x, y: c.y + s.y };
+  const k = 0.0035 + pulseDrive.turb * 0.018 + pulseDrive.speed * 0.006;
+  const tempo = 0.35 + pulseDrive.speed * 1.5 + pulseDrive.turb * 0.4;
+  const wave = Math.sin(x * k + y * k * 0.68 + time * tempo);
+  const dAng = wave * (0.12 + pulseDrive.turb * 1.25 + pulseDrive.energy * 0.2);
+  const cs = Math.cos(dAng), sn = Math.sin(dAng);
+  return { x: f.x * cs - f.y * sn, y: f.x * sn + f.y * cs };
+}
+
 function potential(x, y, time) {
   // noiseZoom < 1 → spatially zoomed-out (larger features / more chaotic feel under bass)
   const z = noiseZoom;
@@ -765,17 +1004,7 @@ function curlField(x, y, time) {
   const ddx = (potential(x + e, y, time) - potential(x - e, y, time)) / (2 * e);
   const ddy = (potential(x, y + e, time) - potential(x, y - e, time)) / (2 * e);
   const s = Math.min(W, H) * 0.42;
-  let vx = ddy * s, vy = -ddx * s;
-  // MIDI / on-screen keyboard: blend a steered baseline angle
-  if (audioFx.steer && steerHeld > 0.02) {
-    const mag = Math.hypot(vx, vy) || s * 0.2;
-    const blend = Math.min(0.85, steerHeld * 0.75);
-    const sx = Math.cos(steerAngle) * mag;
-    const sy = Math.sin(steerAngle) * mag;
-    vx = vx * (1 - blend) + sx * blend;
-    vy = vy * (1 - blend) + sy * blend;
-  }
-  return { x: vx, y: vy };
+  return applySteer(ddy * s, -ddx * s, s);
 }
 
 /* Corner-rooted swirl. Quiet = a light eddy; loud/high-freq = tight arcs.
@@ -806,8 +1035,10 @@ function cornerSwirl(x, y) {
 /* One field sample. Mirror mode adds audio curvature + a soft corner bias
    (tanh, no midline clip) so paths arc and still cross the center. */
 function flowAt(x, y, time) {
+  const id = MODES[modeIdx].id;
+  if (id === 'listen') return listenFlow(x, y, time);
   let f = curlField(x, y, time);
-  if (MODES[modeIdx].id !== 'mirror') return f;
+  if (id !== 'mirror') return f;
   const s = cornerSwirl(x, y);
   f = { x: f.x + s.x, y: f.y + s.y };
   const pull = 2.6;
@@ -833,6 +1064,18 @@ function mirrorSegs(x0, y0, x1, y1) {
     [x0, H - y0, x1, H - y1],
     [W - x0, H - y0, W - x1, H - y1],
   ];
+}
+function fieldSegs(x0, y0, x1, y1) {
+  const id = MODES[modeIdx].id;
+  if (id === 'mirror') return mirrorSegs(x0, y0, x1, y1);
+  if (id === 'listen' && pulseDrive.catOn && pulseDrive.intensity > 0.02) return mirrorSegs(x0, y0, x1, y1);
+  return [[x0, y0, x1, y1]];
+}
+function fieldSegAlpha(i) {
+  if (MODES[modeIdx].id === 'listen' && i > 0) {
+    return Math.min(0.38, 0.08 + pulseDrive.intensity * 0.26);
+  }
+  return 1;
 }
 
 function sampleMaskBright(x, y) {
@@ -928,10 +1171,24 @@ function packCircles(n, minR, maxR) {
 function spawnOne(opts = {}) {
   const life = 2.2 + Math.random() * 4.5;
   let x, y;
+  let home = 0;
   const mode = MODES[modeIdx].id;
 
   if (opts.x != null) {
     x = opts.x; y = opts.y;
+  } else if (mode === 'listen') {
+    home = pickCorner();
+    const right = home === 1 || home === 3;
+    const bottom = home >= 2;
+    if (Math.random() < 0.2) {
+      x = Math.random() * W;
+      y = Math.random() * H;
+    } else {
+      const lx = Math.pow(Math.random(), 1.35);
+      const ly = Math.pow(Math.random(), 1.35);
+      x = right ? W * (0.22 + (1 - lx) * 0.74) : W * (0.04 + lx * 0.74);
+      y = bottom ? H * (0.22 + (1 - ly) * 0.74) : H * (0.04 + ly * 0.74);
+    }
   } else if (mode === 'mirror') {
     // Corner-weighted, with a uniform tail so the center is crossed immediately.
     // No clamp at W/2 or H/2 — sections bleed.
@@ -969,14 +1226,23 @@ function spawnOne(opts = {}) {
     px: x, py: y,
     life, maxLife: life,
     seed: Math.random() * Math.PI * 2,
-    size: opts.size || (mode === 'mirror' ? (0.42 + Math.random() * 0.85) : (0.6 + Math.random() * 1.4)),
+    size: opts.size || (mode === 'mirror' ? (0.42 + Math.random() * 0.85) : mode === 'listen' ? (0.5 + Math.random() * 1.05) : (0.6 + Math.random() * 1.4)),
     speedMul: opts.speedMul || (0.7 + Math.random() * 0.8),
     hueMix: Math.random(),
+    lane: mode === 'listen' ? pickLane() : 0,
+    home,
+    storm: mode === 'listen' && pulseDrive.catOn && Math.random() < (0.045 + pulseDrive.intensity * 0.14),
   };
 }
 
 function targetCount() {
-  return MODES[modeIdx].id === 'mirror' ? 1500 : COUNT;
+  const id = MODES[modeIdx].id;
+  if (id === 'mirror') return 1500;
+  if (id === 'listen') {
+    const n = Math.round(340 + pulseDrive.energy * 1560);
+    return pulseDrive.catOn ? Math.round(n * 0.78) : n;
+  }
+  return COUNT;
 }
 
 function resetParticles() {
@@ -1009,7 +1275,7 @@ function resetParticles() {
   document.getElementById('h-n').textContent = String(particles.length);
   // Hard clear trail (skip if still bake already locked)
   if (!(reduceMotion && stillBaked)) {
-    ctx.fillStyle = INK;
+    ctx.fillStyle = MODES[modeIdx].id === 'listen' ? '#020306' : INK;
     ctx.fillRect(0, 0, W, H);
   }
 }
@@ -1025,9 +1291,12 @@ function setMode(idx) {
   trailAlpha = (m.id === 'curl' || m.id === 'music') ? 0.042
     : m.id === 'mirror' ? 0.046
     : m.id === 'attrib' ? 0.06
+    : m.id === 'listen' ? (0.052 + Math.min(0.035, pulseDrive.turb * 0.028))
     : 0.055;
-  if ((m.id === 'music' || m.id === 'mirror') && !audioPlaying && !reduceMotion) {
-    const hint = document.getElementById('gestureHint');
+  const hint = document.getElementById('gestureHint');
+  if (m.id === 'listen') {
+    if (hint) hint.classList.add('hidden');
+  } else if ((m.id === 'music' || m.id === 'mirror') && !audioPlaying && !reduceMotion) {
     if (hint) hint.classList.remove('hidden');
   }
   resetParticles();
@@ -1037,7 +1306,7 @@ const chipsEl = document.getElementById('mode-chips');
 MODES.forEach((m, i) => {
   const b = document.createElement('button');
   b.type = 'button';
-  b.className = 'mode-chip' + (i === 0 ? ' on' : '');
+  b.className = 'mode-chip' + (m.id === 'listen' ? ' listen' : '') + (i === 0 ? ' on' : '');
   b.textContent = `${i + 1} · ${m.label}`;
   b.addEventListener('click', () => setMode(i));
   chipsEl.appendChild(b);
@@ -1105,7 +1374,10 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'a') { toggleSong(); e.preventDefault(); }
   else if (k === 'r') { resetParticles(); e.preventDefault(); }
   else if (k === ' ' || e.code === 'Space') { setPaused(!paused); e.preventDefault(); }
-  else if (k >= '1' && k <= '7') { setMode(Number(k) - 1); e.preventDefault(); }
+  else if (k >= '1' && k <= '9') {
+    const n = Number(k) - 1;
+    if (n < MODES.length) { setMode(n); e.preventDefault(); }
+  }
 });
 
 canvas.addEventListener('pointermove', (e) => {
@@ -1154,7 +1426,7 @@ function exportSVG() {
     let x = s.x, y = s.y;
     const raw = [[x, y]];
     for (let i = 0; i < steps; i++) {
-      const f = mode === 'mirror' ? flowAt(x, y, t) : curlField(x, y, t);
+      const f = flowAt(x, y, t);
       const mag = Math.hypot(f.x, f.y) || 1e-6;
       x += (f.x / mag) * stepLen;
       y += (f.y / mag) * stepLen;
@@ -1163,7 +1435,7 @@ function exportSVG() {
       raw.push([x, y]);
     }
     if (raw.length > 3) {
-      const copies = mode === 'mirror'
+      const copies = (mode === 'mirror' || (mode === 'listen' && pulseDrive.catOn))
         ? [
             (px, py) => [px, py],
             (px, py) => [W - px, py],
@@ -1201,26 +1473,34 @@ function exportSVG() {
 
 /* ── Draw helpers ──────────────────────────────────────────────────── */
 function drawVectors() {
-  const mirror = MODES[modeIdx].id === 'mirror';
-  const step = Math.max(28, Math.min(W, H) / (mirror ? 14 : 18));
+  const id = MODES[modeIdx].id;
+  const step = Math.max(28, Math.min(W, H) / (id === 'mirror' || id === 'listen' ? 14 : 18));
   ctx.save();
   ctx.globalAlpha = 0.45;
   for (let y = step * 0.5; y < H; y += step) {
     for (let x = step * 0.5; x < W; x += step) {
-      const f = mirror ? flowAt(x, y, t) : curlField(x, y, t);
+      const f = flowAt(x, y, t);
       const mag = Math.hypot(f.x, f.y) || 1e-6;
       const ux = f.x / mag, uy = f.y / mag;
       const len = Math.min(mag * 0.08, step * 0.45);
-      const mix = Math.min(mag / (Math.min(W, H) * 0.5), 1);
-      const r = (ACCENT[0] * mix + VIOLET[0] * (1 - mix)) | 0;
-      const g = (ACCENT[1] * mix + VIOLET[1] * (1 - mix)) | 0;
-      const b = (ACCENT[2] * mix + VIOLET[2] * (1 - mix)) | 0;
-      ctx.strokeStyle = `rgb(${r},${g},${b})`;
-      const segs = mirror
-        ? mirrorSegs(x, y, x + ux * len, y + uy * len)
-        : [[x, y, x + ux * len, y + uy * len]];
+      if (id === 'listen') {
+        const rgb = laneRgbAt(((x * 0.017 + y * 0.013) % 1 + 1) % 1);
+        const glow = pulseDrive.glow * 0.45;
+        const r = (rgb[0] * (1 - glow) + CATA_GLOW[0] * glow) | 0;
+        const g = (rgb[1] * (1 - glow) + CATA_GLOW[1] * glow) | 0;
+        const b = (rgb[2] * (1 - glow) + CATA_GLOW[2] * glow) | 0;
+        ctx.strokeStyle = `rgb(${r},${g},${b})`;
+      } else {
+        const mix = Math.min(mag / (Math.min(W, H) * 0.5), 1);
+        const r = (ACCENT[0] * mix + VIOLET[0] * (1 - mix)) | 0;
+        const g = (ACCENT[1] * mix + VIOLET[1] * (1 - mix)) | 0;
+        const b = (ACCENT[2] * mix + VIOLET[2] * (1 - mix)) | 0;
+        ctx.strokeStyle = `rgb(${r},${g},${b})`;
+      }
+      const segs = fieldSegs(x, y, x + ux * len, y + uy * len);
       for (let i = 0; i < segs.length; i++) {
         const s = segs[i];
+        ctx.globalAlpha = 0.45 * fieldSegAlpha(i);
         ctx.beginPath();
         ctx.moveTo(s[0], s[1]);
         ctx.lineTo(s[2], s[3]);
@@ -1233,6 +1513,10 @@ function drawVectors() {
 
 function colorFor(p, ang, speed) {
   const mode = MODES[modeIdx].id;
+  if (mode === 'listen') {
+    const rgb = listenRGB(p);
+    return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  }
   if (audioPlaying && audioFx.color && (mode === 'music' || bands.vol > 0.04)) {
     const [cr, cg, cb] = bandHueRGB();
     // Soften with Noctuary violet when quiet
@@ -1261,7 +1545,7 @@ function step(dt) {
   if (reduceMotion || paused) return;
   t += dt;
   const mode = MODES[modeIdx].id;
-  const baseSpeed = Math.min(W, H) * (mode === 'curl' ? 0.55 : mode === 'mirror' ? 0.32 : 0.48);
+  const baseSpeed = Math.min(W, H) * (mode === 'curl' ? 0.55 : mode === 'mirror' ? 0.32 : mode === 'listen' ? 0.4 : 0.48);
 
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
@@ -1271,7 +1555,18 @@ function step(dt) {
 
     // Mild pointer swirl in curl / attrib. Mirror folds the pointer into the sim
     // so a stir in any corner bends all four stamps together.
-    if (pointer.active && (mode === 'curl' || mode === 'attrib' || mode === 'music' || mode === 'mirror')) {
+    if (mode === 'listen') {
+      const hx = (p.home % 2 === 1) ? W * 0.78 : W * 0.22;
+      const hy = (p.home >= 2) ? H * 0.78 : H * 0.22;
+      const w = 1.6 + (pulseDrive.corners[p.home] || 0.3) * 1.1;
+      const pull = w * (8 + pulseDrive.energy * 6);
+      f = {
+        x: f.x + ((hx - p.x) / Math.max(W, 1)) * pull,
+        y: f.y + ((hy - p.y) / Math.max(H, 1)) * pull,
+      };
+    }
+
+    if (pointer.active && (mode === 'curl' || mode === 'attrib' || mode === 'music' || mode === 'mirror' || mode === 'listen')) {
       let px = pointer.x, py = pointer.y;
       if (mode === 'mirror') {
         if (px > W * 0.5) px = W - px;
@@ -1302,6 +1597,12 @@ function step(dt) {
     if (audioPlaying && !reduceMotion && audioFx.vel) {
       // Quiet = lazy drift; loud = race the field
       spd *= 0.18 + bands.vol * 3.1;
+    }
+
+    if (mode === 'listen') {
+      const breath = 0.86 + 0.14 * Math.sin(t * (0.7 + pulseDrive.speed * 2.2) + p.seed);
+      spd *= (0.42 + pulseDrive.energy * 1.25) * (0.62 + pulseDrive.speed * 0.95) * breath;
+      if (p.storm) spd *= 1.12 + pulseDrive.turb * 0.45;
     }
 
     if (mode === 'attrib') {
@@ -1363,7 +1664,8 @@ function render() {
     ctx.fillStyle = INK;
     ctx.fillRect(0, 0, W, H);
   } else {
-    ctx.fillStyle = `rgba(5,6,10,${paused ? 0 : trailAlpha})`;
+    const ink = MODES[modeIdx].id === 'listen' ? '2,3,6' : '5,6,10';
+    ctx.fillStyle = `rgba(${ink},${paused ? 0 : trailAlpha})`;
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -1381,41 +1683,74 @@ function render() {
   }
 
   ctx.lineCap = 'round';
-  const mirrorDraw = MODES[modeIdx].id === 'mirror';
+  ctx.lineJoin = 'round';
+  const modeId = MODES[modeIdx].id;
+  const mirrorDraw = modeId === 'mirror';
+  const listenDraw = modeId === 'listen';
   for (let i = 0; i < particles.length; i++) {
     const p = particles[i];
     const col = colorFor(p, p._ang || 0, p._spd || 0.4);
-    const sz = (MODES[modeIdx].id === 'attrib' ? p.size : p.size) * dpr * (mirrorDraw ? 0.72 : 0.9);
-    ctx.strokeStyle = col;
-    ctx.lineWidth = Math.max(0.6, sz * (mirrorDraw ? 0.48 : 0.55));
-    ctx.globalAlpha = reduceMotion ? 0.85 : (mirrorDraw ? 0.58 : 0.7);
-    // Avoid trail jump on wrap. Mirror stamps the same segment four ways —
-    // flip X, flip Y, flip both — with no clip at the midlines.
+    const sz = p.size * dpr * (mirrorDraw ? 0.72 : listenDraw ? 0.84 : 0.9);
     const jump = Math.hypot(p.x - p.px, p.y - p.py);
     if (jump < Math.min(W, H) * 0.2) {
-      const segs = mirrorDraw
-        ? mirrorSegs(p.px, p.py, p.x, p.y)
-        : [[p.px, p.py, p.x, p.y]];
+      const segs = fieldSegs(p.px, p.py, p.x, p.y);
       for (let s = 0; s < segs.length; s++) {
         const seg = segs[s];
+        const aMul = fieldSegAlpha(s);
         ctx.beginPath();
         ctx.moveTo(seg[0], seg[1]);
         ctx.lineTo(seg[2], seg[3]);
-        ctx.stroke();
+        if (listenDraw) {
+          ctx.strokeStyle = col;
+          if (s === 0) {
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.min(0.5, 0.2 + pulseDrive.glow * 0.28);
+            ctx.lineWidth = Math.max(3.1, sz * (2.15 + pulseDrive.glow * 0.85));
+            ctx.stroke();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = 0.96;
+            ctx.lineWidth = Math.max(1.35, sz * 0.62);
+            ctx.stroke();
+          } else {
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.globalAlpha = aMul;
+            ctx.lineWidth = Math.max(0.55, sz * 0.28);
+            ctx.stroke();
+          }
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.strokeStyle = col;
+          ctx.lineWidth = Math.max(0.6, sz * (mirrorDraw ? 0.48 : 0.55));
+          ctx.globalAlpha = (reduceMotion ? 0.85 : (mirrorDraw ? 0.58 : 0.7)) * aMul;
+          ctx.stroke();
+        }
       }
     } else {
-      ctx.fillStyle = col;
-      const dots = mirrorDraw
+      const dots = (mirrorDraw || (listenDraw && pulseDrive.catOn))
         ? [[p.x, p.y], [W - p.x, p.y], [p.x, H - p.y], [W - p.x, H - p.y]]
         : [[p.x, p.y]];
       const rad = Math.max(0.8, sz * 0.4);
       for (let d = 0; d < dots.length; d++) {
-        ctx.beginPath();
-        ctx.arc(dots[d][0], dots[d][1], rad, 0, Math.PI * 2);
-        ctx.fill();
+        const aMul = fieldSegAlpha(d);
+        if (listenDraw) {
+          ctx.fillStyle = col;
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = (d === 0 ? 0.9 : aMul);
+          ctx.beginPath();
+          ctx.arc(dots[d][0], dots[d][1], d === 0 ? rad * 1.4 : rad, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = (reduceMotion ? 0.85 : (mirrorDraw ? 0.58 : 0.7)) * aMul;
+          ctx.fillStyle = col;
+          ctx.beginPath();
+          ctx.arc(dots[d][0], dots[d][1], rad, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
   }
+  ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
 
   if (showVectors) drawVectors();
@@ -1446,8 +1781,10 @@ window.addEventListener('resize', resize);
 
 /* ── Still seed ────────────────────────────────────────────────────── */
 function stillCompose() {
-  const mi = MODES.findIndex((m) => m.id === 'mirror');
-  setMode(mi >= 0 ? mi : 0);
+  if (!params.get('mode')) {
+    const mi = MODES.findIndex((m) => m.id === 'mirror');
+    setMode(mi >= 0 ? mi : 0);
+  }
   setVectors(false);
   document.getElementById('h-n').textContent = String(particles.length);
   ctx.fillStyle = INK;
@@ -1469,20 +1806,25 @@ function stillCompose() {
     }
     ctx.fillStyle = `rgba(5,6,10,0.07)`;
     ctx.fillRect(0, 0, W, H);
-    ctx.lineWidth = 1.05;
+    ctx.lineWidth = MODES[modeIdx].id === 'listen' ? 1.35 : 1.05;
     const jumpMax = Math.min(W, H) * 0.2;
+    const listenDraw = MODES[modeIdx].id === 'listen';
     for (const p of particles) {
       if (Math.hypot(p.x - p.px, p.y - p.py) > jumpMax) continue;
       ctx.strokeStyle = colorFor(p, 0, 0.5);
-      const segs = mirrorSegs(p.px, p.py, p.x, p.y);
+      const segs = fieldSegs(p.px, p.py, p.x, p.y);
       for (let i = 0; i < segs.length; i++) {
         const seg = segs[i];
+        ctx.globalAlpha = fieldSegAlpha(i);
+        ctx.globalCompositeOperation = listenDraw ? 'lighter' : 'source-over';
         ctx.beginPath();
         ctx.moveTo(seg[0], seg[1]);
         ctx.lineTo(seg[2], seg[3]);
         ctx.stroke();
       }
     }
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
   }
   stillBaked = true;
   if (showVectors) drawVectors();
@@ -1571,8 +1913,16 @@ if (reduceMotion) {
   document.getElementById('h-audio').textContent = 'still';
 }
 
+function initialModeIndex() {
+  const want = (params.get('mode') || '').toLowerCase();
+  if (!want) return 0;
+  const i = MODES.findIndex((m) => m.id === want || m.short === want);
+  return i >= 0 ? i : 0;
+}
+
 resize();
-setMode(0);
+loadPulse();
+setMode(initialModeIndex());
 if (params.has('still') || reduceMotion) {
   stillCompose();
 }
