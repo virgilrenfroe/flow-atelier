@@ -231,34 +231,6 @@
     height: 100%;
     overflow: visible;
   }
-  .star-label {
-    position: absolute;
-    transform: translate(-50%, -50%);
-    font-family: var(--font-sans);
-    font-weight: 560;
-    letter-spacing: 0.16em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    line-height: 1;
-    text-shadow:
-      0 0 10px rgba(2,3,6,0.95),
-      0 0 3px rgba(2,3,6,1),
-      0 1px 1px rgba(2,3,6,1);
-  }
-  .star-label.metro { color: rgba(242,235,224,0.9); }
-  .star-label.metro::before {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 58%;
-    width: calc(36px + var(--heat, 0) * 92px);
-    height: calc(36px + var(--heat, 0) * 92px);
-    transform: translate(-50%, -50%);
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(242,235,224, calc(0.04 + var(--heat, 0) * 0.14)) 0%, transparent 68%);
-    z-index: -1;
-  }
-  .star-label.trade { font-weight: 640; letter-spacing: 0.14em; }
 
   .audio-rail {
     right: 10px; top: 44px; gap: 5px;
@@ -370,7 +342,6 @@
     </div>
     <div class="listen-star" id="listenStar" aria-hidden="true">
       <svg id="listenStarSvg" aria-hidden="true"></svg>
-      <div id="listenStarLabels"></div>
     </div>
     <div class="modes" id="mode-chips" aria-label="Modes"></div>
     <p class="note"><a href="archive/flow-pre-corners.html">Previous build</a></p>
@@ -442,7 +413,7 @@ const MODES = [
     label: 'Listen',
     short: 'listen',
     title: 'Listen field',
-    body: 'Two overlapping triangles make a Star of David. Metros sit on the six tips and the center. Trades run the edges.',
+    body: 'Two overlapping triangles make a Star of David. Tip brightness and edge color carry the pulse.',
   },
 ];
 
@@ -1360,7 +1331,6 @@ function resetParticles() {
 
 function layoutListenStar() {
   const svg = document.getElementById('listenStarSvg');
-  const labels = document.getElementById('listenStarLabels');
   const w = Math.max(1, innerWidth);
   const h = Math.max(1, innerHeight);
   const cx = w * 0.5;
@@ -1382,7 +1352,7 @@ function layoutListenStar() {
     return { id: m.id, ang: m.ang, heat, n: seatN[i] || 0, x, y, cx: x * dpr, cy: y * dpr };
   });
   listenGeom = { cx, cy, r, w, h, seats };
-  if (!svg || !labels) return;
+  if (!svg) return;
 
   const byId = {};
   for (let i = 0; i < seats.length; i++) byId[seats[i].id] = seats[i];
@@ -1473,55 +1443,22 @@ function layoutListenStar() {
     edge.dataset.kind = 'edge';
   }
 
-  labels.textContent = '';
-  const placeLabel = (kind, id, x, y, heat, rgb) => {
-    const el = document.createElement('span');
-    el.className = 'star-label ' + kind;
-    el.dataset.kind = kind;
-    el.dataset.id = id;
-    el.textContent = id;
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
-    const floor = kind === 'metro' ? 0.48 : 0.52;
-    el.style.opacity = String(floor + heat * (1 - floor));
-    const base = kind === 'metro' ? 10 : 8.5;
-    const grow = kind === 'metro' ? 4.5 : 2.4;
-    el.style.fontSize = (base + heat * grow) + 'px';
-    el.style.setProperty('--heat', heat.toFixed(3));
-    if (rgb) el.style.color = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
-    labels.appendChild(el);
+  const addDot = (x, y, rad, fill, opacity, heat) => {
+    const el = document.createElementNS(NS, 'circle');
+    el.setAttribute('cx', x.toFixed(1));
+    el.setAttribute('cy', y.toFixed(1));
+    el.setAttribute('r', rad.toFixed(1));
+    el.setAttribute('fill', fill);
+    el.setAttribute('opacity', String(opacity));
+    el.dataset.tip = '1';
+    el.dataset.heat = heat.toFixed(3);
+    svg.appendChild(el);
   };
-
   for (let i = 0; i < seats.length; i++) {
     const s = seats[i];
-    let x = s.x;
-    let y = s.y;
-    if (s.ang != null) {
-      const a = s.ang * Math.PI / 180;
-      x = cx + Math.cos(a) * (r + 22);
-      y = cy + Math.sin(a) * (r + 22);
-    } else {
-      y = cy - 8;
-    }
-    placeLabel('metro', s.id, x, y, s.heat, null);
+    addDot(s.x, s.y, 7 + s.heat * 36, 'rgb(242,235,224)', 0.05 + s.heat * 0.32, s.heat);
+    addDot(s.x, s.y, 1.5 + s.heat * 3.4, 'rgb(255,252,245)', 0.32 + s.heat * 0.68, s.heat);
   }
-  for (let i = 0; i < TRADE_EDGES.length; i++) {
-    const spec = TRADE_EDGES[i];
-    const lane = tradeLane(spec.id);
-    const heat = heatOf(lane.n || 0, maxTrade);
-    const p = byId[spec.a];
-    const q = byId[spec.b];
-    const mx = (p.x + q.x) / 2;
-    const my = (p.y + q.y) / 2;
-    let nx = q.y - p.y;
-    let ny = p.x - q.x;
-    const len = Math.hypot(nx, ny) || 1;
-    nx /= len;
-    ny /= len;
-    if (nx * (mx - cx) + ny * (my - cy) < 0) { nx = -nx; ny = -ny; }
-    placeLabel('trade', spec.id, mx + nx * 16, my + ny * 16, heat, lane.rgb);
-  }
-  placeLabel('trade', TRADE_CORE, cx, cy + 18, coreHeat, coreLane.rgb);
 }
 
 function setMode(idx) {
