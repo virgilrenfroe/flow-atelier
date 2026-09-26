@@ -948,9 +948,11 @@ const buildingMat = new THREE.ShaderMaterial({
       vec2 cell = floor(roomUV);
       vec2 f = fract(roomUV);
 
-      // Mullions / frames — dark opaque bands; window = hole, not glow sticker
-      float mullU = mix(0.14, 0.11, nearGround);
-      float mullV = mix(0.16, 0.12, nearGround);
+      // Mullions / frames — thin dark bands; window = hole (Virgil 2026-09-26).
+      // Old 0.14/0.16 left ~49% glass + beige wallCol rings (frameBand only covered
+      // inner 55% of the margin). Shrink margins and paint the whole leftover as mullion.
+      float mullU = mix(0.05, 0.04, nearGround);
+      float mullV = mix(0.055, 0.045, nearGround);
       float inPane = step(mullU, f.x) * step(f.x, 1.0 - mullU)
                    * step(mullV, f.y) * step(f.y, 1.0 - mullV);
       // Keep clear of roof/plinth edge
@@ -967,8 +969,11 @@ const buildingMat = new THREE.ShaderMaterial({
       inPane *= step(edgeKillM, edgeDistM);
       float edgeFade = smoothstep(edgeKillM, edgeSoftM, edgeDistM);
 
-      // Frame / mullion bands — opaque wall structure between panes
-      float frameBand = isVert * (1.0 - step(mullU * 0.55, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))));
+      // Frame / mullion bands — whole margin is dark mullion (not façade beige)
+      float frameBand = isVert * (1.0 - step(
+        min(mullU, mullV),
+        min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))
+      ));
       vec3 mullionCol = vColor * 0.12 + vec3(0.015, 0.016, 0.022);
       vec3 body = mix(wallCol, mullionCol, frameBand * 0.92);
 
