@@ -10,6 +10,6 @@ Click **Song** (or `A`) to unlock audio. SVG export with `E`.
 
 **Previous build** ([archive/flow-pre-corners.html](archive/flow-pre-corners.html)) is the page from before Quad mirror (Mask swarm first; modes mask · pack · curl · attrib · wrap · music). It is a full working copy, not a replacement of the current page.
 
-**Cityscape** ([cityscape.html](cityscape.html)) is the Noctuary night quay — a separate three.js page, not a particle mode. From Flow home, open the **Cityscape** chip (or press `C`). Play / Your song drives the window lights from the same corridor track (`demo-assets/audio/corridor-song.mp3`). Listen mode stays on the field: `?mode=listen`.
+**Cityscape** ([cityscape.html](cityscape.html)) is the Noctuary night quay — a separate three.js page, not a particle mode. From Flow home, open the **Cityscape** chip (or press `C`). Press `H` (or open `?hud=1`) for Play / Your song; those drive the window lights from the same corridor track (`demo-assets/audio/corridor-song.mp3`). Listen mode stays on the field: `?mode=listen`.
 
 Live quay: https://flow-atelier.up.railway.app/cityscape.html
