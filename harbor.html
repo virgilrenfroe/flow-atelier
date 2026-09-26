@@ -883,11 +883,14 @@ const buildingMat = new THREE.ShaderMaterial({
 
     // Atlas path — FLAT orthographic back-wall sample (Virgil 2026-09-26).
     // Deep ray-box parallax bowed mullions/furniture into curves at glancing angles.
-    // Pane UV maps 1:1 onto the fenestra cell — furniture lines stay axis-aligned.
+    // UV center-crop (0.72): fenestra plates bake beige side walls into L/R of each
+    // 512 cell — zoom into furniture so panes read as rooms, not wall margins.
     // Extremely shallow depth cue only via mild vignette, not ray hit.
     vec3 shadeRoomAtlas(vec2 paneUV, float lit, float shop, float seed) {
       float glowAmt = clamp(lit, 0.0, 1.0);
       vec2 huv = clamp(paneUV, 0.0, 1.0);
+      // Zoom into cell center — crop ~14% margin each side (beige dollhouse walls)
+      huv = 0.5 + (huv - 0.5) * 0.72;
       float idx = shop > 0.55
         ? floor(hash(vec2(seed * 1.7, seed * 0.31)) * 16.0)
         : floor(hash(vec2(seed * 2.3, seed * 0.19)) * uRoomCount);
