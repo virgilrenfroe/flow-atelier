@@ -442,7 +442,7 @@ const MODES = [
     label: 'Listen',
     short: 'listen',
     title: 'Listen field',
-    body: 'A hexagram holds the seven metros (Triad at the center) and the seven trades along its rays. Pulse weight is brightness, not a chart.',
+    body: 'Two overlapping triangles make a Star of David. Metros sit on the six tips and the center. Trades run the edges.',
   },
 ];
 
@@ -819,11 +819,10 @@ let pulseDrive = {
   intensity: 0.35, catOn: true, lanes: [], seatN: [],
   asks: 25, fresh: 4, source: 'seed',
 };
-/* Hexagram seats. Center is Triad: heaviest in the seed and the piedmont hub.
-   Points read west-left / east-right / north-up:
-   upper-left Asheville, lower-left Charlotte, bottom Fayetteville,
-   lower-right Wilmington, upper-right Greenville, top Triangle.
-   Trades ride the six rays (clockwise from the top) plus the inner hexagon. */
+/* Star of David: two equilateral triangles on one circle.
+   Up: Triangle (top), Wilmington (lower right), Charlotte (lower left).
+   Down: Greenville (upper right), Fayetteville (bottom), Asheville (upper left).
+   Center seat is Triad. Six trades color the six sides; general glows in the overlap. */
 const METROS = [
   { id: 'triangle', ang: -90 },
   { id: 'greenville', ang: -30 },
@@ -833,13 +832,15 @@ const METROS = [
   { id: 'asheville', ang: 210 },
   { id: 'triad', ang: null },
 ];
-const TRADE_RAYS = [
-  { id: 'electrical', metro: 'triangle' },
-  { id: 'plumbing', metro: 'greenville' },
-  { id: 'hvac', metro: 'wilmington' },
-  { id: 'roof', metro: 'fayetteville' },
-  { id: 'flooring', metro: 'charlotte' },
-  { id: 'paint', metro: 'asheville' },
+const TRI_UP = ['triangle', 'wilmington', 'charlotte'];
+const TRI_DOWN = ['greenville', 'fayetteville', 'asheville'];
+const TRADE_EDGES = [
+  { id: 'electrical', a: 'triangle', b: 'wilmington' },
+  { id: 'plumbing', a: 'wilmington', b: 'charlotte' },
+  { id: 'hvac', a: 'charlotte', b: 'triangle' },
+  { id: 'roof', a: 'greenville', b: 'fayetteville' },
+  { id: 'flooring', a: 'fayetteville', b: 'asheville' },
+  { id: 'paint', a: 'asheville', b: 'greenville' },
 ];
 const TRADE_CORE = 'general';
 let listenGeom = null;
@@ -1364,7 +1365,7 @@ function layoutListenStar() {
   const h = Math.max(1, innerHeight);
   const cx = w * 0.5;
   const cy = h * 0.46;
-  const r = Math.min(w, h) * (w < 760 ? 0.26 : 0.30);
+  const r = Math.min(w, h) * (w < 760 ? 0.28 : 0.34);
   const seatN = pulseDrive.seatN && pulseDrive.seatN.length === METROS.length
     ? pulseDrive.seatN
     : METROS.map(() => 0);
@@ -1386,29 +1387,34 @@ function layoutListenStar() {
   const byId = {};
   for (let i = 0; i < seats.length; i++) byId[seats[i].id] = seats[i];
   const edgePt = (a, b, t) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-  const upIds = ['triangle', 'wilmington', 'charlotte'];
-  const downIds = ['greenville', 'fayetteville', 'asheville'];
-  const hex = [];
-  for (let i = 0; i < upIds.length; i++) {
-    const a = byId[upIds[i]];
-    const b = byId[upIds[(i + 1) % upIds.length]];
-    hex.push(edgePt(a, b, 1 / 3));
-    hex.push(edgePt(a, b, 2 / 3));
+  const triPts = (ids) => ids.map((id) => byId[id]);
+  const upPts = triPts(TRI_UP);
+  const downPts = triPts(TRI_DOWN);
+  /* Intersection of the two triangles — filled only, never stroked, so the center
+     reads as the overlap inside the star rather than a hexagon outline. */
+  const overlap = [];
+  for (let i = 0; i < upPts.length; i++) {
+    const a = upPts[i];
+    const b = upPts[(i + 1) % upPts.length];
+    overlap.push(edgePt(a, b, 1 / 3));
+    overlap.push(edgePt(a, b, 2 / 3));
   }
-  hex.sort((p, q) => Math.atan2(p.y - cy, p.x - cx) - Math.atan2(q.y - cy, q.x - cx));
+  overlap.sort((p, q) => Math.atan2(p.y - cy, p.x - cx) - Math.atan2(q.y - cy, q.x - cx));
 
   const NS = 'http://www.w3.org/2000/svg';
   svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const addPoly = (pts, stroke, width, opacity) => {
+  const addPoly = (pts, opts) => {
     const el = document.createElementNS(NS, 'polygon');
     el.setAttribute('points', pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' '));
-    el.setAttribute('fill', 'none');
-    el.setAttribute('stroke', stroke);
-    el.setAttribute('stroke-width', String(width));
-    el.setAttribute('stroke-linejoin', 'round');
-    el.setAttribute('stroke-linecap', 'round');
-    el.setAttribute('opacity', String(opacity));
+    el.setAttribute('fill', opts.fill || 'none');
+    el.setAttribute('stroke', opts.stroke || 'none');
+    if (opts.width) el.setAttribute('stroke-width', String(opts.width));
+    el.setAttribute('stroke-linejoin', 'miter');
+    el.setAttribute('stroke-miterlimit', '3');
+    el.setAttribute('stroke-linecap', 'butt');
+    if (opts.opacity != null) el.setAttribute('opacity', String(opts.opacity));
+    if (opts.shape) el.dataset.shape = opts.shape;
     svg.appendChild(el);
     return el;
   };
@@ -1420,43 +1426,52 @@ function layoutListenStar() {
     el.setAttribute('y2', y2.toFixed(1));
     el.setAttribute('stroke', stroke);
     el.setAttribute('stroke-width', String(width));
-    el.setAttribute('stroke-linecap', 'round');
+    el.setAttribute('stroke-linecap', 'butt');
     el.setAttribute('opacity', String(opacity));
     svg.appendChild(el);
     return el;
   };
 
-  addPoly(upIds.map((id) => byId[id]), 'rgba(242,235,224,0.7)', 1.15, 0.2);
-  addPoly(downIds.map((id) => byId[id]), 'rgba(242,235,224,0.7)', 1.15, 0.2);
-
-  for (let i = 0; i < TRADE_RAYS.length; i++) {
-    const spec = TRADE_RAYS[i];
-    const lane = tradeLane(spec.id);
-    const heat = heatOf(lane.n || 0, maxTrade);
-    const seat = byId[spec.metro];
-    const a = seat.ang * Math.PI / 180;
-    const x1 = cx + Math.cos(a) * r * 0.2;
-    const y1 = cy + Math.sin(a) * r * 0.2;
-    const x2 = cx + Math.cos(a) * r * 0.8;
-    const y2 = cy + Math.sin(a) * r * 0.8;
-    const col = `rgb(${lane.rgb[0]},${lane.rgb[1]},${lane.rgb[2]})`;
-    const core = 0.95 + heat * 2.7;
-    addLine(x1, y1, x2, y2, col, core * 3.2, 0.12 + heat * 0.3);
-    const ray = addLine(x1, y1, x2, y2, col, core, 0.38 + heat * 0.58);
-    ray.dataset.trade = spec.id;
-    ray.dataset.heat = heat.toFixed(3);
-    ray.dataset.width = core.toFixed(2);
-  }
-
   const coreLane = tradeLane(TRADE_CORE);
   const coreHeat = heatOf(coreLane.n || 0, maxTrade);
   const coreCol = `rgb(${coreLane.rgb[0]},${coreLane.rgb[1]},${coreLane.rgb[2]})`;
-  const coreW = 0.95 + coreHeat * 2.5;
-  addPoly(hex, coreCol, coreW * 3, 0.14 + coreHeat * 0.28);
-  const hexEl = addPoly(hex, coreCol, coreW, 0.42 + coreHeat * 0.55);
-  hexEl.dataset.trade = TRADE_CORE;
-  hexEl.dataset.heat = coreHeat.toFixed(3);
-  hexEl.dataset.width = coreW.toFixed(2);
+  const glow = addPoly(overlap, {
+    fill: coreCol,
+    opacity: 0.05 + coreHeat * 0.1,
+    shape: 'overlap',
+  });
+  glow.dataset.trade = TRADE_CORE;
+  glow.dataset.heat = coreHeat.toFixed(3);
+
+  /* The star itself: one triangle pointing up, one pointing down. */
+  addPoly(upPts, {
+    stroke: 'rgba(242,235,224,0.92)',
+    width: 2.4,
+    opacity: 0.42,
+    shape: 'triangle-up',
+  });
+  addPoly(downPts, {
+    stroke: 'rgba(242,235,224,0.92)',
+    width: 2.4,
+    opacity: 0.42,
+    shape: 'triangle-down',
+  });
+
+  for (let i = 0; i < TRADE_EDGES.length; i++) {
+    const spec = TRADE_EDGES[i];
+    const lane = tradeLane(spec.id);
+    const heat = heatOf(lane.n || 0, maxTrade);
+    const a = byId[spec.a];
+    const b = byId[spec.b];
+    const col = `rgb(${lane.rgb[0]},${lane.rgb[1]},${lane.rgb[2]})`;
+    const core = 1.35 + heat * 2.4;
+    addLine(a.x, a.y, b.x, b.y, col, core * 2.6, 0.14 + heat * 0.28);
+    const edge = addLine(a.x, a.y, b.x, b.y, col, core, 0.55 + heat * 0.4);
+    edge.dataset.trade = spec.id;
+    edge.dataset.heat = heat.toFixed(3);
+    edge.dataset.width = core.toFixed(2);
+    edge.dataset.kind = 'edge';
+  }
 
   labels.textContent = '';
   const placeLabel = (kind, id, x, y, heat, rgb) => {
@@ -1490,18 +1505,23 @@ function layoutListenStar() {
     }
     placeLabel('metro', s.id, x, y, s.heat, null);
   }
-  for (let i = 0; i < TRADE_RAYS.length; i++) {
-    const spec = TRADE_RAYS[i];
+  for (let i = 0; i < TRADE_EDGES.length; i++) {
+    const spec = TRADE_EDGES[i];
     const lane = tradeLane(spec.id);
     const heat = heatOf(lane.n || 0, maxTrade);
-    const a = byId[spec.metro].ang * Math.PI / 180;
-    const side = i % 2 === 0 ? 1 : -1;
-    const dist = r * 0.55;
-    const x = cx + Math.cos(a) * dist - Math.sin(a) * 15 * side;
-    const y = cy + Math.sin(a) * dist + Math.cos(a) * 15 * side;
-    placeLabel('trade', spec.id, x, y, heat, lane.rgb);
+    const p = byId[spec.a];
+    const q = byId[spec.b];
+    const mx = (p.x + q.x) / 2;
+    const my = (p.y + q.y) / 2;
+    let nx = q.y - p.y;
+    let ny = p.x - q.x;
+    const len = Math.hypot(nx, ny) || 1;
+    nx /= len;
+    ny /= len;
+    if (nx * (mx - cx) + ny * (my - cy) < 0) { nx = -nx; ny = -ny; }
+    placeLabel('trade', spec.id, mx + nx * 16, my + ny * 16, heat, lane.rgb);
   }
-  placeLabel('trade', TRADE_CORE, cx, cy + 16, coreHeat, coreLane.rgb);
+  placeLabel('trade', TRADE_CORE, cx, cy + 18, coreHeat, coreLane.rgb);
 }
 
 function setMode(idx) {
