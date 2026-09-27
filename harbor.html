@@ -1133,16 +1133,19 @@ const buildingMat = new THREE.ShaderMaterial({
       // Keep clear of roof/plinth edge
       inPane *= step(0.12, lpM.y) * step(lpM.y, vScale.y - 0.18);
       inPane *= isVert;
-      // Corner conflict: façade-local rooms reorient on adjacent faces.
-      // Kill ~1.5 bays at each vertical edge (hard), then soft-fade another half bay
-      // so the last lit pane does not snap. Opaque pier reads as structure.
+      // Corner conflict: façade-local rooms reorient on adjacent faces (face-map/proc).
+      // Kill ~0.4 bay at each vertical edge (hard), then soft-fade another ~0.2 bay.
+      // Atlas flat-ortho must NOT hard-kill: inPane=0 fills the mullion hole with
+      // wallCol, which reads as warm tan/brown "side wall" opaque panes (Virgil
+      // 2026-09-27 after cool127). Fenestra stays lit to the corner; face-map keeps
+      // the pier. edgeFade=1 on atlas so mix(body, interior) never bleeds façade.
       float halfAlong = (abs(Ln.x) >= abs(Ln.z)) ? (0.5 * vScale.z) : (0.5 * vScale.x);
       float edgeDistM = halfAlong - abs(faceAlong);
-      // Thin opaque pier — hard kill; short soft fade (long soft fades smeared mullions into arcs).
       float edgeKillM = max(0.42 * cellW, 0.28);
       float edgeSoftM = edgeKillM + 0.18 * cellW;
-      inPane *= step(edgeKillM, edgeDistM);
-      float edgeFade = smoothstep(edgeKillM, edgeSoftM, edgeDistM);
+      float atlasFlat = step(0.5, uAtlasOn) * (1.0 - step(0.5, uFaceMapOn));
+      inPane *= mix(step(edgeKillM, edgeDistM), 1.0, atlasFlat);
+      float edgeFade = mix(smoothstep(edgeKillM, edgeSoftM, edgeDistM), 1.0, atlasFlat);
 
       // Frame / mullion bands — whole margin is dark mullion (not façade beige)
       float frameBand = isVert * (1.0 - step(
@@ -1286,7 +1289,7 @@ const mesh = new THREE.InstancedMesh(boxGeo, buildingMat, INSTANCE_COUNT);
 const atlasLoader = new THREE.TextureLoader();
 const atlasBase = new URL('./06-intermediate-assets/', import.meta.url);
 // file:// cannot use ?v= query on local PNGs; http(s) gets cache-bust.
-const atlasCache = location.protocol === 'file:' ? '' : '?v=cool127';
+const atlasCache = location.protocol === 'file:' ? '' : '?v=pane128';
 function prepAtlas(tex) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.ClampToEdgeWrapping;
@@ -4731,6 +4734,7 @@ function fillTourChecklist() {
     'Heuristic / code-known:',
     '• [x] Shared 3D room seed from lpM cellX/Y/Z (+ vId) — not façade UV cell',
     '• [x] Corner back-wall band: thin edgeKill + sideMute=1 near edge/glancing + camM.x damp',
+    '• [x] Atlas path: skip edgeKill/edgeFade→wallCol (tan side-wall panes after cool127)',
     '• [x] Distance LOD impostor (lodFlat mix to flat back atlas 16–36u)',
     '• [x] Night-street gait: walk 0.50 / sprint 0.88 + head-bob',
     '• [x] Street widths: SIDEWALK_W 0.50 · STREET_W 1.65',
