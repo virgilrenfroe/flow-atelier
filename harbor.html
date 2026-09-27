@@ -4763,7 +4763,10 @@ physHooks.onProbe = () => {
 // Chain on quay: crate → pressure plate → hinged lantern tip → Signal pulse + pier gate.
 // Night-concrete / fenestra taste. Uses existing crates / constraint / wind / springs / buoyancy.
 // Shatter fires last when the gate finishes opening (debris-swap the fenestra vessel).
-const RUBE_MASS_THRESHOLD = 2.5; // Harbor crate masses ~0.45–2.2; one dense or mid+light
+// Two ordinary crates (mid 1.1 + light 0.7 = 1.8) or one dense (2.2).
+// 2.5 sat above both, so a real stack never latched.
+const RUBE_MASS_THRESHOLD = 1.75;
+const RUBE_LATCH_HOLD_MS = 280;
 const RUBE_PLATE = { x: -3.15, z: 3.12, w: 2.2, d: 1.7, h: 0.07 };
 const RUBE_GATE = { x: -5.15, z: 2.55, w: 1.35, h: 1.55, d: 0.12 };
 const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
@@ -4771,7 +4774,10 @@ const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
 const rubeState = {
   stage: 'idle', // idle | plate | lantern | gate | done
   plateMass: 0,
+  plateResting: 0,
   platePressed: false,
+  plateHoldSince: 0,
+  plateBelowSince: 0,
   plateLatched: false,
   lanternFiredAt: 0,
   gateOpen: false,
@@ -4886,19 +4892,92 @@ rubeVesselMesh.add(
 );
 const rubeDebris = []; // { mesh, body }
 
+const rubeHeScratch = { x: 0, y: 0, z: 0 };
+const rubePtScratch = { x: 0, y: 0, z: 0 };
+
+function rubeWorldHe(entry) {
+  const he = entry.halfExtents || { x: 0.25, y: 0.25, z: 0.25 };
+  const q = entry.body.quaternion;
+  const x = q.x, y = q.y, z = q.z, w = q.w;
+  const r00 = 1 - 2 * (y * y + z * z);
+  const r01 = 2 * (x * y - z * w);
+  const r02 = 2 * (x * z + y * w);
+  const r10 = 2 * (x * y + z * w);
+  const r11 = 1 - 2 * (x * x + z * z);
+  const r12 = 2 * (y * z - x * w);
+  const r20 = 2 * (x * z - y * w);
+  const r21 = 2 * (y * z + x * w);
+  const r22 = 1 - 2 * (x * x + y * y);
+  rubeHeScratch.x = Math.abs(r00) * he.x + Math.abs(r01) * he.y + Math.abs(r02) * he.z;
+  rubeHeScratch.y = Math.abs(r10) * he.x + Math.abs(r11) * he.y + Math.abs(r12) * he.z;
+  rubeHeScratch.z = Math.abs(r20) * he.x + Math.abs(r21) * he.y + Math.abs(r22) * he.z;
+  return rubeHeScratch;
+}
+
+function rubeOverlapsPlate(entry) {
+  const he = rubeWorldHe(entry);
+  const hx = he.x;
+  const hz = he.z;
+  const p = entry.body.position;
+  const overlapW = (RUBE_PLATE.w * 0.5 + hx) - Math.abs(p.x - RUBE_PLATE.x);
+  const overlapD = (RUBE_PLATE.d * 0.5 + hz) - Math.abs(p.z - RUBE_PLATE.z);
+  if (overlapW <= 0.04 || overlapD <= 0.04) return false;
+  const foot = Math.max(hx * 2 * hz * 2, 1e-4);
+  const area = Math.min(overlapW, hx * 2) * Math.min(overlapD, hz * 2);
+  return area / foot >= 0.28;
+}
+
+function rubeContactOnPlate(contact) {
+  rubePtScratch.x = contact.bi.position.x + contact.ri.x;
+  rubePtScratch.z = contact.bi.position.z + contact.ri.z;
+  return Math.abs(rubePtScratch.x - RUBE_PLATE.x) <= RUBE_PLATE.w * 0.5
+    && Math.abs(rubePtScratch.z - RUBE_PLATE.z) <= RUBE_PLATE.d * 0.5;
+}
+
+// Resting weight only. A grab (physGrab) lifts that crate off the sum.
+// physSelected is the last raycast hit and must not add or remove plate mass.
 function rubeSamplePlateMass() {
-  let sum = 0;
-  const halfW = RUBE_PLATE.w * 0.5;
-  const halfD = RUBE_PLATE.d * 0.5;
+  const held = physGrab && physGrab.entry;
+  const crateByBody = new Map();
   for (const entry of physCrates) {
-    if (physSelected === entry) continue; // grabbed mass waits until released
-    const p = entry.body.position;
-    const he = entry.halfExtents || new CANNON.Vec3(0.25, 0.25, 0.25);
-    const overlapX = Math.abs(p.x - RUBE_PLATE.x) < halfW + he.x;
-    const overlapZ = Math.abs(p.z - RUBE_PLATE.z) < halfD + he.z;
-    const onDeck = p.y - he.y < 1.4;
-    if (overlapX && overlapZ && onDeck) sum += entry.mass;
+    if (!entry || !(entry.mass > 0) || !entry.body) continue;
+    if (entry === held) continue;
+    crateByBody.set(entry.body, entry);
   }
+  const supported = new Set();
+  const contacts = physWorld.contacts;
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < contacts.length; i++) {
+      const c = contacts[i];
+      let crate = null;
+      let crateIsI = false;
+      if (crateByBody.has(c.bi)) {
+        crate = crateByBody.get(c.bi);
+        crateIsI = true;
+      } else if (crateByBody.has(c.bj)) {
+        crate = crateByBody.get(c.bj);
+      } else {
+        continue;
+      }
+      if (supported.has(crate)) continue;
+      // ni sign depends on which body is i. A support contact sits under the
+      // crate and is mostly vertical — not a side bump against the quay.
+      rubePtScratch.y = c.bi.position.y + c.ri.y;
+      if (rubePtScratch.y > crate.body.position.y - 0.02) continue;
+      if (Math.abs(c.ni.y) < 0.45) continue;
+      if (!rubeContactOnPlate(c)) continue;
+      const other = crateIsI ? c.bj : c.bi;
+      const onDeck = other === quayDeckBody;
+      const under = crateByBody.get(other);
+      const onStack = !!(under && supported.has(under));
+      if (!onDeck && !onStack) continue;
+      if (!rubeOverlapsPlate(crate)) continue;
+      supported.add(crate);
+    }
+  }
+  let sum = 0;
+  for (const entry of supported) sum += entry.mass;
+  rubeState.plateResting = supported.size;
   return sum;
 }
 
@@ -5023,7 +5102,10 @@ function rubeClearDebris() {
 function rubeReset() {
   rubeState.stage = 'idle';
   rubeState.plateMass = 0;
+  rubeState.plateResting = 0;
   rubeState.platePressed = false;
+  rubeState.plateHoldSince = 0;
+  rubeState.plateBelowSince = 0;
   rubeState.plateLatched = false;
   rubeState.lanternFiredAt = 0;
   rubeState.gateOpen = false;
@@ -5082,12 +5164,30 @@ function rubeTick() {
   rubeState.plateMass = rubeSamplePlateMass();
   const pressed = rubeState.plateMass >= RUBE_MASS_THRESHOLD - 1e-3;
   rubeState.platePressed = pressed;
+  const nowMs = performance.now();
+  if (rubeState.stage === 'idle') {
+    if (pressed) {
+      rubeState.plateBelowSince = 0;
+      if (!rubeState.plateHoldSince) rubeState.plateHoldSince = nowMs;
+    } else if (rubeState.plateHoldSince) {
+      // A one-frame contact gap must not wipe a crate that is still sitting there.
+      if (!rubeState.plateBelowSince) rubeState.plateBelowSince = nowMs;
+      if (nowMs - rubeState.plateBelowSince > 160) {
+        rubeState.plateHoldSince = 0;
+        rubeState.plateBelowSince = 0;
+      }
+    }
+  }
+  const heldLongEnough = rubeState.plateHoldSince
+    && nowMs - rubeState.plateHoldSince >= RUBE_LATCH_HOLD_MS;
   const t = Math.min(1, rubeState.plateMass / RUBE_MASS_THRESHOLD);
   rubePlateMat.emissiveIntensity = 0.06 + t * 0.55;
   rubePlateLight.intensity = 0.18 + t * 1.5;
 
-  // Stage machine — one-shot chain until Reset
-  if (rubeState.stage === 'idle' && pressed) {
+  // Stage machine — one-shot chain until Reset. Latch only after weight
+  // has been resting on the plate; grabbing a crate elsewhere does not press it.
+  // Once latched, the chain runs through to shatter even if a crate is lifted off.
+  if (rubeState.stage === 'idle' && pressed && heldLongEnough) {
     rubeState.stage = 'plate';
     rubeState.plateLatched = true;
     rubeFireLantern();
@@ -5134,8 +5234,10 @@ function rubeFillProbe() {
     ladder: { step4: 'rube', step5: 'shatter' },
     stage: rubeState.stage,
     plateMass: +rubeState.plateMass.toFixed(2),
+    plateResting: rubeState.plateResting,
     threshold: RUBE_MASS_THRESHOLD,
     platePressed: rubeState.platePressed,
+    plateHoldMs: rubeState.plateHoldSince ? Math.max(0, performance.now() - rubeState.plateHoldSince) : 0,
     plateLatched: rubeState.plateLatched,
     gateOpen: rubeState.gateOpen,
     gateY: +rubeState.gateY.toFixed(3),
