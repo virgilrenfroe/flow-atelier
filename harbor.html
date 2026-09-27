@@ -1865,6 +1865,340 @@ function swayStrandBulbs(t) {
   strandBulbs.instanceMatrix.needsUpdate = true;
 }
 
+// ——— Night traffic signals ———
+// A few corner heads on the existing grid, inland of the quay. The Rube plate,
+// vessel, and crate deck stay clear (no poles on the quay-front street).
+// Vertical 3-lamp heads, dark housing, one soft pool per crossing.
+const SIGNAL_GREEN_T = 3.6;
+const SIGNAL_AMBER_T = 1.2;
+const SIGNAL_RED_T = 4.8;
+const SIGNAL_CYCLE = SIGNAL_GREEN_T + SIGNAL_AMBER_T + SIGNAL_RED_T; // 9.6
+const SIGNAL_ORBIT_CAM = new THREE.Vector3(16.5, 10.5, 20.5);
+const SIGNAL_LAMP_HEX = [0xff2424, 0xffa010, 0x1ec85a]; // red, amber, green
+const SIGNAL_LAMP_OFF = [0x3a1416, 0x3a2c12, 0x14301c];
+
+function signalStage(t, phase) {
+  let u = (t + phase) % SIGNAL_CYCLE;
+  if (u < 0) u += SIGNAL_CYCLE;
+  if (u < SIGNAL_GREEN_T) return 2;
+  if (u < SIGNAL_GREEN_T + SIGNAL_AMBER_T) return 1;
+  return 0;
+}
+
+function streetCrossing(c, r) {
+  return {
+    c,
+    r,
+    x: gridOriginX - STREET_W * 0.5 + c * cellW,
+    z: gridOriginZ + STREET_W * 0.5 - r * cellD,
+  };
+}
+
+function signalRayBlocked(origin, target) {
+  const dirx = target.x - origin.x;
+  const diry = target.y - origin.y;
+  const dirz = target.z - origin.z;
+  for (let i = 0; i < harborBoxes.length; i++) {
+    const b = harborBoxes[i];
+    const minX = b.x - b.w * 0.5;
+    const maxX = b.x + b.w * 0.5;
+    const minZ = b.z - b.d * 0.5;
+    const maxZ = b.z + b.d * 0.5;
+    let tmin = 0;
+    let tmax = 1;
+    const slabs = [
+      [dirx, origin.x, minX, maxX],
+      [diry, origin.y, 0, b.h],
+      [dirz, origin.z, minZ, maxZ],
+    ];
+    let hit = true;
+    for (let a = 0; a < 3; a++) {
+      const d = slabs[a][0];
+      const o = slabs[a][1];
+      let t1 = slabs[a][2];
+      let t2 = slabs[a][3];
+      if (Math.abs(d) < 1e-8) {
+        if (o < t1 || o > t2) { hit = false; break; }
+        continue;
+      }
+      t1 = (t1 - o) / d;
+      t2 = (t2 - o) / d;
+      if (t1 > t2) { const s = t1; t1 = t2; t2 = s; }
+      if (t1 > tmin) tmin = t1;
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) { hit = false; break; }
+    }
+    if (hit && tmin < 0.9 && tmax > 0.04) return true;
+  }
+  return false;
+}
+
+function signalPoleBlocked(x, z) {
+  for (let i = 0; i < harborBoxes.length; i++) {
+    const b = harborBoxes[i];
+    if (Math.abs(x - b.x) < b.w * 0.5 + 0.08 && Math.abs(z - b.z) < b.d * 0.5 + 0.08) return true;
+  }
+  return false;
+}
+
+function pickTrafficCorners() {
+  const inset = STREET_W * 0.5 - SIDEWALK_W * 0.5;
+  const signs = [1, -1];
+  const cands = [];
+  for (let r = 1; r <= GRID_ROWS - 1; r++) {
+    for (let c = 1; c <= GRID_COLS - 1; c++) {
+      const cross = streetCrossing(c, r);
+      for (let a = 0; a < 2; a++) {
+        for (let b = 0; b < 2; b++) {
+          const sx = signs[a];
+          const sz = signs[b];
+          const poleX = cross.x + sx * inset;
+          const poleZ = cross.z + sz * inset;
+          if (poleZ > 0.05) continue;
+          if (signalPoleBlocked(poleX, poleZ)) continue;
+          const dx = cross.x - poleX;
+          const dz = cross.z - poleZ;
+          const len = Math.hypot(dx, dz) || 1;
+          const arm = 0.78;
+          const headX = poleX + (dx / len) * arm;
+          const headZ = poleZ + (dz / len) * arm;
+          const headY = 2.52;
+          if (Math.hypot(headX + 3.15, headZ - 3.12) < 4.2) continue;
+          const open = !signalRayBlocked(SIGNAL_ORBIT_CAM, { x: headX, y: headY, z: headZ });
+          const dist = Math.hypot(headX, headZ + 2.5);
+          cands.push({
+            c, r, poleX, poleZ, headX, headY, headZ, cross,
+            score: (open ? 12 : 0) - dist * 0.22 + headZ * 0.08,
+          });
+        }
+      }
+    }
+  }
+  cands.sort((p, q) => q.score - p.score);
+  const picked = [];
+  for (let i = 0; i < cands.length; i++) {
+    const cand = cands[i];
+    let spread = true;
+    for (let j = 0; j < picked.length; j++) {
+      if (Math.hypot(picked[j].headX - cand.headX, picked[j].headZ - cand.headZ) < 6.2) {
+        spread = false;
+        break;
+      }
+    }
+    if (!spread) continue;
+    picked.push(cand);
+    if (picked.length === 4) break;
+  }
+  return picked;
+}
+
+const trafficGroup = new THREE.Group();
+trafficGroup.name = 'traffic-signals';
+scene.add(trafficGroup);
+
+const signalIron = new THREE.MeshStandardMaterial({
+  color: 0x1a1c22, roughness: 0.55, metalness: 0.48,
+});
+const signalVisorMat = new THREE.MeshStandardMaterial({
+  color: 0x101114, roughness: 0.72, metalness: 0.22,
+});
+const signalPoleGeo = new THREE.CylinderGeometry(0.04, 0.048, 1, 8);
+signalPoleGeo.translate(0, 0.5, 0);
+const signalBaseGeo = new THREE.BoxGeometry(0.18, 0.035, 0.18);
+const signalArmGeo = new THREE.BoxGeometry(0.046, 0.042, 1);
+const signalHangerGeo = new THREE.CylinderGeometry(0.018, 0.018, 1, 6);
+signalHangerGeo.translate(0, -0.5, 0);
+const signalHousingGeo = new THREE.BoxGeometry(0.26, 0.84, 0.15);
+const signalBackGeo = new THREE.BoxGeometry(0.32, 0.9, 0.028);
+const signalVisorGeo = new THREE.BoxGeometry(0.22, 0.02, 0.12);
+const signalLampGeo = new THREE.SphereGeometry(0.072, 10, 8);
+
+const SIGNAL_MAX = 4;
+const signalPoles = new THREE.InstancedMesh(signalPoleGeo, signalIron, SIGNAL_MAX);
+const signalBases = new THREE.InstancedMesh(signalBaseGeo, signalIron, SIGNAL_MAX);
+const signalArms = new THREE.InstancedMesh(signalArmGeo, signalIron, SIGNAL_MAX);
+const signalHangers = new THREE.InstancedMesh(signalHangerGeo, signalIron, SIGNAL_MAX * 2);
+const signalHousings = new THREE.InstancedMesh(signalHousingGeo, signalIron, SIGNAL_MAX * 2);
+const signalBacks = new THREE.InstancedMesh(signalBackGeo, signalVisorMat, SIGNAL_MAX * 2);
+const signalVisors = new THREE.InstancedMesh(signalVisorGeo, signalVisorMat, SIGNAL_MAX * 6);
+const signalLensMat = new THREE.MeshStandardMaterial({
+  color: 0x221418, roughness: 0.42, metalness: 0.06,
+  emissive: 0x120808, emissiveIntensity: 0.25,
+});
+const signalLenses = new THREE.InstancedMesh(signalLampGeo, signalLensMat, SIGNAL_MAX * 6);
+const signalLitMat = [
+  new THREE.MeshStandardMaterial({
+    color: 0x3a1010, emissive: SIGNAL_LAMP_HEX[0], emissiveIntensity: 2.7,
+    roughness: 0.28, metalness: 0.02,
+  }),
+  new THREE.MeshStandardMaterial({
+    color: 0x3a2a10, emissive: SIGNAL_LAMP_HEX[1], emissiveIntensity: 2.45,
+    roughness: 0.28, metalness: 0.02,
+  }),
+  new THREE.MeshStandardMaterial({
+    color: 0x103018, emissive: SIGNAL_LAMP_HEX[2], emissiveIntensity: 2.55,
+    roughness: 0.28, metalness: 0.02,
+  }),
+];
+const signalLit = [
+  new THREE.InstancedMesh(signalLampGeo, signalLitMat[0], SIGNAL_MAX * 2),
+  new THREE.InstancedMesh(signalLampGeo, signalLitMat[1], SIGNAL_MAX * 2),
+  new THREE.InstancedMesh(signalLampGeo, signalLitMat[2], SIGNAL_MAX * 2),
+];
+const signalMeshes = [
+  signalPoles, signalBases, signalArms, signalHangers, signalHousings,
+  signalBacks, signalVisors, signalLenses,
+].concat(signalLit);
+for (let i = 0; i < signalMeshes.length; i++) {
+  signalMeshes[i].count = 0;
+  signalMeshes[i].frustumCulled = false;
+  scene.add(signalMeshes[i]);
+}
+for (let i = 0; i < signalLit.length; i++) signalLit[i].layers.enable(BLOOM_LAYER);
+signalLenses.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(SIGNAL_MAX * 6 * 3), 3);
+
+const signalDummy = new THREE.Object3D();
+const signalColor = new THREE.Color();
+function signalSet(mesh, i, x, y, z, yaw, sx, sy, sz) {
+  signalDummy.position.set(x, y, z);
+  signalDummy.rotation.set(0, yaw, 0);
+  signalDummy.scale.set(sx, sy, sz);
+  signalDummy.updateMatrix();
+  mesh.setMatrixAt(i, signalDummy.matrix);
+  if (i + 1 > mesh.count) mesh.count = i + 1;
+}
+
+const signalCorners = pickTrafficCorners();
+const signalRigs = [];
+const signalLampHome = [[], [], []];
+
+for (let n = 0; n < signalCorners.length; n++) {
+  const corner = signalCorners[n];
+  const phase = n * (SIGNAL_CYCLE / signalCorners.length);
+  const poleH = 3.02;
+  const dx = corner.cross.x - corner.poleX;
+  const dz = corner.cross.z - corner.poleZ;
+  const len = Math.hypot(dx, dz) || 1;
+  const ux = dx / len;
+  const uz = dz / len;
+  const armLen = 0.78;
+  const endX = corner.poleX + ux * armLen;
+  const endZ = corner.poleZ + uz * armLen;
+  const armYaw = Math.atan2(ux, uz);
+  const sideX = -uz;
+  const sideZ = ux;
+  const armY = poleH - 0.02;
+  const hy = armY - 0.62;
+
+  signalSet(signalPoles, n, corner.poleX, 0, corner.poleZ, 0, 1, poleH, 1);
+  signalSet(signalBases, n, corner.poleX, 0.02, corner.poleZ, 0, 1, 1, 1);
+  signalSet(
+    signalArms, n,
+    (corner.poleX + endX) * 0.5, armY, (corner.poleZ + endZ) * 0.5,
+    armYaw, 1, 1, armLen
+  );
+
+  const heads = [
+    { yaw: 0, ox: sideX * 0.16, oz: sideZ * 0.16, phase },
+    { yaw: Math.PI / 2, ox: -sideX * 0.16, oz: -sideZ * 0.16, phase: phase + SIGNAL_RED_T },
+  ];
+  const lampY = [0.24, 0, -0.24];
+  for (let h = 0; h < heads.length; h++) {
+    const head = heads[h];
+    const hx = endX + head.ox;
+    const hz = endZ + head.oz;
+    const faceX = Math.sin(head.yaw);
+    const faceZ = Math.cos(head.yaw);
+    const hi = n * 2 + h;
+    const hangerLen = armY - (hy + 0.42);
+    signalSet(signalHangers, hi, hx, armY, hz, 0, 1, hangerLen, 1);
+    signalSet(signalHousings, hi, hx, hy, hz, head.yaw, 1, 1, 1);
+    signalSet(signalBacks, hi, hx - faceX * 0.09, hy, hz - faceZ * 0.09, head.yaw, 1, 1, 1);
+    for (let k = 0; k < 3; k++) {
+      const ly = hy + lampY[k];
+      const lx = hx + faceX * 0.09;
+      const lz = hz + faceZ * 0.09;
+      const vi = n * 6 + h * 3 + k;
+      signalSet(signalVisors, vi, lx + faceX * 0.04, ly + 0.078, lz + faceZ * 0.04, head.yaw, 1, 1, 1);
+      signalSet(signalLenses, vi, lx, ly, lz, 0, 1, 1, 1);
+      signalColor.setHex(SIGNAL_LAMP_OFF[k]);
+      signalLenses.setColorAt(vi, signalColor);
+      const li = n * 2 + h;
+      signalLampHome[k].push({ x: lx, y: ly, z: lz, phase: head.phase, color: k, index: li });
+      signalSet(signalLit[k], li, lx, -40, lz, 0, 0.001, 0.001, 0.001);
+    }
+  }
+
+  const pool = new THREE.PointLight(SIGNAL_LAMP_HEX[0], 1.7, 4.6, 2);
+  pool.position.set(endX, hy, endZ);
+  trafficGroup.add(pool);
+  signalRigs.push({
+    phase,
+    ewPhase: phase + SIGNAL_RED_T,
+    light: pool,
+    pole: { x: corner.poleX, z: corner.poleZ },
+    head: { x: endX, y: hy, z: endZ },
+    crossing: { c: corner.c, r: corner.r, x: corner.cross.x, z: corner.cross.z },
+  });
+}
+
+for (let i = 0; i < signalMeshes.length; i++) signalMeshes[i].instanceMatrix.needsUpdate = true;
+if (signalLenses.instanceColor) signalLenses.instanceColor.needsUpdate = true;
+
+function updateTrafficSignals(t) {
+  if (!signalRigs.length) return;
+  for (let k = 0; k < 3; k++) {
+    const homes = signalLampHome[k];
+    for (let i = 0; i < homes.length; i++) {
+      const lamp = homes[i];
+      const on = signalStage(t, lamp.phase) === lamp.color;
+      const s = on ? 1.12 : 0.001;
+      signalSet(
+        signalLit[k], lamp.index,
+        lamp.x, on ? lamp.y : -40, lamp.z,
+        0, s, s, s
+      );
+    }
+    signalLit[k].instanceMatrix.needsUpdate = true;
+  }
+  const stages = [];
+  for (let i = 0; i < signalRigs.length; i++) {
+    const rig = signalRigs[i];
+    const stage = signalStage(t, rig.phase);
+    stages.push(stage);
+    const homes = signalLampHome[stage];
+    let glow = null;
+    for (let j = 0; j < homes.length; j++) {
+      if (homes[j].phase === rig.phase) { glow = homes[j]; break; }
+    }
+    if (glow) {
+      rig.light.color.setHex(SIGNAL_LAMP_HEX[stage]);
+      rig.light.position.set(glow.x, glow.y, glow.z);
+    }
+  }
+  if (window.__harborSignals) window.__harborSignals.stages = stages;
+}
+
+updateTrafficSignals(freezeMotion ? 1.25 : 0);
+window.__harborSignals = {
+  count: signalRigs.length,
+  cycle: SIGNAL_CYCLE,
+  meshes: {
+    poles: signalPoles.count,
+    housings: signalHousings.count,
+    visors: signalVisors.count,
+    lenses: signalLenses.count,
+    lit: signalLit.map((m) => m.count),
+  },
+  heads: signalRigs.map((r) => ({
+    x: r.head.x, y: r.head.y, z: r.head.z,
+    poleX: r.pole.x, poleZ: r.pole.z,
+    phase: r.phase,
+    crossing: r.crossing,
+  })),
+  stages: signalRigs.map((r) => signalStage(freezeMotion ? 1.25 : 0, r.phase)),
+};
+
 // ——— Ground / district pad (under streets; darker than asphalt) ———
 // Stop at quay/seawall — do NOT cover the outboard basin (was Plane 90×70 @ z=-4
 // spanning to z≈+31, which hid the water plane under an opaque pad).
@@ -5767,6 +6101,7 @@ function tick() {
 
   buildingMat.uniforms.uTime.value = t;
   if (typeof swayStrandBulbs === 'function') swayStrandBulbs(t);
+  if (typeof updateTrafficSignals === 'function') updateTrafficSignals(t);
   asphaltMat.uniforms.uTime.value = t;
   quayMat.uniforms.uTime.value = t;
   waterMat.uniforms.uTime.value = t;
