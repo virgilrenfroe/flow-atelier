@@ -5415,8 +5415,8 @@ for (let si = 0; si < BANNER_DEFS.length; si++) {
         mass: physFreeze ? 0 : segMass,
         shape: new CANNON.Sphere(0.03),
         position: new CANNON.Vec3(wx, wy, wz),
-        linearDamping: 0.38 - t * 0.2,
-        angularDamping: 0.45,
+        linearDamping: 0.34 - t * 0.16,
+        angularDamping: 0.5 - t * 0.22,
         allowSleep: false,
       });
       body.quaternion.set(basisQ.x, basisQ.y, basisQ.z, basisQ.w);
@@ -5437,22 +5437,31 @@ for (let si = 0; si < BANNER_DEFS.length; si++) {
     const hitchLocal = new CANNON.Vec3();
     nodes[0].body.pointToWorldFrame(origin, springScratchA);
     hitch.pointToLocalFrame(springScratchA, hitchLocal);
+    // Hold the hoist on the halyard. Joints meet at the shared edge — pinning
+    // the centers would collapse the whole fly into one point.
     pennantPin(hitch, hitchLocal, nodes[0].body, origin);
-    pennantSpring(hitch, hitchLocal, nodes[0].body, origin, 24, 2.3);
+    const step = PENNANT_CLOTH_LEN / (PENNANT_NODES - 1);
+    const half = step * 0.5;
     for (let row = 0; row < PENNANT_NODES - 1; row++) {
       const t = (row + 1) / (PENNANT_NODES - 1);
-      const a = new CANNON.Vec3(0, 0, 0);
-      const b = new CANNON.Vec3(0, 0, 0);
+      const a = new CANNON.Vec3(0, -half, 0);
+      const b = new CANNON.Vec3(0, half, 0);
       pennantPin(nodes[row].body, a, nodes[row + 1].body, b);
-      pennantSpring(nodes[row].body, a, nodes[row + 1].body, b, 20 - t * 12, 2.15 - t * 0.45);
+      springAdd(nodes[row].body, nodes[row + 1].body, {
+        restLength: step,
+        stiffness: 16 - t * 8,
+        damping: 1.9 - t * 0.35,
+        localAnchorA: new CANNON.Vec3(0, 0, 0),
+        localAnchorB: new CANNON.Vec3(0, 0, 0),
+      });
     }
-    // Skip links resist a hard fold but stay loose at the fly.
+    // Skip links resist a hard fold. Weaker toward the tip so the fly streams.
     for (let row = 0; row < PENNANT_NODES - 2; row++) {
       const t = (row + 1) / (PENNANT_NODES - 1);
       pennantSpring(
         nodes[row].body, new CANNON.Vec3(0, 0, 0),
         nodes[row + 2].body, new CANNON.Vec3(0, 0, 0),
-        11 - t * 7.5, 1.55
+        28 - t * 16, 1.7
       );
     }
     pennantCloths.push({
