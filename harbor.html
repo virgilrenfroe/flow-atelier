@@ -1824,12 +1824,16 @@ for (let bz = 0; bz < GRID_ROWS; bz++) {
   }
 }
 
-// Pier / quay edge sheds (between sidewalk and water) — warm small massing
-for (let i = 0; i < 14 && placed < INSTANCE_COUNT; i++) {
-  const x = gridOriginX + 0.6 + i * ((BLOCK_W + STREET_W) * GRID_COLS / 14);
-  const z = gridOriginZ + STREET_W + SIDEWALK_W + rng(0.3, 1.1);
-  placeBuilding(x, z, rng(0.55, 1.05), rng(1.1, 2.8), rng(0.5, 0.95),
-    rand() > 0.4 ? warm : violet, 0);
+// Promenade stays open along the seawall. These rolls used to drop a row of
+// pier sheds on the quay, jammed against the graffiti face. Burn the same
+// draws so the inland district does not reshuffle; the instance budget
+// fills on the hinterland belt instead.
+for (let i = 0; i < 14; i++) {
+  rng(0.3, 1.1);
+  rng(0.55, 1.05);
+  rng(1.1, 2.8);
+  rng(0.5, 0.95);
+  rand();
 }
 
 // 360° hinterland wrap — extra row + side wings so orbit never faces void
