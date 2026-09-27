@@ -3366,9 +3366,12 @@ const WIND_CARDINALS = [
   { name: 'S', x: 0, z: 1 },
   { name: 'SE', x: 0.707, z: 0.707 },
 ];
-const WIND_STR_STEPS = [0.45, 0.9, 1.4, 2.2]; // strength index → force scale
-const WIND_CRATE_SCALE = 12;   // ×strength×gust → Newtons (must beat quay friction ~μN≈5)
-const WIND_LANTERN_SCALE = 3.2; // soft sway (visible nod); hinge stays intact
+// Gentle night breeze. Default step stays under quay friction so crates
+// rest; the top step can creep the lightest box, not launch it.
+// Cork μN ≈ 2.2 N. Peak default crate force ≈ 1.3 N.
+const WIND_STR_STEPS = [0.18, 0.32, 0.48, 0.72];
+const WIND_CRATE_SCALE = 2.4;
+const WIND_LANTERN_SCALE = 2.2; // soft nod; hinge stays intact
 const harborWind = {
   on: !physFreeze,
   dirIdx: 0, // default E — along quay
@@ -3441,11 +3444,10 @@ function windApplyForces(t) {
     harborWind.gust = 0;
     return;
   }
-  // Alive gust: slow sine + quieter secondary (not a constant shove)
-  const gust = 0.72
-    + 0.22 * Math.sin(t * 1.35)
-    + 0.12 * Math.sin(t * 0.41 + 1.7)
-    + 0.08 * Math.sin(t * 2.85 + 0.4);
+  // Slow breath. Small amplitude, long period — no rapid gust spikes.
+  const gust = 0.84
+    + 0.06 * Math.sin(t * 0.36)
+    + 0.03 * Math.sin(t * 0.15 + 1.7);
   harborWind.gust = gust;
   const base = harborWind.strength * gust;
   const dx = harborWind.dir.x;
@@ -3456,8 +3458,8 @@ function windApplyForces(t) {
     if (entry.mass <= 0) continue;
     const body = entry.body;
     if (body.type !== CANNON.Body.DYNAMIC) continue;
-    // Light crates drift more; force scaled to overcome quay friction
-    const massFade = 0.55 + 0.45 * (1.2 / Math.max(entry.mass, 0.4));
+    // Light crates catch a little more air; keep it under static friction.
+    const massFade = 0.78 + 0.22 * (0.85 / Math.max(entry.mass, 0.45));
     const f = base * WIND_CRATE_SCALE * massFade;
     harborWind.forceScratch.set(dx * f, f * 0.02, dz * f);
     body.wakeUp();
@@ -4096,7 +4098,7 @@ function springWindPush(base, dx, dz) {
   if (physFreeze || !physSpringsOn || !harborWind.on) return;
   // Signal tip — lively lateral sway
   if (tipBody.type === CANNON.Body.DYNAMIC) {
-    const soft = base * 5.5;
+    const soft = base * 3.2;
     tipBody.wakeUp();
     tipBody.applyForce(
       harborWind.forceScratch.set(dx * soft, soft * 0.08, dz * soft),
@@ -4106,7 +4108,7 @@ function springWindPush(base, dx, dz) {
   // Cable bobs
   for (const entry of physSpringBodies) {
     if (entry.kind !== 'cableBob' || entry.body.type !== CANNON.Body.DYNAMIC) continue;
-    const soft = base * 1.6;
+    const soft = base * 1.05;
     entry.body.wakeUp();
     entry.body.applyForce(
       harborWind.forceScratch.set(dx * soft, soft * 0.05, dz * soft),
@@ -4117,7 +4119,7 @@ function springWindPush(base, dx, dz) {
   for (const entry of physBannerSegs) {
     if (entry.body.type !== CANNON.Body.DYNAMIC) continue;
     const catchF = 0.55 + entry.segIdx * 0.35;
-    const soft = base * 4.0 * catchF;
+    const soft = base * 2.4 * catchF;
     entry.body.wakeUp();
     entry.body.applyForce(
       harborWind.forceScratch.set(dx * soft, soft * 0.03, dz * soft),
@@ -4286,7 +4288,9 @@ physHooks.onProbe = () => {
 // Night-concrete / fenestra taste. Uses existing crates / constraint / wind / springs / buoyancy.
 // Shatter fires last when the gate finishes opening (debris-swap the fenestra vessel).
 const RUBE_MASS_THRESHOLD = 2.5; // Harbor crate masses ~0.45–2.2; one dense or mid+light
-const RUBE_PLATE = { x: -3.15, z: 3.12, w: 2.2, d: 1.7, h: 0.07 };
+// Promenade deck plane is y=0.04. Pad sits fully above it (rim + thin gold top).
+const RUBE_DECK_Y = 0.04;
+const RUBE_PLATE = { x: -2.9, z: 3.28, w: 2.75, d: 2.15, h: 0.03 };
 const RUBE_GATE = { x: -5.15, z: 2.55, w: 1.35, h: 1.55, d: 0.12 };
 const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
 
@@ -4305,28 +4309,48 @@ const rubeState = {
   hintAt: 0,
 };
 
-// Pressure plate — gold top / night-concrete rim (sibling harbor-prop-physics pattern)
+// Pressure plate — thin gold top on a night-concrete rim, fully on the deck.
+// Idle emissive is a slow warm breath so the pad reads from the promenade
+// without becoming a neon control.
 const rubePlateMat = new THREE.MeshStandardMaterial({
   color: 0xf0c24b,
-  roughness: 0.55,
-  metalness: 0.18,
+  roughness: 0.42,
+  metalness: 0.28,
   emissive: 0xf0c24b,
-  emissiveIntensity: 0.06,
+  emissiveIntensity: 0.34,
 });
+const rubePlateRimMat = new THREE.MeshStandardMaterial({
+  color: 0x2c313c,
+  roughness: 0.88,
+  metalness: 0.14,
+  emissive: 0xc6a15a,
+  emissiveIntensity: 0.14,
+});
+const rubePlateRimH = 0.04;
+const rubePlateRim = new THREE.Mesh(
+  new THREE.BoxGeometry(RUBE_PLATE.w + 0.22, rubePlateRimH, RUBE_PLATE.d + 0.22),
+  rubePlateRimMat
+);
+rubePlateRim.position.set(
+  RUBE_PLATE.x,
+  RUBE_DECK_Y + 0.01 + rubePlateRimH * 0.5,
+  RUBE_PLATE.z
+);
+rubePlateRim.renderOrder = 2;
+scene.add(rubePlateRim);
 const rubePlateMesh = new THREE.Mesh(
   new THREE.BoxGeometry(RUBE_PLATE.w, RUBE_PLATE.h, RUBE_PLATE.d),
   rubePlateMat
 );
-rubePlateMesh.position.set(RUBE_PLATE.x, RUBE_PLATE.h * 0.5 + 0.02, RUBE_PLATE.z);
-scene.add(rubePlateMesh);
-const rubePlateRim = new THREE.Mesh(
-  new THREE.BoxGeometry(RUBE_PLATE.w + 0.14, 0.045, RUBE_PLATE.d + 0.14),
-  new THREE.MeshStandardMaterial({ color: 0x2a2e36, roughness: 0.92, metalness: 0.08 })
+rubePlateMesh.position.set(
+  RUBE_PLATE.x,
+  rubePlateRim.position.y + rubePlateRimH * 0.5 + RUBE_PLATE.h * 0.5,
+  RUBE_PLATE.z
 );
-rubePlateRim.position.set(RUBE_PLATE.x, 0.025, RUBE_PLATE.z);
-scene.add(rubePlateRim);
-const rubePlateLight = new THREE.PointLight(0xf0c24b, 0.18, 5.5, 2);
-rubePlateLight.position.set(RUBE_PLATE.x, 0.55, RUBE_PLATE.z);
+rubePlateMesh.renderOrder = 3;
+scene.add(rubePlateMesh);
+const rubePlateLight = new THREE.PointLight(0xf0c24b, 0.42, 7.5, 2);
+rubePlateLight.position.set(RUBE_PLATE.x, 0.7, RUBE_PLATE.z);
 scene.add(rubePlateLight);
 
 // Sliding pier gate near Signal (kinematic) — night iron + gold accent bar
@@ -4536,8 +4560,9 @@ function rubeReset() {
   rubeGateBody.position.y = rubeState.gateClosedY;
   rubeGateBody.velocity.set(0, 0, 0);
   rubeGateMesh.position.copy(rubeGateBody.position);
-  rubePlateMat.emissiveIntensity = 0.06;
-  rubePlateLight.intensity = 0.18;
+  rubePlateMat.emissiveIntensity = 0.34;
+  rubePlateRimMat.emissiveIntensity = 0.14;
+  rubePlateLight.intensity = 0.42;
   rubeGateMat.emissiveIntensity = 0.04;
   rubeClearDebris();
   rubeVesselMesh.visible = true;
@@ -4586,8 +4611,11 @@ function rubeTick() {
   const pressed = rubeState.plateMass >= RUBE_MASS_THRESHOLD - 1e-3;
   rubeState.platePressed = pressed;
   const t = Math.min(1, rubeState.plateMass / RUBE_MASS_THRESHOLD);
-  rubePlateMat.emissiveIntensity = 0.06 + t * 0.55;
-  rubePlateLight.intensity = 0.18 + t * 1.5;
+  const breathe = 0.5 + 0.5 * Math.sin(performance.now() * 0.00085);
+  const idle = 0.30 + breathe * 0.08;
+  rubePlateMat.emissiveIntensity = idle + t * 0.26;
+  rubePlateRimMat.emissiveIntensity = 0.10 + breathe * 0.06 + t * 0.08;
+  rubePlateLight.intensity = 0.36 + breathe * 0.1 + t * 0.85;
 
   // Stage machine — one-shot chain until Reset
   if (rubeState.stage === 'idle' && pressed) {
@@ -4637,6 +4665,14 @@ function rubeFillProbe() {
     ladder: { step4: 'rube', step5: 'shatter' },
     stage: rubeState.stage,
     plateMass: +rubeState.plateMass.toFixed(2),
+    plate: {
+      x: RUBE_PLATE.x,
+      y: +rubePlateMesh.position.y.toFixed(3),
+      z: RUBE_PLATE.z,
+      top: +(rubePlateMesh.position.y + RUBE_PLATE.h * 0.5).toFixed(3),
+      rimBottom: +(rubePlateRim.position.y - rubePlateRimH * 0.5).toFixed(3),
+      deckY: RUBE_DECK_Y,
+    },
     threshold: RUBE_MASS_THRESHOLD,
     platePressed: rubeState.platePressed,
     plateLatched: rubeState.plateLatched,
