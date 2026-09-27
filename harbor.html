@@ -256,6 +256,7 @@
       <div class="r"><span>fbo</span><strong id="fbo-state">A→B</strong></div>
       <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
       <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
+      <div class="r"><strong class="accent">Rube plate → quay left of Signal</strong></div>
     </div>
     <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · not live</p>
   </div>
@@ -4288,9 +4289,10 @@ physHooks.onProbe = () => {
 // Night-concrete / fenestra taste. Uses existing crates / constraint / wind / springs / buoyancy.
 // Shatter fires last when the gate finishes opening (debris-swap the fenestra vessel).
 const RUBE_MASS_THRESHOLD = 2.5; // Harbor crate masses ~0.45–2.2; one dense or mid+light
-// Promenade deck plane is y=0.04. Pad sits fully above it (rim + thin gold top).
+// Promenade deck plane is y=0.04. Pad sits fully above it, on open deck
+// left of Signal (x=-6.5) and clear of crate spawns.
 const RUBE_DECK_Y = 0.04;
-const RUBE_PLATE = { x: -2.9, z: 3.28, w: 2.75, d: 2.15, h: 0.03 };
+const RUBE_PLATE = { x: -9.46, z: 2.45, w: 2.9, d: 2.7, h: 0.05 };
 const RUBE_GATE = { x: -5.15, z: 2.55, w: 1.35, h: 1.55, d: 0.12 };
 const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
 
@@ -4309,31 +4311,30 @@ const rubeState = {
   hintAt: 0,
 };
 
-// Pressure plate — thin gold top on a night-concrete rim, fully on the deck.
-// Idle emissive is a slow warm breath so the pad reads from the promenade
-// without becoming a neon control.
+// Pressure plate — gold slab on a night-concrete rim, fully above the deck.
+// Large enough to read from the default orbit, with a slow warm breath.
 const rubePlateMat = new THREE.MeshStandardMaterial({
-  color: 0xf0c24b,
-  roughness: 0.42,
-  metalness: 0.28,
-  emissive: 0xf0c24b,
-  emissiveIntensity: 0.34,
+  color: 0xffd36a,
+  roughness: 0.34,
+  metalness: 0.42,
+  emissive: 0xffc14a,
+  emissiveIntensity: 1.25,
 });
 const rubePlateRimMat = new THREE.MeshStandardMaterial({
   color: 0x2c313c,
-  roughness: 0.88,
-  metalness: 0.14,
-  emissive: 0xc6a15a,
-  emissiveIntensity: 0.14,
+  roughness: 0.86,
+  metalness: 0.16,
+  emissive: 0xf0c24b,
+  emissiveIntensity: 0.55,
 });
-const rubePlateRimH = 0.04;
+const rubePlateRimH = 0.06;
 const rubePlateRim = new THREE.Mesh(
-  new THREE.BoxGeometry(RUBE_PLATE.w + 0.22, rubePlateRimH, RUBE_PLATE.d + 0.22),
+  new THREE.BoxGeometry(RUBE_PLATE.w + 0.18, rubePlateRimH, RUBE_PLATE.d + 0.18),
   rubePlateRimMat
 );
 rubePlateRim.position.set(
   RUBE_PLATE.x,
-  RUBE_DECK_Y + 0.01 + rubePlateRimH * 0.5,
+  RUBE_DECK_Y + 0.025 + rubePlateRimH * 0.5,
   RUBE_PLATE.z
 );
 rubePlateRim.renderOrder = 2;
@@ -4349,9 +4350,75 @@ rubePlateMesh.position.set(
 );
 rubePlateMesh.renderOrder = 3;
 scene.add(rubePlateMesh);
-const rubePlateLight = new THREE.PointLight(0xf0c24b, 0.42, 7.5, 2);
-rubePlateLight.position.set(RUBE_PLATE.x, 0.7, RUBE_PLATE.z);
+const rubePlateTopY = rubePlateMesh.position.y + RUBE_PLATE.h * 0.5;
+const rubePlateLight = new THREE.PointLight(0xffc14a, 1.35, 11, 2);
+rubePlateLight.position.set(RUBE_PLATE.x, 1.35, RUBE_PLATE.z);
 scene.add(rubePlateLight);
+
+// Idle marker: thin gold mast + floating ring. Hidden once the chain leaves idle.
+const rubePlateBeaconH = 2.4;
+const rubePlateBeaconMat = new THREE.MeshStandardMaterial({
+  color: 0xffd36a,
+  roughness: 0.3,
+  metalness: 0.4,
+  emissive: 0xffc14a,
+  emissiveIntensity: 1.7,
+});
+const rubePlateBeaconGeo = new THREE.CylinderGeometry(0.03, 0.045, rubePlateBeaconH, 10);
+rubePlateBeaconGeo.translate(0, rubePlateBeaconH * 0.5, 0);
+const rubePlateBeacon = new THREE.Mesh(rubePlateBeaconGeo, rubePlateBeaconMat);
+rubePlateBeacon.position.set(RUBE_PLATE.x, rubePlateTopY + 0.02, RUBE_PLATE.z);
+rubePlateBeacon.layers.enable(BLOOM_LAYER);
+rubePlateBeacon.renderOrder = 4;
+scene.add(rubePlateBeacon);
+const rubePlateBeaconTip = new THREE.Mesh(
+  new THREE.SphereGeometry(0.09, 12, 10),
+  rubePlateBeaconMat
+);
+rubePlateBeaconTip.position.y = rubePlateBeaconH;
+rubePlateBeaconTip.layers.enable(BLOOM_LAYER);
+rubePlateBeacon.add(rubePlateBeaconTip);
+const rubePlateRingMat = new THREE.MeshStandardMaterial({
+  color: 0xffd36a,
+  roughness: 0.28,
+  metalness: 0.35,
+  emissive: 0xffc14a,
+  emissiveIntensity: 1.45,
+});
+const rubePlateRing = new THREE.Mesh(
+  new THREE.TorusGeometry(0.95, 0.03, 8, 56),
+  rubePlateRingMat
+);
+rubePlateRing.rotation.x = Math.PI / 2;
+rubePlateRing.position.set(RUBE_PLATE.x, rubePlateTopY + 1.45, RUBE_PLATE.z);
+rubePlateRing.layers.enable(BLOOM_LAYER);
+rubePlateRing.renderOrder = 4;
+scene.add(rubePlateRing);
+
+// Drop instanced posts / lanterns / bollards that would grow through the pad.
+(function rubeClearPlateFurniture() {
+  const halfW = RUBE_PLATE.w * 0.5 + 0.4;
+  const halfD = RUBE_PLATE.d * 0.5 + 0.45;
+  const tmp = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  const shrink = (inst, n) => {
+    for (let i = 0; i < n; i++) {
+      inst.getMatrixAt(i, tmp);
+      pos.setFromMatrixPosition(tmp);
+      if (Math.abs(pos.x - RUBE_PLATE.x) < halfW && Math.abs(pos.z - RUBE_PLATE.z) < halfD) {
+        dummy.position.copy(pos);
+        dummy.scale.set(0.001, 0.001, 0.001);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      }
+    }
+    inst.instanceMatrix.needsUpdate = true;
+  };
+  shrink(bollards, FURN_COUNT);
+  shrink(posts, 18);
+  shrink(lanterns, LANTERN_N);
+})();
 
 // Sliding pier gate near Signal (kinematic) — night iron + gold accent bar
 const rubeGateMat = new THREE.MeshStandardMaterial({
@@ -4560,9 +4627,14 @@ function rubeReset() {
   rubeGateBody.position.y = rubeState.gateClosedY;
   rubeGateBody.velocity.set(0, 0, 0);
   rubeGateMesh.position.copy(rubeGateBody.position);
-  rubePlateMat.emissiveIntensity = 0.34;
-  rubePlateRimMat.emissiveIntensity = 0.14;
-  rubePlateLight.intensity = 0.42;
+  rubePlateMat.emissiveIntensity = 1.25;
+  rubePlateRimMat.emissiveIntensity = 0.55;
+  rubePlateBeaconMat.emissiveIntensity = 1.7;
+  rubePlateRingMat.emissiveIntensity = 1.45;
+  rubePlateLight.intensity = 1.35;
+  rubePlateBeacon.visible = true;
+  rubePlateRing.visible = true;
+  rubePlateRing.position.y = rubePlateTopY + 1.45;
   rubeGateMat.emissiveIntensity = 0.04;
   rubeClearDebris();
   rubeVesselMesh.visible = true;
@@ -4611,11 +4683,20 @@ function rubeTick() {
   const pressed = rubeState.plateMass >= RUBE_MASS_THRESHOLD - 1e-3;
   rubeState.platePressed = pressed;
   const t = Math.min(1, rubeState.plateMass / RUBE_MASS_THRESHOLD);
-  const breathe = 0.5 + 0.5 * Math.sin(performance.now() * 0.00085);
-  const idle = 0.30 + breathe * 0.08;
-  rubePlateMat.emissiveIntensity = idle + t * 0.26;
-  rubePlateRimMat.emissiveIntensity = 0.10 + breathe * 0.06 + t * 0.08;
-  rubePlateLight.intensity = 0.36 + breathe * 0.1 + t * 0.85;
+  const breathe = 0.5 + 0.5 * Math.sin(performance.now() * 0.00115);
+  rubePlateMat.emissiveIntensity = 1.05 + breathe * 0.5 + t * 0.4;
+  rubePlateRimMat.emissiveIntensity = 0.38 + breathe * 0.28 + t * 0.16;
+  rubePlateLight.intensity = 1.05 + breathe * 0.55 + t * 1.2;
+  const marking = rubeState.stage === 'idle';
+  rubePlateBeacon.visible = marking;
+  rubePlateRing.visible = marking;
+  if (marking) {
+    rubePlateBeaconMat.emissiveIntensity = 1.35 + breathe * 0.7;
+    rubePlateRingMat.emissiveIntensity = 1.15 + breathe * 0.65;
+    rubePlateRing.position.y = rubePlateTopY + 1.38 + breathe * 0.14;
+    const rs = 0.96 + breathe * 0.08;
+    rubePlateRing.scale.set(rs, rs, rs);
+  }
 
   // Stage machine — one-shot chain until Reset
   if (rubeState.stage === 'idle' && pressed) {
@@ -4669,9 +4750,13 @@ function rubeFillProbe() {
       x: RUBE_PLATE.x,
       y: +rubePlateMesh.position.y.toFixed(3),
       z: RUBE_PLATE.z,
-      top: +(rubePlateMesh.position.y + RUBE_PLATE.h * 0.5).toFixed(3),
+      w: RUBE_PLATE.w,
+      d: RUBE_PLATE.d,
+      top: +rubePlateTopY.toFixed(3),
       rimBottom: +(rubePlateRim.position.y - rubePlateRimH * 0.5).toFixed(3),
       deckY: RUBE_DECK_Y,
+      beacon: rubePlateBeacon.visible,
+      ringY: +rubePlateRing.position.y.toFixed(3),
     },
     threshold: RUBE_MASS_THRESHOLD,
     platePressed: rubeState.platePressed,
