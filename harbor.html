@@ -1430,9 +1430,9 @@ const buildingMat = new THREE.ShaderMaterial({
       vec2 sheathUv = concUV / 2.05 + vec2(vId * 0.37, vId * 0.21);
       vec4 circuit = texture2D(uSheathCircuit, sheathUv);
       vec4 growth = texture2D(uSheathGrowth, sheathUv);
-      // Cap the mat. A small olive lift stays under the paint threshold.
-      vec3 moss = min(growth.rgb, vec3(0.11, 0.14, 0.10));
-      moss.g = min(moss.g + 0.012, 0.14);
+      // Atlas is already night-valued. Cap only stops a stray highlight
+      // so leaflet veins, moss tips, and shelf zones still separate.
+      vec3 moss = min(growth.rgb, vec3(0.24, 0.26, 0.20));
       // Steep cover so a mip-blurred edge stays moss and a real opening stays open.
       float cover = smoothstep(0.04, 0.30, growth.a);
       // Binary openings — a soft shoulder was a bright circuit haze.
@@ -1878,7 +1878,7 @@ loadStreetAtlas();
 
 // Circuit underlayer + moss/kudzu/fungus cover. Vertical concrete only.
 // A failed load leaves uSheathOn at 0 (procedural night concrete).
-const sheathCache = location.protocol === 'file:' ? '' : '?v=sheath3';
+const sheathCache = location.protocol === 'file:' ? '' : '?v=sheath4';
 function prepSheath(tex) {
   tex.colorSpace = THREE.NoColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
