@@ -256,6 +256,7 @@
       <div class="r"><span>fbo</span><strong id="fbo-state">A→B</strong></div>
       <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
       <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
+      <div class="r"><strong class="accent">Rube plate → quay left of Signal</strong></div>
     </div>
     <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · not live</p>
   </div>
@@ -793,7 +794,7 @@ scene.add(curbs);
 // Teachers: van Dongen Interior Mapping (2008); Gotow Part 1; Chandler & Yang procwin;
 // Mapbox building.fragment faux rooms; three-fenestra (rooms behind glass + Fresnel) — implemented in GLSL.
 // Kill sway. Local façade UV from vLocalPos × instance scale. Mullions = opaque wall. Windows = holes + rooms.
-// Pass 7 · atlases wired: room-atlas-occupied-32 (8×4 fenestra) upstairs · shop-atlas ground band.
+// Pass 7 · atlases wired: room-atlas-occupied-32 (8×4 fenestra) on every floor above 0 · shop-atlas on floor 0 only.
 const INSTANCE_COUNT = 128;
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 boxGeo.translate(0, 0.5, 0);
@@ -819,6 +820,8 @@ const buildingMat = new THREE.ShaderMaterial({
     uFaceCount: { value: 7.0 },
     uFaceCols: { value: 4.0 },
     uFaceRows: { value: 2.0 },
+    uSignAtlas: { value: null },
+    uSignOn: { value: 0.0 },
   },
   vertexShader: /* glsl */`
     varying vec3 vColor;
@@ -891,6 +894,8 @@ const buildingMat = new THREE.ShaderMaterial({
     uniform float uFaceCount;
     uniform float uFaceCols;
     uniform float uFaceRows;
+    uniform sampler2D uSignAtlas;
+    uniform float uSignOn;
     ${NOISE_GLSL}
 
     // Sample atlas cell (cols×rows). huv in [0,1]. Flip V for image space.
@@ -903,6 +908,17 @@ const buildingMat = new THREE.ShaderMaterial({
       vec2 inset = cellSize * 0.001;
       vec2 cellOrigin = vec2(col * cellSize.x, 1.0 - (row + 1.0) * cellSize.y) + inset;
       return texture2D(atlas, cellOrigin + clamp(huv, 0.0, 1.0) * (cellSize - 2.0 * inset)).rgb;
+    }
+
+    vec4 sampleAtlasRGBA(sampler2D atlas, float cols, float rows, float idx, vec2 huv) {
+      float n = cols * rows;
+      float id = mod(floor(idx + 0.5), n);
+      float col = mod(id, cols);
+      float row = floor(id / cols);
+      vec2 cellSize = vec2(1.0 / cols, 1.0 / rows);
+      vec2 inset = cellSize * 0.004;
+      vec2 cellOrigin = vec2(col * cellSize.x, 1.0 - (row + 1.0) * cellSize.y) + inset;
+      return texture2D(atlas, cellOrigin + clamp(huv, 0.0, 1.0) * (cellSize - 2.0 * inset));
     }
 
     // Shared UV center-crop for EVERY interior atlas sample (room + shop + face-map).
@@ -1089,16 +1105,15 @@ const buildingMat = new THREE.ShaderMaterial({
       wallCol += vec3(0.008, 0.009, 0.011) * (blotch - 0.42) * isVert;
       // Slightly cooler shadow side — reads as matte concrete, not plastic
       wallCol = mix(wallCol, wallCol * vec3(0.92, 0.94, 1.02), (1.0 - ndl) * 0.35 * isVert);
-      // Ground-floor shop band in metres (taller cells + warmer interiors)
-      float shopBandM = 2.55;
-      float nearGround = (1.0 - smoothstep(shopBandM * 0.82, shopBandM * 1.08, lpM.y)) * step(0.15, lpM.y);
-
       // Cell size CONSTANT in metres (Virgil 2026-09-26).
-      // cellW/cellH that vary with height (nearGround mix) bend vertical mullions
-      // into curves — roomUV.x = facadeU/cellW(y) shifts sideways as Y changes.
-      // Same square pitch every floor; shop band only changes interior atlas/warmth.
+      // cellW/cellH that vary with height bend vertical mullions into curves.
+      // Same square pitch every floor. Shop atlas is floor index 0 only —
+      // a metre band (the old 2.55 m shopBand) covered several rows and
+      // painted retail interiors on the floors above the street.
       float cellW = 0.76;
       float cellH = 0.76;
+      float floorIndex = floor(max(lpM.y, 0.0) / cellH);
+      float isShop = (1.0 - step(0.5, floorIndex)) * step(0.02, lpM.y);
 
       // Dominant face → façade U along the horizontal tangent, V along height
       vec3 T, B, D; // tangent, bitangent, inward depth (unit-local)
@@ -1126,8 +1141,8 @@ const buildingMat = new THREE.ShaderMaterial({
       // Mullions / frames — thin dark bands; window = hole (Virgil 2026-09-26).
       // Old 0.14/0.16 left ~49% glass + beige wallCol rings (frameBand only covered
       // inner 55% of the margin). Shrink margins and paint the whole leftover as mullion.
-      float mullU = mix(0.05, 0.04, nearGround);
-      float mullV = mix(0.055, 0.045, nearGround);
+      float mullU = mix(0.05, 0.04, isShop);
+      float mullV = mix(0.055, 0.045, isShop);
       float inPane = step(mullU, f.x) * step(f.x, 1.0 - mullU)
                    * step(mullV, f.y) * step(f.y, 1.0 - mullV);
       // Keep clear of roof/plinth edge
@@ -1198,7 +1213,7 @@ const buildingMat = new THREE.ShaderMaterial({
       float coolAmt = smoothstep(0.35, 0.7, vColor.b);
       float litThresh = mix(0.48, 0.30, warmAmt);
       litThresh = mix(litThresh, 0.46, coolAmt * 0.55);
-      litThresh = mix(litThresh, 0.16, nearGround * 0.9);
+      litThresh = mix(litThresh, 0.16, isShop * 0.9);
       float lit = step(litThresh, h0);
       float flickerGate = step(0.93, h1);
       float flicker = 1.0 - flickerGate * uLive * (0.25 + 0.55 * (0.5 + 0.5 * sin(uTime * (1.4 + h1 * 2.2) + h0 * 6.28)));
@@ -1223,7 +1238,7 @@ const buildingMat = new THREE.ShaderMaterial({
                   + vec3(localXY.x * cellW, localXY.y * cellH, 0.0);
         float cellSpan = mix(cellW, cellH, 0.5);
         // Shallower box — deep rooms exaggerate wall bow at glancing angles
-        float depthM = mix(0.78, 1.05, nearGround);
+        float depthM = mix(0.78, 1.05, isShop);
         vec3 camLocal = vec3(camM.x / cellW, camM.y / cellH, camM.z / cellSpan);
         float roomDepth = depthM / cellSpan;
 
@@ -1257,7 +1272,7 @@ const buildingMat = new THREE.ShaderMaterial({
           interior = mix(body, interior, edgeFade);
         } else if (uAtlasOn > 0.5) {
           // Flat ortho fenestra sample — no ray-box bow
-          interior = shadeRoomAtlas(pane, glow, nearGround, h0 + vId * 0.13);
+          interior = shadeRoomAtlas(pane, glow, isShop, h0 + vId * 0.13);
           interior = mix(body, interior, edgeFade);
         } else {
           vec3 rayDirM = normalize((vLocalPos - vCamLocal) * vScale);
@@ -1270,7 +1285,7 @@ const buildingMat = new THREE.ShaderMaterial({
           ));
           vec3 ro = vec3(pane.x, pane.y, 0.001);
           if (rd.z > 0.015) {
-            interior = shadeRoomProc(ro, rd, glow, warmAmt, nearGround);
+            interior = shadeRoomProc(ro, rd, glow, warmAmt, isShop);
           } else {
             interior = mix(vec3(0.02, 0.022, 0.03), vec3(0.12, 0.1, 0.06) * glow, 0.3);
           }
@@ -1295,6 +1310,24 @@ const buildingMat = new THREE.ShaderMaterial({
         vec3 glass = mix(interior, glassRefl, glassMix);
         glass = mix(glass, interior, glow * mix(0.55, 0.72, atlasPath) * (1.0 - fres * 0.9));
         body = glass;
+
+        // Retail names on ground-floor glass only — soft gold / sea-glass, not stickers.
+        // The glazed entry keeps its own transom; this band stays on the side panes.
+        if (uSignOn > 0.5 && isShop > 0.5) {
+          float signBand = smoothstep(0.60, 0.68, f.y) * (1.0 - smoothstep(0.90, 0.97, f.y));
+          signBand *= smoothstep(0.10, 0.16, f.x) * (1.0 - smoothstep(0.84, 0.92, f.x));
+          signBand *= (1.0 - shopEntry);
+          float faceKey = step(abs(Ln.z), abs(Ln.x));
+          float signIdx = floor(hash(vec2(vId * 1.31 + faceKey * 5.0, faceAlong * 0.17 + 2.2)) * 8.0);
+          vec2 suv = vec2(
+            clamp((f.x - 0.12) / 0.76, 0.0, 1.0),
+            clamp((f.y - 0.62) / 0.30, 0.0, 1.0)
+          );
+          vec4 sgn = sampleAtlasRGBA(uSignAtlas, 4.0, 2.0, signIdx, suv);
+          float a = sgn.a * signBand * 0.88;
+          body = mix(body, sgn.rgb, a);
+          body += sgn.rgb * a * 0.18;
+        }
       }
 
       // Through-glass entry: one shop interior across the whole bay (aspect-correct
@@ -1442,6 +1475,104 @@ async function loadHarborAtlases() {
     }
   }
 }
+
+// Ground-floor retail names. Original harbor words, soft gold / sea-glass.
+// Transparent plate so the shop interior stays visible around the letters.
+function makeHarborSignAtlas() {
+  const cols = 4;
+  const rows = 2;
+  const cw = 256;
+  const ch = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = cols * cw;
+  canvas.height = rows * ch;
+  const ctx = canvas.getContext('2d');
+  const names = ['SALT', 'BERTH', 'HULL', 'KEEL', 'NETS', 'LAMP', 'CARGO', 'DOCK'];
+  const sea = (i) => i % 3 === 1;
+  function glyph(kind, x, y, ink) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (kind === 'wave') {
+      ctx.beginPath();
+      ctx.moveTo(-16, 4);
+      ctx.bezierCurveTo(-8, -10, -2, 14, 8, 2);
+      ctx.bezierCurveTo(14, -6, 18, 8, 22, 0);
+      ctx.stroke();
+    } else if (kind === 'ring') {
+      ctx.beginPath();
+      ctx.arc(0, 0, 12, 0.4, Math.PI * 1.85);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 14, 3.2, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (kind === 'lamp') {
+      ctx.beginPath();
+      ctx.moveTo(-10, -8);
+      ctx.lineTo(10, -8);
+      ctx.lineTo(6, 6);
+      ctx.lineTo(-6, 6);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, 6);
+      ctx.lineTo(0, 14);
+      ctx.moveTo(-7, 14);
+      ctx.lineTo(7, 14);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(12, 10);
+      ctx.lineTo(-12, 10);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  const kinds = ['wave', 'ring', 'mark', 'wave', 'ring', 'lamp', 'mark', 'ring'];
+  for (let i = 0; i < names.length; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = col * cw;
+    const y = row * ch;
+    const ink = sea(i) ? 'rgba(186, 214, 220, 0.94)' : 'rgba(232, 196, 120, 0.95)';
+    const glow = sea(i) ? 'rgba(140, 186, 198, 0.55)' : 'rgba(240, 194, 75, 0.5)';
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, cw, ch);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(6, 8, 14, 0.42)';
+    ctx.fillRect(x + 18, y + 28, cw - 36, ch - 52);
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = ink;
+    ctx.font = '700 62px "Arial Black", "Noto Sans", "Liberation Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(names[i], x + cw * 0.58, y + ch * 0.52);
+    ctx.shadowBlur = 0;
+    glyph(kinds[i], x + 48, y + ch * 0.52, ink);
+    ctx.restore();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.premultiplyAlpha = false;
+  tex.needsUpdate = true;
+  buildingMat.uniforms.uSignAtlas.value = tex;
+  buildingMat.uniforms.uSignOn.value = 1.0;
+  buildingMat.needsUpdate = true;
+}
+makeHarborSignAtlas();
 
 if (facesMode) {
   const faceBase = new URL('./06-intermediate-assets/face-proto/', import.meta.url);
@@ -2231,12 +2362,10 @@ const quayMat = new THREE.ShaderMaterial({
     void main(){
       vUv = uv;
       vec3 p = position;
-      float n = fbm(uv * 4.0 + uTime * 0.15);
-      p.z += n * uAmp;
-      p.z += sin(uv.x * 12.0 + uTime) * uAmp * 0.35;
-      vec2 d = uv - (uPointer * 0.5 + 0.5);
-      float rip = exp(-dot(d,d)*6.5) * uAmp * 2.2;
-      p.z += rip;
+      // Flat deck. A swell here (old ~10–20 cm) rose through the gold plate,
+      // whose rim sits only ~2 cm above y=0.04, and read as water on the quay.
+      float n = fbm(uv * 4.0);
+      p.z += (n - 0.5) * 0.003;
       vPos = p;
       vec4 wp = modelMatrix * vec4(p, 1.0);
       vWorldPos = wp.xyz;
@@ -2259,19 +2388,11 @@ const quayMat = new THREE.ShaderMaterial({
       stone *= 1.0 - seam * 0.18;
       float edge = smoothstep(0.025, 0.0, min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y)));
       stone = mix(stone, vec3(0.35, 0.3, 0.18), edge * 0.25);
-      float wash = fbm(vUv * 3.0 - uPointer * 0.2);
-      stone = mix(stone, vec3(0.54, 0.48, 0.72) * 0.38, wash * 0.32);
-      // Wet deck — kept dim so grazing camera + bloom never wash to white sheet
-      vec3 V = normalize(cameraPosition - vWorldPos);
-      float ndotv = max(dot(vec3(0.,1.,0.), V), 0.0);
-      float fres = pow(1.0 - ndotv, 3.0) * smoothstep(0.08, 0.35, ndotv); // kill edge-on blowout
-      float streak = pow(max(0.0, sin(vUv.x * 40.0 + fbm(vUv * 6.0) * 3.0 + uTime * 0.2)), 14.0);
-      streak *= smoothstep(0.2, 0.55, vUv.y);
-      vec3 wet = vec3(0.22, 0.28, 0.4) * streak * fres * 0.22;
-      float skyline = pow(max(0.0, sin(vUv.x * 22.0) * 0.5 + 0.5), 5.0);
-      skyline *= smoothstep(0.08, 0.3, vUv.y) * (1.0 - smoothstep(0.5, 0.9, vUv.y));
-      vec3 refl = vec3(0.35, 0.4, 0.55) * skyline * 0.08;
-      vec3 col = clamp(stone + wet + refl, 0.0, 0.35); // hard ceiling — asphalt, not floodlight
+      // Dry promenade. A static damp line only in the last strip against the
+      // seawall (uv.y 0 is the water edge). No animated wash across the plate.
+      float againstWall = 1.0 - smoothstep(0.0, 0.07, vUv.y);
+      stone = mix(stone, vec3(0.045, 0.055, 0.07), againstWall * 0.55);
+      vec3 col = clamp(stone, 0.0, 0.35);
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -2359,6 +2480,10 @@ const waterMat = new THREE.ShaderMaterial({
       if (nLocal.z < 0.0) nLocal = -nLocal;
 
       vec4 wp = modelMatrix * vec4(p, 1.0);
+      // Basin stays outboard of the seawall. Smaller Z is the promenade.
+      // Clamp so a crest cannot slide the surface onto the dry quay.
+      float clipZ = uWallZ + 0.20;
+      wp.z = max(wp.z, clipZ);
       vWorldPos = wp.xyz;
       vWorldN = normalize(mat3(modelMatrix) * nLocal);
       // Depth outboard of seawall (world +Z)
@@ -2398,6 +2523,9 @@ const waterMat = new THREE.ShaderMaterial({
     }
 
     void main(){
+      // Nothing landward of the seawall's water face — no sheet, no splash.
+      if (vWorldPos.z < uWallZ + 0.20) discard;
+      if (abs(vWorldPos.x) > 11.05) discard;
       vec3 N = normalize(vWorldN);
       float ampK = clamp(uAmp / 0.045, 0.0, 1.0);
       N = normalize(mix(vec3(0.0, 1.0, 0.0), N, ampK));
@@ -2430,7 +2558,9 @@ const waterMat = new THREE.ShaderMaterial({
       vec3 horizonCol = vec3(0.18, 0.20, 0.28);
       float upness = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
       vec3 reflCol = mix(horizonCol, skyCol, upness);
-      float quayBand = smoothstep(uWallZ + 0.8, uWallZ - 1.5, vWorldPos.z);
+      // edge0 must be < edge1 (GLSL smoothstep is undefined the other way).
+      float quayBand = smoothstep(uWallZ - 0.2, uWallZ + 1.6, vWorldPos.z);
+      quayBand = 1.0 - quayBand;
       reflCol = mix(reflCol, vec3(0.08, 0.07, 0.06), quayBand * 0.35 * uReflect);
       float streakA = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampA.x) * 0.55), 10.0);
       float streakB = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampB.x) * 0.55), 10.0);
@@ -2526,6 +2656,22 @@ scene.add(seawallWetCourse);
 const seawallCap = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W + 0.25, 0.1, 0.38), seawallCapMat);
 seawallCap.position.set(0, faceTop + 0.05, SEAWALL_Z + 0.04);
 scene.add(seawallCap);
+
+// Toe closes the gap between the wall's water face and the basin mesh so the
+// surface cannot read through onto the promenade. Top stays below the coping
+// and the graffiti band.
+const seawallToeD = 0.38;
+const seawallToeH = 0.72;
+const seawallToe = new THREE.Mesh(
+  new THREE.BoxGeometry(SEAWALL_W, seawallToeH, seawallToeD),
+  seawallWetMat
+);
+seawallToe.position.set(
+  0,
+  -0.06 - seawallToeH * 0.5,
+  SEAWALL_Z + 0.11 + seawallToeD * 0.5
+);
+scene.add(seawallToe);
 
 // ——— Seawall graffiti (freight band, both faces) ———
 // Original throw-ups only — bubble letters with fill, hard outline, and a 3D
@@ -3006,6 +3152,7 @@ scene.add(seawallGraffiti);
 window.__harborGraffiti = seawallGraffiti;
 window.__grafCanvas = grafCanvas;
 
+
 // Debug probe (harbor water/seawall layout)
 window.__harborWater = water;
 window.__harborQuay = quay;
@@ -3244,7 +3391,7 @@ const seawallLip = new CANNON.Body({
 });
 physWorld.addBody(seawallLip);
 
-// Basin floor (deep) — catch sunk dense crates; buoyancy handles floaters
+// Basin floor (deep) — safety net under the water; buoyancy keeps crates off it
 const BASIN_FLOOR_Y = -2.4;
 const basinFloor = new CANNON.Body({
   mass: 0,
@@ -3430,18 +3577,18 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   })();
 }
 
-// Free crates — grab + toss · density variants for basin buoyancy (light / mid / dense)
-// density = mass / (sx*sy*sz); WATER_DENSITY≈9 so light floats high, dense sits low / sinks
+// Free crates — grab + toss. Masses are the Rube plate signal (latch at 2.5);
+// do not retune them to fake buoyancy. Density only sets draft.
 const HARBOR_CRATE_DEFS = [
-  // mid — cream, ~6.6 dens → floats mid
+  // mid — cream, rides mid-high
   { size: [0.55, 0.55, 0.55], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2, label: 'mid' },
-  // dense — taupe, ~14.3 dens → sits low / sinks
+  // dense — taupe, rides low with freeboard (must not sink)
   { size: [0.7, 0.4, 0.55], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35, label: 'dense' },
-  // light — gold, ~7.7 dens → floats high
+  // light — gold, rides high
   { size: [0.45, 0.45, 0.45], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55, label: 'light' },
-  // mid-heavy — ~12 dens → low float
+  // mid-heavy — low float, still clear of the basin floor
   { size: [0.6, 0.5, 0.5], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1, label: 'mid' },
-  // cork floatable — very light, high bob
+  // cork — very light, high bob
   { size: [0.5, 0.35, 0.5], mass: 0.45, color: 0xc4a574, emissive: 0xf0c24b, ei: 0.06, pos: [-4.1, 0.75, 3.5], yaw: -0.2, label: 'light' },
 ];
 
@@ -3671,9 +3818,24 @@ function physSetConstraint(on) {
 
 // ——— Basin buoyancy (Archimedes) + light blast impulse · ladder step 3 ———
 // Water plane = visual Gerstner mesh Y (WATER_Y). Force only inside basin AABB.
-const WATER_DENSITY = 9.0; // game-scale; matches crate dens ~5–14 (not SI 1000)
-const BUOY_DRAG_LINEAR = 2.8;
-const BUOY_DRAG_ANGULAR = 1.6;
+// Crate density = mass / volume (~5.1 light cork … ~14.3 dense). The old water
+// density of 9 lost to the two heaviest crates, so they sat on the basin floor.
+// Water stays denser than every tossable crate. Plate latch still sums mass
+// (RUBE_MASS_THRESHOLD 1.75, resting contact), never draft.
+function harborCrateDensity(def) {
+  const [sx, sy, sz] = def.size;
+  return def.mass / Math.max(sx * sy * sz, 1e-4);
+}
+const CRATE_DENSITY_MAX = HARBOR_CRATE_DEFS.reduce(
+  (m, def) => Math.max(m, harborCrateDensity(def)),
+  0
+);
+// 1.48× heaviest → dense equilibrium draft ~68% (freeboard above the chop).
+const WATER_DENSITY = CRATE_DENSITY_MAX * 1.48;
+// Cap lift so a light crate that dunks pops back instead of launching.
+const BUOY_LIFT_CAP = 1.55;
+const BUOY_DRAG_LINEAR = 3.4;
+const BUOY_DRAG_ANGULAR = 2.1;
 const BUOY_WAVE_COUPLE = 0.55; // bob from Gerstner amp
 const basinBuoy = {
   on: !physFreeze,
@@ -3710,15 +3872,36 @@ function crateInBasinXZ(p) {
   return p.x >= a.x0 && p.x <= a.x1 && p.z >= a.z0 && p.z <= a.z1;
 }
 
-/** Approx submerged fraction of axis-aligned box vs horizontal water plane. */
+const buoyLocalScratch = new CANNON.Vec3();
+const buoyWorldScratch = new CANNON.Vec3();
+
+/** World-space vertical half-extent of the oriented box (highest corner). */
+function crateWorldHalfY(entry) {
+  const he = entry.halfExtents || buoyLocalScratch;
+  const body = entry.body;
+  let h = 0;
+  body.vectorToWorldFrame(buoyLocalScratch.set(he.x || 0.25, 0, 0), buoyWorldScratch);
+  h += Math.abs(buoyWorldScratch.y);
+  body.vectorToWorldFrame(buoyLocalScratch.set(0, he.y || 0.25, 0), buoyWorldScratch);
+  h += Math.abs(buoyWorldScratch.y);
+  body.vectorToWorldFrame(buoyLocalScratch.set(0, 0, he.z || 0.25), buoyWorldScratch);
+  h += Math.abs(buoyWorldScratch.y);
+  return Math.max(h, 1e-4);
+}
+
+/**
+ * Submerged fraction against a flat water plane.
+ * Uses the oriented vertical span so a tumbled crate's top corner, not its
+ * unrotated height, decides whether it is still under.
+ */
 function submergedFraction(entry, surfaceY) {
-  const he = entry.halfExtents || new CANNON.Vec3(0.25, 0.25, 0.25);
-  const p = entry.body.position;
-  const top = p.y + he.y;
-  const bot = p.y - he.y;
+  const halfH = crateWorldHalfY(entry);
+  const y = entry.body.position.y;
+  const top = y + halfH;
+  const bot = y - halfH;
   if (bot >= surfaceY) return 0;
   if (top <= surfaceY) return 1;
-  return (surfaceY - bot) / Math.max(2 * he.y, 1e-4);
+  return (surfaceY - bot) / (2 * halfH);
 }
 
 function buoyancyApplyForces(t) {
@@ -3727,7 +3910,7 @@ function buoyancyApplyForces(t) {
     return;
   }
   let wet = 0;
-  const g = 9.82;
+  const g = Math.abs(physWorld.gravity.y) || 9.82;
   for (const entry of physCrates) {
     if (!entry.floatable || entry.mass <= 0) continue;
     const body = entry.body;
@@ -3736,22 +3919,46 @@ function buoyancyApplyForces(t) {
     const p = body.position;
     if (!crateInBasinXZ(p)) continue;
     const surfaceY = basinSurfaceY(p.x, p.z, t);
-    const frac = submergedFraction(entry, surfaceY);
+    const halfH = crateWorldHalfY(entry);
+    const top = p.y + halfH;
+    const bot = p.y - halfH;
+    let frac = 0;
+    if (bot >= surfaceY) frac = 0;
+    else if (top <= surfaceY) frac = 1;
+    else frac = (surfaceY - bot) / (2 * halfH);
     if (frac <= 0) continue;
     wet++;
     const vol = entry.volume || (entry.halfExtents
       ? entry.halfExtents.x * entry.halfExtents.y * entry.halfExtents.z * 8
       : 0.1);
     const submergedVol = vol * frac;
-    // Archimedes: F = ρ_water * V_sub * g  upward
-    const Fb = basinBuoy.density * submergedVol * g;
+    const weight = entry.mass * g;
+    // Archimedes: F = ρ_water * V_sub * g upward.
+    let Fb = basinBuoy.density * submergedVol * g;
+    // Fully under: always net-positive so a crate cannot sleep on the floor.
+    if (frac >= 0.995) Fb = Math.max(Fb, weight * 1.15);
+    Fb = Math.min(Fb, weight * BUOY_LIFT_CAP);
     basinBuoy.forceScratch.set(0, Fb, 0);
+    // Buoyancy center sits in the wet half. A small horizontal shift toward
+    // the low side rolls a tumbled crate back toward an even keel.
+    body.vectorToWorldFrame(buoyLocalScratch.set(0, 1, 0), buoyWorldScratch);
+    const tiltH = Math.hypot(buoyWorldScratch.x, buoyWorldScratch.z);
+    let ox = 0;
+    let oz = 0;
+    if (tiltH > 0.12) {
+      const shift = Math.min(halfH * 0.18, 0.05) * Math.min(tiltH, 1);
+      ox = -buoyWorldScratch.x / tiltH * shift;
+      oz = -buoyWorldScratch.z / tiltH * shift;
+    }
+    const wetTop = Math.min(top, surfaceY);
+    const centroidY = (bot + wetTop) * 0.5;
+    basinBuoy.offsetScratch.set(ox, centroidY - p.y, oz);
     body.wakeUp();
-    body.applyForce(basinBuoy.forceScratch, basinBuoy.offsetScratch.set(0, 0, 0));
-    // Quadratic-ish drag while wet — settles bob instead of perpetual thrash
+    body.applyForce(basinBuoy.forceScratch, basinBuoy.offsetScratch);
+    // Drag while wet — settles bob instead of perpetual thrash
     const damp = frac;
     body.velocity.x *= Math.max(0, 1 - BUOY_DRAG_LINEAR * damp * 0.016);
-    body.velocity.y *= Math.max(0, 1 - BUOY_DRAG_LINEAR * damp * 0.022);
+    body.velocity.y *= Math.max(0, 1 - BUOY_DRAG_LINEAR * damp * 0.02);
     body.velocity.z *= Math.max(0, 1 - BUOY_DRAG_LINEAR * damp * 0.016);
     body.angularVelocity.x *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
     body.angularVelocity.y *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
@@ -3759,6 +3966,14 @@ function buoyancyApplyForces(t) {
   }
   basinBuoy.submerged = wet;
 }
+
+// Every physics substep, not once per animation frame. fixedStep() can run
+// several 1/60 steps after a long frame; a single applyForce is cleared after
+// the first of those, and the rest are gravity-only — dense and light crates
+// both sink on mobile / hitch frames.
+physWorld.addEventListener('preStep', () => {
+  buoyancyApplyForces(performance.now() * 0.001);
+});
 
 function physBlast() {
   if (physFreeze) return;
@@ -3843,9 +4058,12 @@ const WIND_CARDINALS = [
   { name: 'S', x: 0, z: 1 },
   { name: 'SE', x: 0.707, z: 0.707 },
 ];
-const WIND_STR_STEPS = [0.45, 0.9, 1.4, 2.2]; // strength index → force scale
-const WIND_CRATE_SCALE = 12;   // ×strength×gust → Newtons (must beat quay friction ~μN≈5)
-const WIND_LANTERN_SCALE = 3.2; // soft sway (visible nod); hinge stays intact
+// Gentle night breeze. Default step stays under quay friction so crates
+// rest; the top step can creep the lightest box, not launch it.
+// Cork μN ≈ 2.2 N. Peak default crate force ≈ 1.3 N.
+const WIND_STR_STEPS = [0.18, 0.32, 0.48, 0.72];
+const WIND_CRATE_SCALE = 2.4;
+const WIND_LANTERN_SCALE = 2.2; // soft nod; hinge stays intact
 const harborWind = {
   on: !physFreeze,
   dirIdx: 0, // default E — along quay
@@ -3918,11 +4136,10 @@ function windApplyForces(t) {
     harborWind.gust = 0;
     return;
   }
-  // Alive gust: slow sine + quieter secondary (not a constant shove)
-  const gust = 0.72
-    + 0.22 * Math.sin(t * 1.35)
-    + 0.12 * Math.sin(t * 0.41 + 1.7)
-    + 0.08 * Math.sin(t * 2.85 + 0.4);
+  // Slow breath. Small amplitude, long period — no rapid gust spikes.
+  const gust = 0.84
+    + 0.06 * Math.sin(t * 0.36)
+    + 0.03 * Math.sin(t * 0.15 + 1.7);
   harborWind.gust = gust;
   const base = harborWind.strength * gust;
   const dx = harborWind.dir.x;
@@ -3933,8 +4150,8 @@ function windApplyForces(t) {
     if (entry.mass <= 0) continue;
     const body = entry.body;
     if (body.type !== CANNON.Body.DYNAMIC) continue;
-    // Light crates drift more; force scaled to overcome quay friction
-    const massFade = 0.55 + 0.45 * (1.2 / Math.max(entry.mass, 0.4));
+    // Light crates catch a little more air; keep it under static friction.
+    const massFade = 0.78 + 0.22 * (0.85 / Math.max(entry.mass, 0.45));
     const f = base * WIND_CRATE_SCALE * massFade;
     harborWind.forceScratch.set(dx * f, f * 0.02, dz * f);
     body.wakeUp();
@@ -3973,7 +4190,6 @@ function physStep() {
     return;
   }
   const _tBuoy = performance.now() * 0.001;
-  buoyancyApplyForces(_tBuoy);
   windApplyForces(_tBuoy);
   if (typeof physHooks.beforeStep === 'function') physHooks.beforeStep();
   physWorld.fixedStep();
@@ -4574,7 +4790,7 @@ function springWindPush(base, dx, dz) {
   if (physFreeze || !physSpringsOn || !harborWind.on) return;
   // Signal tip — lively lateral sway
   if (tipBody.type === CANNON.Body.DYNAMIC) {
-    const soft = base * 5.5;
+    const soft = base * 3.2;
     tipBody.wakeUp();
     tipBody.applyForce(
       harborWind.forceScratch.set(dx * soft, soft * 0.08, dz * soft),
@@ -4584,7 +4800,7 @@ function springWindPush(base, dx, dz) {
   // Cable bobs
   for (const entry of physSpringBodies) {
     if (entry.kind !== 'cableBob' || entry.body.type !== CANNON.Body.DYNAMIC) continue;
-    const soft = base * 1.6;
+    const soft = base * 1.05;
     entry.body.wakeUp();
     entry.body.applyForce(
       harborWind.forceScratch.set(dx * soft, soft * 0.05, dz * soft),
@@ -4595,7 +4811,7 @@ function springWindPush(base, dx, dz) {
   for (const entry of physBannerSegs) {
     if (entry.body.type !== CANNON.Body.DYNAMIC) continue;
     const catchF = 0.55 + entry.segIdx * 0.35;
-    const soft = base * 4.0 * catchF;
+    const soft = base * 2.4 * catchF;
     entry.body.wakeUp();
     entry.body.applyForce(
       harborWind.forceScratch.set(dx * soft, soft * 0.03, dz * soft),
@@ -4764,10 +4980,13 @@ physHooks.onProbe = () => {
 // Night-concrete / fenestra taste. Uses existing crates / constraint / wind / springs / buoyancy.
 // Shatter fires last when the gate finishes opening (debris-swap the fenestra vessel).
 // Two ordinary crates (mid 1.1 + light 0.7 = 1.8) or one dense (2.2).
-// 2.5 sat above both, so a real stack never latched.
+// Resting contact on the gold pad, not the old 2.5 center-in-box test.
 const RUBE_MASS_THRESHOLD = 1.75;
 const RUBE_LATCH_HOLD_MS = 280;
-const RUBE_PLATE = { x: -3.15, z: 3.12, w: 2.2, d: 1.7, h: 0.07 };
+// Promenade deck plane is y=0.04. Pad sits fully above it, on open deck
+// left of Signal (x=-6.5) and clear of crate spawns.
+const RUBE_DECK_Y = 0.04;
+const RUBE_PLATE = { x: -9.46, z: 2.45, w: 2.9, d: 2.7, h: 0.05 };
 const RUBE_GATE = { x: -5.15, z: 2.55, w: 1.35, h: 1.55, d: 0.12 };
 const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
 
@@ -4789,29 +5008,114 @@ const rubeState = {
   hintAt: 0,
 };
 
-// Pressure plate — gold top / night-concrete rim (sibling harbor-prop-physics pattern)
+// Pressure plate — gold slab on a night-concrete rim, fully above the deck.
+// Large enough to read from the default orbit, with a slow warm breath.
 const rubePlateMat = new THREE.MeshStandardMaterial({
-  color: 0xf0c24b,
-  roughness: 0.55,
-  metalness: 0.18,
-  emissive: 0xf0c24b,
-  emissiveIntensity: 0.06,
+  color: 0xffd36a,
+  roughness: 0.34,
+  metalness: 0.42,
+  emissive: 0xffc14a,
+  emissiveIntensity: 1.25,
 });
+const rubePlateRimMat = new THREE.MeshStandardMaterial({
+  color: 0x2c313c,
+  roughness: 0.86,
+  metalness: 0.16,
+  emissive: 0xf0c24b,
+  emissiveIntensity: 0.55,
+});
+const rubePlateRimH = 0.06;
+const rubePlateRim = new THREE.Mesh(
+  new THREE.BoxGeometry(RUBE_PLATE.w + 0.18, rubePlateRimH, RUBE_PLATE.d + 0.18),
+  rubePlateRimMat
+);
+rubePlateRim.position.set(
+  RUBE_PLATE.x,
+  RUBE_DECK_Y + 0.025 + rubePlateRimH * 0.5,
+  RUBE_PLATE.z
+);
+rubePlateRim.renderOrder = 2;
+scene.add(rubePlateRim);
 const rubePlateMesh = new THREE.Mesh(
   new THREE.BoxGeometry(RUBE_PLATE.w, RUBE_PLATE.h, RUBE_PLATE.d),
   rubePlateMat
 );
-rubePlateMesh.position.set(RUBE_PLATE.x, RUBE_PLATE.h * 0.5 + 0.02, RUBE_PLATE.z);
-scene.add(rubePlateMesh);
-const rubePlateRim = new THREE.Mesh(
-  new THREE.BoxGeometry(RUBE_PLATE.w + 0.14, 0.045, RUBE_PLATE.d + 0.14),
-  new THREE.MeshStandardMaterial({ color: 0x2a2e36, roughness: 0.92, metalness: 0.08 })
+rubePlateMesh.position.set(
+  RUBE_PLATE.x,
+  rubePlateRim.position.y + rubePlateRimH * 0.5 + RUBE_PLATE.h * 0.5,
+  RUBE_PLATE.z
 );
-rubePlateRim.position.set(RUBE_PLATE.x, 0.025, RUBE_PLATE.z);
-scene.add(rubePlateRim);
-const rubePlateLight = new THREE.PointLight(0xf0c24b, 0.18, 5.5, 2);
-rubePlateLight.position.set(RUBE_PLATE.x, 0.55, RUBE_PLATE.z);
+rubePlateMesh.renderOrder = 3;
+scene.add(rubePlateMesh);
+const rubePlateTopY = rubePlateMesh.position.y + RUBE_PLATE.h * 0.5;
+const rubePlateLight = new THREE.PointLight(0xffc14a, 1.35, 11, 2);
+rubePlateLight.position.set(RUBE_PLATE.x, 1.35, RUBE_PLATE.z);
 scene.add(rubePlateLight);
+
+// Idle marker: thin gold mast + floating ring. Hidden once the chain leaves idle.
+const rubePlateBeaconH = 2.4;
+const rubePlateBeaconMat = new THREE.MeshStandardMaterial({
+  color: 0xffd36a,
+  roughness: 0.3,
+  metalness: 0.4,
+  emissive: 0xffc14a,
+  emissiveIntensity: 1.7,
+});
+const rubePlateBeaconGeo = new THREE.CylinderGeometry(0.03, 0.045, rubePlateBeaconH, 10);
+rubePlateBeaconGeo.translate(0, rubePlateBeaconH * 0.5, 0);
+const rubePlateBeacon = new THREE.Mesh(rubePlateBeaconGeo, rubePlateBeaconMat);
+rubePlateBeacon.position.set(RUBE_PLATE.x, rubePlateTopY + 0.02, RUBE_PLATE.z);
+rubePlateBeacon.layers.enable(BLOOM_LAYER);
+rubePlateBeacon.renderOrder = 4;
+scene.add(rubePlateBeacon);
+const rubePlateBeaconTip = new THREE.Mesh(
+  new THREE.SphereGeometry(0.09, 12, 10),
+  rubePlateBeaconMat
+);
+rubePlateBeaconTip.position.y = rubePlateBeaconH;
+rubePlateBeaconTip.layers.enable(BLOOM_LAYER);
+rubePlateBeacon.add(rubePlateBeaconTip);
+const rubePlateRingMat = new THREE.MeshStandardMaterial({
+  color: 0xffd36a,
+  roughness: 0.28,
+  metalness: 0.35,
+  emissive: 0xffc14a,
+  emissiveIntensity: 1.45,
+});
+const rubePlateRing = new THREE.Mesh(
+  new THREE.TorusGeometry(0.95, 0.03, 8, 56),
+  rubePlateRingMat
+);
+rubePlateRing.rotation.x = Math.PI / 2;
+rubePlateRing.position.set(RUBE_PLATE.x, rubePlateTopY + 1.45, RUBE_PLATE.z);
+rubePlateRing.layers.enable(BLOOM_LAYER);
+rubePlateRing.renderOrder = 4;
+scene.add(rubePlateRing);
+
+// Drop instanced posts / lanterns / bollards that would grow through the pad.
+(function rubeClearPlateFurniture() {
+  const halfW = RUBE_PLATE.w * 0.5 + 0.4;
+  const halfD = RUBE_PLATE.d * 0.5 + 0.45;
+  const tmp = new THREE.Matrix4();
+  const pos = new THREE.Vector3();
+  const shrink = (inst, n) => {
+    for (let i = 0; i < n; i++) {
+      inst.getMatrixAt(i, tmp);
+      pos.setFromMatrixPosition(tmp);
+      if (Math.abs(pos.x - RUBE_PLATE.x) < halfW && Math.abs(pos.z - RUBE_PLATE.z) < halfD) {
+        dummy.position.copy(pos);
+        dummy.scale.set(0.001, 0.001, 0.001);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        inst.setMatrixAt(i, dummy.matrix);
+      }
+    }
+    inst.instanceMatrix.needsUpdate = true;
+  };
+  shrink(bollards, FURN_COUNT);
+  shrink(posts, 18);
+  shrink(lanterns, LANTERN_N);
+})();
 
 // Sliding pier gate near Signal (kinematic) — night iron + gold accent bar
 const rubeGateMat = new THREE.MeshStandardMaterial({
@@ -5115,8 +5419,14 @@ function rubeReset() {
   rubeGateBody.position.y = rubeState.gateClosedY;
   rubeGateBody.velocity.set(0, 0, 0);
   rubeGateMesh.position.copy(rubeGateBody.position);
-  rubePlateMat.emissiveIntensity = 0.06;
-  rubePlateLight.intensity = 0.18;
+  rubePlateMat.emissiveIntensity = 1.25;
+  rubePlateRimMat.emissiveIntensity = 0.55;
+  rubePlateBeaconMat.emissiveIntensity = 1.7;
+  rubePlateRingMat.emissiveIntensity = 1.45;
+  rubePlateLight.intensity = 1.35;
+  rubePlateBeacon.visible = true;
+  rubePlateRing.visible = true;
+  rubePlateRing.position.y = rubePlateTopY + 1.45;
   rubeGateMat.emissiveIntensity = 0.04;
   rubeClearDebris();
   rubeVesselMesh.visible = true;
@@ -5181,8 +5491,20 @@ function rubeTick() {
   const heldLongEnough = rubeState.plateHoldSince
     && nowMs - rubeState.plateHoldSince >= RUBE_LATCH_HOLD_MS;
   const t = Math.min(1, rubeState.plateMass / RUBE_MASS_THRESHOLD);
-  rubePlateMat.emissiveIntensity = 0.06 + t * 0.55;
-  rubePlateLight.intensity = 0.18 + t * 1.5;
+  const breathe = 0.5 + 0.5 * Math.sin(performance.now() * 0.00115);
+  rubePlateMat.emissiveIntensity = 1.05 + breathe * 0.5 + t * 0.4;
+  rubePlateRimMat.emissiveIntensity = 0.38 + breathe * 0.28 + t * 0.16;
+  rubePlateLight.intensity = 1.05 + breathe * 0.55 + t * 1.2;
+  const marking = rubeState.stage === 'idle';
+  rubePlateBeacon.visible = marking;
+  rubePlateRing.visible = marking;
+  if (marking) {
+    rubePlateBeaconMat.emissiveIntensity = 1.35 + breathe * 0.7;
+    rubePlateRingMat.emissiveIntensity = 1.15 + breathe * 0.65;
+    rubePlateRing.position.y = rubePlateTopY + 1.38 + breathe * 0.14;
+    const rs = 0.96 + breathe * 0.08;
+    rubePlateRing.scale.set(rs, rs, rs);
+  }
 
   // Stage machine — one-shot chain until Reset. Latch only after weight
   // has been resting on the plate; grabbing a crate elsewhere does not press it.
@@ -5235,6 +5557,18 @@ function rubeFillProbe() {
     stage: rubeState.stage,
     plateMass: +rubeState.plateMass.toFixed(2),
     plateResting: rubeState.plateResting,
+    plate: {
+      x: RUBE_PLATE.x,
+      y: +rubePlateMesh.position.y.toFixed(3),
+      z: RUBE_PLATE.z,
+      w: RUBE_PLATE.w,
+      d: RUBE_PLATE.d,
+      top: +rubePlateTopY.toFixed(3),
+      rimBottom: +(rubePlateRim.position.y - rubePlateRimH * 0.5).toFixed(3),
+      deckY: RUBE_DECK_Y,
+      beacon: rubePlateBeacon.visible,
+      ringY: +rubePlateRing.position.y.toFixed(3),
+    },
     threshold: RUBE_MASS_THRESHOLD,
     platePressed: rubeState.platePressed,
     plateHoldMs: rubeState.plateHoldSince ? Math.max(0, performance.now() - rubeState.plateHoldSince) : 0,
@@ -5522,6 +5856,8 @@ const mistMat = new THREE.ShaderMaterial({
       float s = 5.0 + dens.r * 32.0 + dens.g * 22.0;
       gl_PointSize = s * uPixelRatio * (1.2 / -mv.z);
       vAlpha = dens.r * 0.62 + dens.g * 0.42;
+      // Spray stays in the basin. The promenade (and the gold plate) stay dry.
+      vAlpha *= smoothstep(5.35, 6.15, p.z);
       vCol = mix(vec3(0.54, 0.48, 0.72), vec3(0.94, 0.76, 0.29), dens.g);
       vCol = mix(vCol, vec3(1.0, 0.55, 0.28), dens.b * 0.55);
     }
