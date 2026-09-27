@@ -699,6 +699,9 @@ curbs.frustumCulled = false;
 
 const dummyR = new THREE.Object3D();
 let roadN = 0, swN = 0, curbN = 0;
+// World-XZ footprints for static ground. Top is the walk surface.
+// Built into cannon after physWorld exists.
+const pavementCols = [];
 
 function addRoad(cx, cz, len, width, rotY) {
   if (roadN >= ROAD_MAX) return;
@@ -708,6 +711,14 @@ function addRoad(cx, cz, len, width, rotY) {
   dummyR.scale.set(len, width, 1);
   dummyR.updateMatrix();
   roads.setMatrixAt(roadN++, dummyR.matrix);
+  const alongX = Math.abs(rotY) < 0.8;
+  pavementCols.push({
+    x: cx,
+    z: cz,
+    hx: (alongX ? len : width) * 0.5 + 0.04,
+    hz: (alongX ? width : len) * 0.5 + 0.04,
+    top: 0.015,
+  });
 }
 
 function addSidewalk(cx, cz, sx, sz) {
@@ -717,6 +728,14 @@ function addSidewalk(cx, cz, sx, sz) {
   dummyR.scale.set(sx, 0.055, sz);
   dummyR.updateMatrix();
   sidewalks.setMatrixAt(swN++, dummyR.matrix);
+  // Box is centered on y=0.03, so the tread is half the thickness up.
+  pavementCols.push({
+    x: cx,
+    z: cz,
+    hx: sx * 0.5 + 0.03,
+    hz: sz * 0.5 + 0.03,
+    top: 0.03 + 0.055 * 0.5,
+  });
 }
 
 function addCurb(cx, cz, sx, sz) {
@@ -1192,42 +1211,45 @@ const buildingMat = new THREE.ShaderMaterial({
       inPane *= mix(step(edgeKillM, edgeDistM), 1.0, atlasFlat);
       float edgeFade = mix(smoothstep(edgeKillM, edgeSoftM, edgeDistM), 1.0, atlasFlat);
 
-      // Glazed shop entry: one ground-floor bay on the façade column grid.
-      // Edges sit on mullion lines (or the corner pier when a cell is clipped).
-      // Height is a single storey — sill 0.10, head 0.70, under the next floor
-      // at cellH 0.76 — and does not grow with the massing. The head is that
-      // floor slab, not a gold bar. No mid-rail, no opaque leaf. Thin jambs.
+      // Glazed shop entry — one column of the ground-floor grid, one storey.
+      // Sill 0.10, head 0.70, under the next floor (cellH 0.76). The opening
+      // takes the whole column so the pane row does not run through it: stone
+      // sill, dark jambs, a lintel, a meeting stile, and a kick. It does not
+      // grow with the massing and it is not a second window.
       float faceLen = halfAlong * 2.0;
       float faceIsX = step(abs(Ln.z), abs(Ln.x));
       float doorSeed = hash(vec2(vId * 0.37 + 1.7, mix(4.1, 8.6, faceIsX)));
-      float pier = 0.05;
-      float innerL = -halfAlong + pier;
-      float innerR = halfAlong - pier;
-      float i0 = ceil(innerL / cellW - 1e-4);
-      float i1 = floor(innerR / cellW + 1e-4);
-      float nFull = max(i1 - i0, 0.0);
-      float useFull = step(0.5, nFull);
-      float pick = floor(doorSeed * max(nFull - 1e-4, 0.0));
-      pick = min(pick, max(nFull - 1.0, 0.0));
-      float bay = i0 + pick;
-      float midAlong = clamp(0.0, min(innerL, innerR), max(innerL, innerR));
-      float midBay = floor(midAlong / cellW);
-      float doorL = mix(max(midBay * cellW, innerL), bay * cellW, useFull);
-      float doorR = mix(min((midBay + 1.0) * cellW, innerR), (bay + 1.0) * cellW, useFull);
+      float margin = 0.06;
+      float iLo = ceil(((-halfAlong + margin) / cellW) - 0.5 - 1e-4);
+      float iHi = floor(((halfAlong - margin) / cellW) - 0.5 + 1e-4);
+      float nCols = max(iHi - iLo + 1.0, 0.0);
+      float useCol = step(0.5, nCols);
+      float pick = floor(doorSeed * max(nCols - 1e-4, 1.0));
+      pick = min(pick, max(nCols - 1.0, 0.0));
+      float doorCol = iLo + pick;
+      float midAlong = clamp(0.0, -halfAlong + margin, halfAlong - margin);
+      float midCol = floor(midAlong / cellW);
+      float doorL = mix(max(midCol * cellW, -halfAlong + 0.04), doorCol * cellW, useCol);
+      float doorR = mix(min((midCol + 1.0) * cellW, halfAlong - 0.04), (doorCol + 1.0) * cellW, useCol);
+      doorL = max(doorL, -halfAlong + 0.03);
+      doorR = min(doorR, halfAlong - 0.03);
       float doorBot = 0.10;
       // Hard cap under the next floor (cellH == 0.76). Never grow with the box.
       float doorTop = min(cellH - 0.06, 0.70);
-      float jambW = 0.022;
+      float jambW = 0.048;
       float glassL = doorL + jambW;
       float glassR = doorR - jambW;
-      float doorOk = step(1.2, vScale.y) * step(0.9, faceLen) * isVert;
-      doorOk *= step(0.34, doorR - doorL);
+      float doorOk = step(0.95, vScale.y) * step(0.62, faceLen) * isVert;
+      doorOk *= step(0.28, doorR - doorL);
       doorOk *= step(doorBot + 0.28, doorTop);
       float inDoorX = step(doorL, faceAlong) * step(faceAlong, doorR);
       float inGlassX = step(glassL, faceAlong) * step(faceAlong, glassR);
       float inDoorY = step(doorBot, lpM.y) * step(lpM.y, doorTop);
       float inDoor = doorOk * inDoorX * inDoorY;
       float inGlass = doorOk * inGlassX * inDoorY;
+      // Whole ground-floor column. Cutting only the glass left the pane grid
+      // reading as a continuous shopfront with no entry.
+      float inDoorCol = doorOk * inDoorX * step(0.0, lpM.y) * step(lpM.y, cellH);
       float shopEntry = inDoor;
 
       // Frame / mullion bands — whole margin is dark mullion (not façade beige).
@@ -1237,8 +1259,8 @@ const buildingMat = new THREE.ShaderMaterial({
         min(mullU, mullV),
         min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))
       ));
-      frameBand *= (1.0 - shopEntry);
-      inPane *= (1.0 - shopEntry);
+      frameBand *= (1.0 - inDoorCol);
+      inPane *= (1.0 - inDoorCol);
       // Dark mullion on concrete — clearer pane contrast vs textured body
       vec3 mullionCol = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
       vec3 body = mix(wallCol, mullionCol, frameBand * 0.94);
@@ -1373,62 +1395,71 @@ const buildingMat = new THREE.ShaderMaterial({
         }
       }
 
-      // Shop bay glass — same glow as the panes beside it. Vertical sample
-      // stays in the lower case so a fridge rail in the plate center is not
-      // a bar across the entry. Exposure is unchanged.
+      // Shop entry glass — one lit interior across the opening. Kick and the
+      // meeting stile sit on the glass only, so a break reveals the room.
       if (inGlass > 0.5) {
-        float bayLeft = mix(midBay, bay, useFull) * cellW;
-        vec2 doorCell = vec2((faceAlong - bayLeft) / cellW, lpM.y / cellH);
-        vec2 doorUV = (doorCell - vec2(mullU, mullV)) / (vec2(1.0) - 2.0 * vec2(mullU, mullV));
-        doorUV = clamp(doorUV, 0.0, 1.0);
-        vec2 doorHuv = vec2(
-          0.5 + (doorUV.x - 0.5) * 0.78,
-          mix(0.05, 0.38, doorUV.y)
-        );
+        float ax = clamp((faceAlong - glassL) / max(glassR - glassL, 0.04), 0.0, 1.0);
+        float ay = clamp((lpM.y - doorBot) / max(doorTop - doorBot, 0.04), 0.0, 1.0);
+        vec2 doorPane = vec2(ax, ay);
+        float faceShopSeed = vId * 0.17 + mix(6.4, 2.2, faceIsX) + doorCol * 0.13;
+        float doorGlow = max(glow, 0.88);
         if (uFaceMapOn > 0.5) {
-          float doorRoom = floor(h0 * uFaceCount);
-          vec3 doorFace = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, doorRoom, doorHuv);
-          vec3 doorDark = doorFace * 0.07 + vec3(0.008, 0.01, 0.015);
-          vec3 doorLit = doorFace * mix(0.5, 1.0, glow);
-          interior = mix(doorDark, doorLit, mix(0.12, 1.0, glow));
+          float doorRoom = floor(hash(vec2(faceShopSeed, 3.3)) * uFaceCount);
+          interior = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, doorRoom, cropAtlasUV(doorPane));
+          interior *= mix(0.55, 1.05, doorGlow);
         } else if (uAtlasOn > 0.5) {
-          float plateSeed = h0 + vId * 0.13;
-          float plateIdx = floor(hash(vec2(plateSeed * 1.7, plateSeed * 0.31)) * 16.0);
-          vec3 plate = sampleAtlas(uShopAtlas, 4.0, 4.0, plateIdx, doorHuv);
-          plate *= 1.0 - 0.10 * pow(max(abs(doorHuv.x - 0.5) * 2.0, abs(doorHuv.y - 0.2) * 2.2), 2.0);
-          vec3 plateDark = plate * 0.10 + vec3(0.01, 0.012, 0.018);
-          vec3 plateLit = plate * mix(0.65, 1.15, glow);
-          interior = mix(plateDark, plateLit, mix(0.18, 1.0, glow));
+          interior = shadeRoomAtlas(doorPane, doorGlow, 1.0, faceShopSeed);
         } else {
-          interior = mix(vec3(0.02, 0.022, 0.03), vec3(0.42, 0.28, 0.12), glow);
+          interior = mix(vec3(0.05, 0.04, 0.032), vec3(0.42, 0.28, 0.12), doorGlow);
         }
+        float kick = 1.0 - smoothstep(0.0, 0.15, ay);
+        vec3 shown = mix(interior, vec3(0.055, 0.048, 0.04), kick * 0.88);
         vec3 doorView = normalize(cameraPosition - vWorldPos);
-        float doorFres = pow(1.0 - max(dot(N, doorView), 0.0), 2.85);
-        vec3 doorSky = vec3(0.12, 0.16, 0.28);
-        vec3 doorStreet = vec3(0.18, 0.14, 0.08);
-        vec3 doorRefl = mix(doorStreet, doorSky, clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
-        doorRefl += vec3(0.08, 0.07, 0.12) * doorFres;
-        float doorSpec = pow(max(dot(reflect(-doorView, N), normalize(vec3(0.35, 0.9, 0.2))), 0.0), 48.0);
-        doorRefl += vec3(0.55, 0.6, 0.75) * doorSpec * 0.18;
+        float doorFres = pow(1.0 - max(dot(N, doorView), 0.0), 2.6);
+        vec3 doorRefl = mix(vec3(0.16, 0.12, 0.07), vec3(0.11, 0.15, 0.26), clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
         float doorAtlas = step(0.5, uAtlasOn) * (1.0 - step(0.5, uFaceMapOn));
-        interior *= (1.0 - doorFres * mix(0.45, 0.22, doorAtlas));
-        float doorMix = mix(mix(0.02, 0.01, doorAtlas), mix(0.88, 0.72, doorAtlas), doorFres);
-        vec3 doorGlass = mix(interior, doorRefl, doorMix);
-        doorGlass = mix(doorGlass, interior, glow * mix(0.55, 0.72, doorAtlas) * (1.0 - doorFres * 0.9));
+        shown *= (1.0 - doorFres * mix(0.28, 0.12, doorAtlas));
+        vec3 doorGlass = mix(shown, doorRefl, doorFres * mix(0.22, 0.10, doorAtlas));
+        float meet = (1.0 - smoothstep(0.010, 0.026, abs(ax - 0.5))) * step(0.40, glassR - glassL);
+        doorGlass = mix(doorGlass, vec3(0.018, 0.020, 0.024), meet);
         body = doorGlass;
       }
 
-      // Broken shop glass is an empty bay. Apartment floors never sample the mask.
+      // Broken shop glass is a hole into the bay. Keep the room that was
+      // behind the pane. A flat near-black plate was wiping the interior.
       float shopHit = isShop * shopPaneBroken(faceAlong, cellW, Ln, vId);
       if (shopHit * max(inPane, inGlass) > 0.5) {
-        body = vec3(0.012, 0.014, 0.018);
+        vec3 hole = interior;
+        float holeLum = dot(hole, vec3(0.30, 0.55, 0.15));
+        if (holeLum < 0.045) {
+          vec2 holeUV = clamp(
+            (f - vec2(mullU, mullV)) / max(vec2(1.0) - 2.0 * vec2(mullU, mullV), vec2(0.02)),
+            0.0, 1.0
+          );
+          if (uAtlasOn > 0.5 && uFaceMapOn < 0.5) {
+            hole = shadeRoomAtlas(holeUV, max(glow, 0.82), 1.0, h0 + vId * 0.13);
+          } else if (uFaceMapOn > 0.5) {
+            float holeRoom = floor(h0 * uFaceCount);
+            hole = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, holeRoom, cropAtlasUV(holeUV));
+            hole *= mix(0.55, 1.05, max(glow, 0.82));
+          } else {
+            hole = mix(vec3(0.06, 0.05, 0.042), vec3(0.30, 0.20, 0.12), max(glow, 0.6));
+          }
+        }
+        float recess = smoothstep(0.0, 0.10, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)));
+        body = hole * mix(0.58, 1.0, recess);
       }
 
-      // Thin recessed jamb / stile on the column line, sill under the glass.
+      // Jamb, stone sill, and lintel. They stay after the glass breaks so the
+      // bay still reads as an opening, not a missing pane.
       float inStile = inDoor * (1.0 - inGlassX);
-      body = mix(body, vec3(0.010, 0.011, 0.014), inStile);
-      float sillBand = doorOk * inDoorX * step(0.055, lpM.y) * step(lpM.y, doorBot);
-      body = mix(body, vec3(0.062, 0.058, 0.052), sillBand);
+      body = mix(body, vec3(0.012, 0.013, 0.016), inStile);
+      float sillBand = doorOk * step(doorL - 0.025, faceAlong) * step(faceAlong, doorR + 0.025)
+        * step(0.015, lpM.y) * step(lpM.y, doorBot);
+      body = mix(body, vec3(0.22, 0.17, 0.12), sillBand);
+      float inLintel = doorOk * step(doorL - 0.02, faceAlong) * step(faceAlong, doorR + 0.02)
+        * step(doorTop, lpM.y) * step(lpM.y, min(doorTop + 0.062, cellH));
+      body = mix(body, vec3(0.030, 0.028, 0.026), inLintel);
 
       // Soft roof wash
       body = mix(body, vColor * 0.20 + vec3(0.03, 0.035, 0.05), isRoof * 0.88);
@@ -1812,12 +1843,16 @@ for (let bz = 0; bz < GRID_ROWS; bz++) {
   }
 }
 
-// Pier / quay edge sheds (between sidewalk and water) — warm small massing
-for (let i = 0; i < 14 && placed < INSTANCE_COUNT; i++) {
-  const x = gridOriginX + 0.6 + i * ((BLOCK_W + STREET_W) * GRID_COLS / 14);
-  const z = gridOriginZ + STREET_W + SIDEWALK_W + rng(0.3, 1.1);
-  placeBuilding(x, z, rng(0.55, 1.05), rng(1.1, 2.8), rng(0.5, 0.95),
-    rand() > 0.4 ? warm : violet, 0);
+// Promenade stays open along the seawall. These rolls used to drop a row of
+// pier sheds on the quay, jammed against the graffiti face. Burn the same
+// draws so the inland district does not reshuffle; the instance budget
+// fills on the hinterland belt instead.
+for (let i = 0; i < 14; i++) {
+  rng(0.3, 1.1);
+  rng(0.55, 1.05);
+  rng(1.1, 2.8);
+  rng(0.5, 0.95);
+  rand();
 }
 
 // 360° hinterland wrap — extra row + side wings so orbit never faces void
@@ -3111,6 +3146,32 @@ function grafRow(ctx, row, pieces) {
   ctx.restore();
 }
 
+// Smaller overlapping throw-ups fill the gaps between the big pieces.
+// Original harbor words only — bubble throw-ups, not stencil figures.
+function grafDenseOverlays(seed) {
+  const words = [
+    'TIDE', 'DOCK', 'PIER', 'BOOM', 'HOLD', 'LASH', 'CLEAT', 'GALE',
+    'WHARF', 'QUAY', 'STOW', 'DRAFT', 'SOUND', 'FATHOM', 'LEE', 'CARGO',
+    'NETS', 'BOLL',
+  ];
+  const styles = [GRAF_CHROME, GRAF_TEAL, GRAF_OX, GRAF_SILVER, GRAF_GHOST];
+  const rnd = grafRng(seed);
+  const pieces = [];
+  const n = 18;
+  for (let i = 0; i < n; i++) {
+    pieces.push({
+      word: words[i % words.length],
+      x: (i / n) * 0.94 - 0.02 + (rnd() - 0.5) * 0.05,
+      h: 0.26 + rnd() * 0.22,
+      y: rnd() * 0.46,
+      style: styles[Math.floor(rnd() * styles.length)],
+      alpha: 0.74 + rnd() * 0.24,
+      rot: (rnd() - 0.5) * 0.09,
+    });
+  }
+  return pieces;
+}
+
 // Water face — long horizontal band, chrome and muted fills, ghosts underneath.
 grafRow(grafCtx, 0, [
   { word: 'SLIP', x: 0.02, h: 0.46, y: 0.16, style: GRAF_GHOST, alpha: 0.34, rot: -0.04 },
@@ -3121,6 +3182,7 @@ grafRow(grafCtx, 0, [
   { word: 'HULL', x: 0.52, h: 0.62, y: 0.05, style: GRAF_OX, alpha: 0.96, rot: -0.01 },
   { word: 'MOOR', x: 0.72, h: 0.58, y: 0.10, style: GRAF_SILVER, alpha: 0.94, rot: 0.02 },
   { word: 'REEF', x: 0.86, h: 0.42, y: 0.20, style: GRAF_GHOST, alpha: 0.36, rot: 0.04 },
+  ...grafDenseOverlays(11),
 ]);
 // Promenade face — same freight language, different original tags.
 grafRow(grafCtx, 1, [
@@ -3131,6 +3193,7 @@ grafRow(grafCtx, 1, [
   { word: 'REEF', x: 0.48, h: 0.60, y: 0.07, style: GRAF_TEAL, alpha: 0.95, rot: 0.01 },
   { word: 'BILGE', x: 0.68, h: 0.56, y: 0.10, style: GRAF_SILVER, alpha: 0.94, rot: -0.02 },
   { word: 'KEEL', x: 0.86, h: 0.40, y: 0.22, style: GRAF_GHOST, alpha: 0.33, rot: 0.04 },
+  ...grafDenseOverlays(29),
 ]);
 
 const grafTex = new THREE.CanvasTexture(grafCanvas);
@@ -3139,26 +3202,101 @@ grafTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 grafTex.wrapS = THREE.ClampToEdgeWrapping;
 grafTex.wrapT = THREE.ClampToEdgeWrapping;
 grafTex.needsUpdate = true;
-// Photographic freight atlas is the seawall paint. The canvas throw-ups stay
-// as the stand-in until the PNG arrives, then the photo plate takes the map.
+// Photographic freight atlas is the seawall paint. Letter paint is lifted off
+// the concrete and stamped back in overlapping shifts so both faces are jammed
+// with throw-ups. Original freight tags only — no stencil figures. The canvas
+// throw-ups stay as the stand-in until the PNG arrives.
+// [sourceRow, xShift, yShift, scaleX, scaleY, alpha] in row units.
+const GRAF_PACK_SHIFTS = [
+  [0, -0.22, -0.04, 1.00, 0.92, 0.96],
+  [0, 0.28, 0.05, 0.96, 0.90, 0.94],
+  [0, 0.48, -0.02, 0.78, 0.78, 0.90],
+  [0, -0.46, 0.06, 0.72, 0.74, 0.88],
+  [1, 0.12, -0.06, 0.84, 0.80, 0.90],
+  [1, -0.30, 0.04, 0.70, 0.72, 0.86],
+  [1, 0.55, 0.00, 0.64, 0.68, 0.84],
+  [0, 0.08, 0.07, 0.88, 0.82, 0.86],
+  [1, -0.10, -0.07, 0.86, 0.80, 0.86],
+];
+
+function grafLetterMask(img) {
+  const c = document.createElement('canvas');
+  c.width = GRAF_W;
+  c.height = GRAF_H;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, 0, 0, GRAF_W, GRAF_H);
+  const im = g.getImageData(0, 0, GRAF_W, GRAF_H);
+  const d = im.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    d[i + 3] = Math.max(0, Math.min(255, ((lum - 58) / 42) * 255)) | 0;
+  }
+  g.putImageData(im, 0, 0);
+  return c;
+}
+
+function grafPackFreight(img) {
+  const mask = grafLetterMask(img);
+  const out = document.createElement('canvas');
+  out.width = GRAF_W;
+  out.height = GRAF_H;
+  const ctx = out.getContext('2d');
+  ctx.drawImage(img, 0, 0, GRAF_W, GRAF_H);
+  const rowH = GRAF_H / 2;
+  for (let row = 0; row < 2; row++) {
+    const destY = row * rowH;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, destY, GRAF_W, rowH);
+    ctx.clip();
+    for (const shift of GRAF_PACK_SHIFTS) {
+      const src = shift[0];
+      const xShift = shift[1];
+      const yShift = shift[2];
+      const scaleX = shift[3];
+      const scaleY = shift[4];
+      const alpha = shift[5];
+      const srcUse = row === 0 ? src : 1 - src;
+      const srcY = srcUse * rowH;
+      const dw = GRAF_W * scaleX;
+      const dh = rowH * scaleY;
+      const dx = xShift * GRAF_W;
+      const dy = destY + yShift * rowH + (rowH - dh) * 0.5;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const draw = (x) => ctx.drawImage(mask, 0, srcY, GRAF_W, rowH, x, dy, dw, dh);
+      draw(dx);
+      if (dx < 0) draw(dx + GRAF_W);
+      if (dx + dw > GRAF_W) draw(dx - GRAF_W);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+  return out;
+}
+
 const grafAtlasUrl = new URL('freight-graf-atlas.png' + atlasCache, atlasBase).href;
 window.__grafAtlasUrl = grafAtlasUrl;
 new THREE.TextureLoader().load(grafAtlasUrl, (tex) => {
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
-  tex.needsUpdate = true;
-  grafMat.map = tex;
-  grafMat.emissiveMap = tex;
+  const packed = grafPackFreight(tex.image);
+  const packedTex = new THREE.CanvasTexture(packed);
+  packedTex.colorSpace = THREE.SRGBColorSpace;
+  packedTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  packedTex.wrapS = THREE.ClampToEdgeWrapping;
+  packedTex.wrapT = THREE.ClampToEdgeWrapping;
+  packedTex.minFilter = THREE.LinearFilter;
+  packedTex.magFilter = THREE.LinearFilter;
+  packedTex.generateMipmaps = false;
+  packedTex.needsUpdate = true;
+  grafMat.map = packedTex;
+  grafMat.emissiveMap = packedTex;
   grafMat.emissive.set(0xffffff);
   // Night quay: the photo has to carry itself the way a lit atlas pane does.
   grafMat.emissiveIntensity = 0.82;
   grafMat.needsUpdate = true;
-  window.__grafAtlas = 'freight-photo';
+  if (tex.dispose) tex.dispose();
+  window.__grafAtlas = 'freight-photo-packed';
+  window.__grafPacked = packed;
 }, undefined, () => {
   window.__grafAtlas = 'canvas-fallback';
 });
@@ -3427,14 +3565,69 @@ function physAdd(mesh, body, kind, mass) {
   return entry;
 }
 
-// Static quay collision slab (matches hero quay deck band)
+// Static quay collision slab (matches hero quay deck band).
+// Thick downward so a fast crate cannot step through the promenade.
+// Top stays at the deck (y=0.04). Plate latch still keys off this body.
+const QUAY_TOP_Y = 0.04;
+const PAVEMENT_HALF_Y = 1.05;
 const quayDeckBody = new CANNON.Body({
   mass: 0,
+  type: CANNON.Body.STATIC,
   material: physGroundMat,
-  shape: new CANNON.Box(new CANNON.Vec3(11, 0.08, 3.2)),
-  position: new CANNON.Vec3(0, -0.04, 2.6),
+  shape: new CANNON.Box(new CANNON.Vec3(11, PAVEMENT_HALF_Y, 3.2)),
+  position: new CANNON.Vec3(0, QUAY_TOP_Y - PAVEMENT_HALF_Y, 2.6),
 });
 physWorld.addBody(quayDeckBody);
+
+// Streets, sidewalks, and lot pads. Pieces that sit on the quay slab are
+// clipped out so a crate on the promenade still rests on quayDeckBody.
+const QUAY_COL_X = 11;
+const QUAY_COL_Z0 = 2.6 - 3.2;
+const QUAY_COL_Z1 = 2.6 + 3.2;
+function pavementOutsideQuay(p) {
+  const x0 = p.x - p.hx;
+  const x1 = p.x + p.hx;
+  const z0 = p.z - p.hz;
+  const z1 = p.z + p.hz;
+  const qx0 = -QUAY_COL_X;
+  const qx1 = QUAY_COL_X;
+  const ox0 = Math.max(x0, qx0);
+  const ox1 = Math.min(x1, qx1);
+  const oz0 = Math.max(z0, QUAY_COL_Z0);
+  const oz1 = Math.min(z1, QUAY_COL_Z1);
+  if (!(ox0 < ox1 - 1e-4 && oz0 < oz1 - 1e-4)) return [p];
+  const out = [];
+  const push = (ax0, ax1, az0, az1) => {
+    if (ax1 - ax0 < 0.04 || az1 - az0 < 0.04) return;
+    out.push({
+      x: (ax0 + ax1) * 0.5,
+      z: (az0 + az1) * 0.5,
+      hx: (ax1 - ax0) * 0.5,
+      hz: (az1 - az0) * 0.5,
+      top: p.top,
+    });
+  };
+  if (x0 < qx0) push(x0, qx0, z0, z1);
+  if (x1 > qx1) push(qx1, x1, z0, z1);
+  const mx0 = Math.max(x0, qx0);
+  const mx1 = Math.min(x1, qx1);
+  if (z0 < QUAY_COL_Z0) push(mx0, mx1, z0, QUAY_COL_Z0);
+  if (z1 > QUAY_COL_Z1) push(mx0, mx1, QUAY_COL_Z1, z1);
+  return out;
+}
+let pavementBodies = 0;
+for (const footprint of pavementCols) {
+  for (const p of pavementOutsideQuay(footprint)) {
+    physWorld.addBody(new CANNON.Body({
+      mass: 0,
+      type: CANNON.Body.STATIC,
+      material: physGroundMat,
+      shape: new CANNON.Box(new CANNON.Vec3(p.hx, PAVEMENT_HALF_Y, p.hz)),
+      position: new CANNON.Vec3(p.x, p.top - PAVEMENT_HALF_Y, p.z),
+    }));
+    pavementBodies++;
+  }
+}
 
 // Soft seawall curb (low) — slows sliding but toss clears into basin for buoyancy
 const seawallLip = new CANNON.Body({
@@ -3631,19 +3824,22 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   })();
 }
 
-// Free crates — grab + toss. Masses are the Rube plate signal (latch at 2.5);
-// do not retune them to fake buoyancy. Density only sets draft.
+// Free crates — grab + toss. Masses stay the Rube plate signal (latch at 1.75:
+// two ordinary crates, or one dense). Do not retune mass to fake buoyancy;
+// density only sets draft, and halfExtents follow these sizes.
+// Linear size is a quay crate against the ~0.60 door (tallest 0.24, under
+// half a ground storey). The old 0.45–0.55 boxes read as half a shopfront.
 const HARBOR_CRATE_DEFS = [
   // mid — cream, rides mid-high
-  { size: [0.55, 0.55, 0.55], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2, label: 'mid' },
+  { size: [0.26, 0.24, 0.26], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2, label: 'mid' },
   // dense — taupe, rides low with freeboard (must not sink)
-  { size: [0.7, 0.4, 0.55], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35, label: 'dense' },
+  { size: [0.34, 0.18, 0.26], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35, label: 'dense' },
   // light — gold, rides high
-  { size: [0.45, 0.45, 0.45], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55, label: 'light' },
+  { size: [0.22, 0.20, 0.22], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55, label: 'light' },
   // mid-heavy — low float, still clear of the basin floor
-  { size: [0.6, 0.5, 0.5], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1, label: 'mid' },
+  { size: [0.28, 0.22, 0.24], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1, label: 'mid' },
   // cork — very light, high bob
-  { size: [0.5, 0.35, 0.5], mass: 0.45, color: 0xc4a574, emissive: 0xf0c24b, ei: 0.06, pos: [-4.1, 0.75, 3.5], yaw: -0.2, label: 'light' },
+  { size: [0.24, 0.16, 0.24], mass: 0.45, color: 0xc4a574, emissive: 0xf0c24b, ei: 0.06, pos: [-4.1, 0.75, 3.5], yaw: -0.2, label: 'light' },
 ];
 
 function makeHarborCrate(def) {
@@ -3873,10 +4069,9 @@ function physSetConstraint(on) {
 
 // ——— Basin buoyancy (Archimedes) + light blast impulse · ladder step 3 ———
 // Water plane = visual Gerstner mesh Y (WATER_Y). Force only inside basin AABB.
-// Crate density = mass / volume (~5.1 light cork … ~14.3 dense). The old water
-// density of 9 lost to the two heaviest crates, so they sat on the basin floor.
-// Water stays denser than every tossable crate. Plate latch still sums mass
-// (RUBE_MASS_THRESHOLD 1.75, resting contact), never draft.
+// Crate density = mass / volume. Water stays denser than every tossable crate
+// (1.48× the heaviest) so draft stays a fraction of the box, not a sunk hull.
+// Plate latch still sums mass (RUBE_MASS_THRESHOLD 1.75, resting contact), never draft.
 function harborCrateDensity(def) {
   const [sx, sy, sz] = def.size;
   return def.mass / Math.max(sx * sy * sz, 1e-4);
@@ -4497,7 +4692,7 @@ function refreshHarborPhysicsProbe() {
       ? physLanterns.map(() => 'PointToPoint')
       : [],
     constraintOn: physConstraintOn,
-    staticGround: 6, // quay + curb + basin floor + 3 walls
+    staticGround: 6 + pavementBodies, // quay + curb + basin + 3 walls + streets
     wind: windProbe,
     cratePos: physCrates.map((c) => ({
       x: +c.body.position.x.toFixed(3),
