@@ -3694,6 +3694,10 @@ const furnMat = new THREE.ShaderMaterial({
     uTime: { value: 0 },
     uFogColor: { value: new THREE.Color(0x05060a) },
     uFogDensity: { value: 0.024 },
+    uIron: { value: null },
+    uIronOn: { value: 0 },
+    // quay-iron-atlas.png column. 0 pole · 1 bollard. Instanced posts override this.
+    uCell: { value: 1 },
   },
   vertexShader: /* glsl */`
     varying vec3 vColor;
@@ -3720,21 +3724,35 @@ const furnMat = new THREE.ShaderMaterial({
     varying vec2 vUv;
     uniform vec3 uFogColor;
     uniform float uFogDensity;
+    uniform sampler2D uIron;
+    uniform float uIronOn;
+    uniform float uCell;
     void main(){
       vec3 N = normalize(vNormalW);
       float ndl = clamp(dot(N, normalize(vec3(0.4, 0.85, 0.25))), 0.15, 1.0);
-      vec3 body = vColor * (0.35 + 0.55 * ndl);
+      vec3 plain = vColor * (0.35 + 0.55 * ndl);
+      // Hardware sheet is 4 square columns. uCell picks pole vs bollard.
+      float u = clamp(vUv.x, 0.02, 0.98);
+      float v = clamp(vUv.y, 0.02, 0.98);
+      vec3 photo = texture2D(uIron, vec2((u + uCell) * 0.25, v)).rgb;
+      vec3 worn = photo * (0.72 + 0.55 * ndl);
+      vec3 body = mix(plain, worn, uIronOn);
       // iron rim / cap highlight
       float cap = smoothstep(0.82, 0.95, vUv.y);
-      body += vec3(0.15, 0.16, 0.2) * cap;
+      body += vec3(0.15, 0.16, 0.2) * cap * (1.0 - uIronOn * 0.65);
       float dist = length(vWorldPos - cameraPosition);
       float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 12.0);
       gl_FragColor = vec4(mix(body, uFogColor, clamp(fog, 0.0, 0.8)), 1.0);
     }
   `,
 });
+const ironStub = new THREE.DataTexture(new Uint8Array([42, 44, 52, 255]), 1, 1);
+ironStub.needsUpdate = true;
+furnMat.uniforms.uIron.value = ironStub;
 const bollards = new THREE.InstancedMesh(bollardGeo, furnMat, FURN_COUNT);
-const posts = new THREE.InstancedMesh(postGeo, furnMat.clone(), 18);
+const quayPostMat = furnMat.clone();
+quayPostMat.uniforms.uCell.value = 0;
+const posts = new THREE.InstancedMesh(postGeo, quayPostMat, 18);
 const iron = new THREE.Color(0x2a2e3a);
 const ironWarm = new THREE.Color(0x3a3228);
 let fi = 0;
@@ -3981,6 +3999,92 @@ const ironWarmStd = new THREE.MeshStandardMaterial({
   color: 0x3a3228, roughness: 0.9, metalness: 0.18,
 });
 
+// Hardware sheet — 06-intermediate-assets/quay-iron-atlas.png (+ normal, rough).
+// Same freight-wear pass as the crates: scuff, rust, stencil fade. Not a metal tile.
+// 2048×512, four square columns. UV v = 1 is the top of the image.
+//   0 pole     signal poles, hangers, quay posts, strand posts, pennant masts
+//   1 bollard  physics bollards, instanced bollards, signal bases
+//   2 housing  traffic cabinets (SIGNAL)
+//   3 arm      signal arms, visors, backs, quay lantern arms
+// Cylinders and boxes already lay each face out in 0–1, so stamping that range
+// into a column is enough. Lenses and the lit heads stay lamp materials.
+// Instanced bollards/posts sample the same columns in furnMat (uCell).
+const IRON_ATLAS_COLS = 4;
+const IRON_CELL = { pole: 0, bollard: 1, housing: 2, arm: 3 };
+
+function stampIronCell(geo, col) {
+  const uv = geo.attributes.uv;
+  if (!uv) return;
+  const du = 1 / IRON_ATLAS_COLS;
+  const inset = 0.015;
+  for (let i = 0; i < uv.count; i++) {
+    const u = inset + uv.getX(i) * (1 - inset * 2);
+    const v = inset + uv.getY(i) * (1 - inset * 2);
+    uv.setXY(i, col * du + u * du, v);
+  }
+  uv.needsUpdate = true;
+  geo.computeTangents();
+}
+stampIronCell(signalPoleGeo, IRON_CELL.pole);
+stampIronCell(signalHangerGeo, IRON_CELL.pole);
+stampIronCell(strandPostGeo, IRON_CELL.pole);
+stampIronCell(signalBaseGeo, IRON_CELL.bollard);
+stampIronCell(signalHousingGeo, IRON_CELL.housing);
+stampIronCell(signalArmGeo, IRON_CELL.arm);
+stampIronCell(signalBackGeo, IRON_CELL.arm);
+stampIronCell(signalVisorGeo, IRON_CELL.arm);
+
+function prepIronColor(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+function prepIronData(tex) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+window.__harborIron = {
+  ready: false,
+  atlas: '06-intermediate-assets/quay-iron-atlas.png',
+  normal: '06-intermediate-assets/quay-iron-normal.png',
+  rough: '06-intermediate-assets/quay-iron-rough.png',
+  cols: IRON_ATLAS_COLS,
+  cells: ['pole', 'bollard', 'housing', 'arm'],
+};
+const ironCache = location.protocol === 'file:' ? '' : '?v=iron1';
+const ironWearMats = [signalIron, signalVisorMat, ironMatStd, ironWarmStd, strandPostMat];
+// Dedicated sheets replace Studio's street-atlas row-2 crop on props only.
+// The seed still runs; applyDedicatedPropWear puts these maps back on top.
+const dedicatedPropWear = { iron: null, crate: null };
+Promise.all([
+  atlasLoader.loadAsync(new URL('quay-iron-atlas.png' + ironCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-iron-normal.png' + ironCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-iron-rough.png' + ironCache, atlasBase).href),
+]).then(([color, normal, rough]) => {
+  dedicatedPropWear.iron = {
+    map: prepIronColor(color),
+    normal: prepIronData(normal),
+    rough: prepIronData(rough),
+    size: `${color.image.width}x${color.image.height}`,
+  };
+  applyDedicatedPropWear();
+}).catch((err) => {
+  console.warn('Quay iron atlas failed — street-atlas iron crop remains', err);
+});
+
 // Fixed bollards (static) — collision posts crates can bounce off
 const PHYS_BOLLARD_POS = [
   [-3.6, 0.04, 4.55],
@@ -4034,6 +4138,9 @@ const PHYS_LANTERN_DEFS = [
 const physPostGeo = new THREE.CylinderGeometry(0.05, 0.065, 1.4, 8);
 physPostGeo.translate(0, 0.7, 0);
 const physArmGeo = new THREE.BoxGeometry(1, 0.06, 0.06);
+stampIronCell(physBollardGeo, IRON_CELL.bollard);
+stampIronCell(physPostGeo, IRON_CELL.pole);
+stampIronCell(physArmGeo, IRON_CELL.arm);
 const physLanternGeo = new THREE.BoxGeometry(0.22, 0.3, 0.22);
 const physLanternMatWarm = new THREE.MeshStandardMaterial({
   color: 0xf0c24b, roughness: 0.42, metalness: 0.12,
@@ -4060,7 +4167,7 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   });
   physAdd(postMesh, postBody, 'post', 0);
 
-  const armMesh = new THREE.Mesh(physArmGeo, ironMatStd.clone());
+  const armMesh = new THREE.Mesh(physArmGeo, ironMatStd);
   armMesh.scale.x = def.armLen;
   const armBody = new CANNON.Body({
     mass: 0,
@@ -4142,31 +4249,268 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
 // density only sets draft, and halfExtents follow these sizes.
 // Linear size is a quay crate against the ~0.60 door (tallest 0.24, under
 // half a ground storey). The old 0.45–0.55 boxes read as half a shopfront.
+//
+// Wear atlas — 06-intermediate-assets/quay-crate-atlas.png (+ normal, rough).
+// One shared photo sheet, freight-graf / street-ground wear, not a wood tile.
+// 2560×2048, 5 columns × 4 rows, each cell 512×512.
+// Columns follow HARBOR_CRATE_DEFS order (the paint family that used to be
+// a flat color). Marks are original stencil only:
+//   0 HARBOR cream · 1 SIGNAL taupe · 2 QUAY ochre · 3 FENESTRA · 4 HARBOR worn
+// Rows, top of the PNG first (UV v = 1 is the top of the image):
+//   0 front  → BoxGeometry +Z
+//   1 back   → −Z
+//   2 side   → +X, and −X with U mirrored. −Y (bottom) reuses this row, V-flipped.
+//   3 lid    → +Y
+// Each face cover-crops its square cell so the stencil isn't stretched onto a
+// wide or flat box. A 2% inset keeps the bilinear filter off the neighbor cell.
+// Normal + rough ship with the albedo: board-gap grooves and a matte/iron split
+// catch the lanterns. Strength stays low so graffiti ink doesn't emboss.
+const CRATE_ATLAS_COLS = 5;
+const CRATE_ATLAS_ROWS = 4;
+const CRATE_FACE_ROW = { front: 0, back: 1, side: 2, lid: 3 };
+const CRATE_MARKS = ['HARBOR', 'SIGNAL', 'QUAY', 'FENESTRA', 'HARBOR'];
+
+function crateFaceWindow(faceW, faceH) {
+  const aspect = faceW / Math.max(faceH, 1e-4);
+  let u0 = 0;
+  let v0 = 0;
+  let u1 = 1;
+  let v1 = 1;
+  if (aspect >= 1) {
+    const hv = 1 / aspect;
+    v0 = (1 - hv) * 0.5;
+    v1 = v0 + hv;
+  } else {
+    const wu = aspect;
+    u0 = (1 - wu) * 0.5;
+    u1 = u0 + wu;
+  }
+  const inset = 0.02;
+  return [
+    u0 + (u1 - u0) * inset,
+    v0 + (v1 - v0) * inset,
+    u1 - (u1 - u0) * inset,
+    v1 - (v1 - v0) * inset,
+  ];
+}
+
+function crateAtlasUV(col, row, lu, lv) {
+  const du = 1 / CRATE_ATLAS_COLS;
+  const dv = 1 / CRATE_ATLAS_ROWS;
+  return [
+    col * du + lu * du,
+    (1 - (row + 1) * dv) + lv * dv,
+  ];
+}
+
+// BoxGeometry default segments: 6 faces × 4 verts, order +X −X +Y −Y +Z −Z.
+function stampHarborCrateUVs(geo, col, sx, sy, sz) {
+  const uv = geo.attributes.uv;
+  const faces = [
+    { row: CRATE_FACE_ROW.side, w: sz, h: sy, mirrorU: false, flipV: false },
+    { row: CRATE_FACE_ROW.side, w: sz, h: sy, mirrorU: true, flipV: false },
+    { row: CRATE_FACE_ROW.lid, w: sx, h: sz, mirrorU: false, flipV: false },
+    { row: CRATE_FACE_ROW.side, w: sx, h: sz, mirrorU: false, flipV: true },
+    { row: CRATE_FACE_ROW.front, w: sx, h: sy, mirrorU: false, flipV: false },
+    { row: CRATE_FACE_ROW.back, w: sx, h: sy, mirrorU: false, flipV: false },
+  ];
+  const per = uv.count / faces.length;
+  for (let f = 0; f < faces.length; f++) {
+    const face = faces[f];
+    const win = crateFaceWindow(face.w, face.h);
+    for (let k = 0; k < per; k++) {
+      const i = f * per + k;
+      let u = uv.getX(i);
+      let v = uv.getY(i);
+      if (face.mirrorU) u = 1 - u;
+      if (face.flipV) v = 1 - v;
+      const lu = win[0] + u * (win[2] - win[0]);
+      const lv = win[1] + v * (win[3] - win[1]);
+      const at = crateAtlasUV(col, face.row, lu, lv);
+      uv.setXY(i, at[0], at[1]);
+    }
+  }
+  uv.needsUpdate = true;
+  geo.computeTangents();
+}
+
+function makeCrateFallbackMap() {
+  const cell = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = CRATE_ATLAS_COLS * cell;
+  canvas.height = CRATE_ATLAS_ROWS * cell;
+  const g = canvas.getContext('2d');
+  const dyes = ['#d9d0c2', '#c4b8a6', '#a68448', '#b3a794', '#8a7562'];
+  for (let col = 0; col < CRATE_ATLAS_COLS; col++) {
+    for (let row = 0; row < CRATE_ATLAS_ROWS; row++) {
+      const x = col * cell;
+      const y = row * cell;
+      g.fillStyle = dyes[col];
+      g.fillRect(x, y, cell, cell);
+      g.strokeStyle = 'rgba(36,28,20,0.38)';
+      g.lineWidth = 2;
+      for (let s = 16; s < cell; s += 26) {
+        g.beginPath();
+        g.moveTo(x + 6, y + s);
+        g.lineTo(x + cell - 6, y + s);
+        g.stroke();
+      }
+      g.strokeStyle = 'rgba(18,14,10,0.55)';
+      g.strokeRect(x + 5, y + 5, cell - 10, cell - 10);
+      if (row === 0) {
+        g.fillStyle = 'rgba(18,14,12,0.84)';
+        g.font = '700 26px sans-serif';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText(CRATE_MARKS[col], x + cell * 0.5, y + cell * 0.52);
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function prepCrateColor(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+function prepCrateData(tex) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const crateFallbackMap = makeCrateFallbackMap();
+const crateWearMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  map: crateFallbackMap,
+  roughness: 0.88,
+  metalness: 0.04,
+  emissive: 0xfff1dc,
+  emissiveMap: crateFallbackMap,
+  emissiveIntensity: 0.08,
+});
+window.__harborCrates = {
+  ready: false,
+  atlas: '06-intermediate-assets/quay-crate-atlas.png',
+  normal: '06-intermediate-assets/quay-crate-normal.png',
+  rough: '06-intermediate-assets/quay-crate-rough.png',
+  cols: CRATE_ATLAS_COLS,
+  rows: CRATE_ATLAS_ROWS,
+  faces: ['front', 'back', 'side', 'lid'],
+  marks: CRATE_MARKS.slice(),
+};
+const crateCache = location.protocol === 'file:' ? '' : '?v=cratewear1';
+Promise.all([
+  atlasLoader.loadAsync(new URL('quay-crate-atlas.png' + crateCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-crate-normal.png' + crateCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-crate-rough.png' + crateCache, atlasBase).href),
+]).then(([color, normal, rough]) => {
+  dedicatedPropWear.crate = {
+    map: prepCrateColor(color),
+    normal: prepCrateData(normal),
+    rough: prepCrateData(rough),
+    size: `${color.image.width}x${color.image.height}`,
+  };
+  applyDedicatedPropWear();
+}).catch((err) => {
+  console.warn('Quay crate atlas failed — canvas wear remains', err);
+});
+
+// Isolated prop path. Studio's applyStreetPropWear still crops street-atlas.png
+// row 2 (iron col 0, crate col 1) onto these materials. When that seed lands
+// after the dedicated sheets, put the richer maps back. Asphalt, sidewalk,
+// and curb stay on loadStreetAtlas / streetPack.
+function applyDedicatedPropWear() {
+  const iron = dedicatedPropWear.iron;
+  if (iron) {
+    for (let i = 0; i < ironWearMats.length; i++) {
+      const mat = ironWearMats[i];
+      mat.map = iron.map;
+      mat.normalMap = iron.normal;
+      mat.normalScale.set(0.4, 0.4);
+      mat.roughnessMap = iron.rough;
+      mat.roughness = 1;
+      mat.metalness = 0.32;
+      mat.color.set(0xffffff);
+      mat.emissive.set(0xfff1dc);
+      mat.emissiveMap = iron.map;
+      mat.emissiveIntensity = 0.07;
+      mat.needsUpdate = true;
+    }
+    ironWarmStd.color.set(0xe4d4c4);
+    furnMat.uniforms.uIron.value = iron.map;
+    furnMat.uniforms.uIronOn.value = 1;
+    quayPostMat.uniforms.uIron.value = iron.map;
+    quayPostMat.uniforms.uIronOn.value = 1;
+    window.__harborIron.ready = true;
+    window.__harborIron.map = iron.size;
+    window.__harborIron.live = signalIron.map && signalIron.map.image
+      ? `${signalIron.map.image.width}x${signalIron.map.image.height}`
+      : '';
+    window.__harborIron.extends = 'street-atlas row2 col0';
+  }
+  const crate = dedicatedPropWear.crate;
+  if (crate) {
+    crateWearMat.map = crate.map;
+    crateWearMat.emissiveMap = crate.map;
+    crateWearMat.normalMap = crate.normal;
+    crateWearMat.normalScale.set(0.65, 0.65);
+    crateWearMat.roughnessMap = crate.rough;
+    // Roughness map is absolute (G). Three multiplies by the scalar.
+    crateWearMat.roughness = 1;
+    crateWearMat.needsUpdate = true;
+    window.__harborCrates.ready = true;
+    window.__harborCrates.map = crate.size;
+    window.__harborCrates.live = crateWearMat.map && crateWearMat.map.image
+      ? `${crateWearMat.map.image.width}x${crateWearMat.map.image.height}`
+      : '';
+    window.__harborCrates.extends = 'street-atlas row2 col1';
+  }
+  if (stillMode && (iron || crate)) tick();
+}
+const streetPropWearSeed = applyStreetPropWear;
+applyStreetPropWear = function (packed) {
+  streetPropWearSeed(packed);
+  applyDedicatedPropWear();
+};
+
 const HARBOR_CRATE_DEFS = [
-  // mid — cream, rides mid-high
+  // mid — cream column 0, rides mid-high
   { size: [0.26, 0.24, 0.26], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2, label: 'mid' },
-  // dense — taupe, rides low with freeboard (must not sink)
+  // dense — taupe column 1, rides low with freeboard (must not sink)
   { size: [0.34, 0.18, 0.26], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35, label: 'dense' },
-  // light — gold, rides high
+  // light — ochre column 2, rides high
   { size: [0.22, 0.20, 0.22], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55, label: 'light' },
-  // mid-heavy — low float, still clear of the basin floor
+  // mid-heavy — column 3, low float, still clear of the basin floor
   { size: [0.28, 0.22, 0.24], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1, label: 'mid' },
-  // cork — very light, high bob
+  // cork — worn column 4, very light, high bob
   { size: [0.24, 0.16, 0.24], mass: 0.45, color: 0xc4a574, emissive: 0xf0c24b, ei: 0.06, pos: [-4.1, 0.75, 3.5], yaw: -0.2, label: 'light' },
 ];
 
-function makeHarborCrate(def) {
+function makeHarborCrate(def, col) {
   const [sx, sy, sz] = def.size;
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(sx, sy, sz),
-    new THREE.MeshStandardMaterial({
-      color: def.color,
-      roughness: 0.74,
-      metalness: 0.08,
-      emissive: def.emissive,
-      emissiveIntensity: def.ei,
-    })
-  );
+  const geo = new THREE.BoxGeometry(sx, sy, sz);
+  stampHarborCrateUVs(geo, col, sx, sy, sz);
+  const mesh = new THREE.Mesh(geo, crateWearMat);
+  mesh.name = `quay-crate-${col}`;
   const body = new CANNON.Body({
     mass: physFreeze ? 0 : def.mass,
     material: physCrateMat,
@@ -4196,7 +4540,7 @@ function makeHarborCrate(def) {
   physCrates.push(entry);
   return entry;
 }
-for (const def of HARBOR_CRATE_DEFS) makeHarborCrate(def);
+HARBOR_CRATE_DEFS.forEach((def, col) => makeHarborCrate(def, col));
 
 // Grab / toss interaction (physics-props pattern)
 const physRay = new THREE.Raycaster();
@@ -5697,20 +6041,22 @@ function pennantSpring(bodyA, localA, bodyB, localB, stiffness, damping) {
     localAnchorB: localB,
   });
 }
+// Finial stays plain iron. A sphere's default UVs would smear the 4-column sheet.
+const pennantFinialMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2e3a, roughness: 0.88, metalness: 0.22,
+});
 function addPennantPost(x, z) {
   const g = new THREE.Group();
   g.position.set(x, 0, z);
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.026, 0.04, PENNANT_POST_H, 8),
-    ironMatStd
-  );
+  const poleGeo = new THREE.CylinderGeometry(0.026, 0.04, PENNANT_POST_H, 8);
+  stampIronCell(poleGeo, IRON_CELL.pole);
+  const pole = new THREE.Mesh(poleGeo, ironMatStd);
   pole.position.y = 0.04 + PENNANT_POST_H * 0.5;
-  const foot = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.07, 0.09, 0.035, 8),
-    ironWarmStd
-  );
+  const footGeo = new THREE.CylinderGeometry(0.07, 0.09, 0.035, 8);
+  stampIronCell(footGeo, IRON_CELL.bollard);
+  const foot = new THREE.Mesh(footGeo, ironWarmStd);
   foot.position.y = 0.04 + 0.018;
-  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), ironMatStd);
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), pennantFinialMat);
   finial.position.y = 0.04 + PENNANT_POST_H + 0.02;
   const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.022, 0.038), pennantBrass);
   cleat.position.y = PENNANT_CABLE_Y - 0.02;
