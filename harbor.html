@@ -2836,6 +2836,11 @@ function windCycleStr(delta) {
   refreshHarborPhysicsProbe();
 }
 
+// rubeFillProbe is a hoisted function, so a typeof check is true during this
+// init. const rubeState is declared later in the module — calling the probe
+// here throws (TDZ) and the quay never draws. Arm the flag after rubeState.
+let rubeProbeReady = false;
+
 windRefreshDir();
 windRefreshStr();
 windSetOn(harborWind.on);
@@ -2963,7 +2968,7 @@ function refreshHarborPhysicsProbe() {
   };
   window.__buoyancy = window.__harborPhysics.buoyancy;
   if (typeof physHooks.onProbe === 'function') physHooks.onProbe();
-  if (typeof rubeFillProbe === 'function') rubeFillProbe();
+  if (rubeProbeReady) rubeFillProbe();
 }
 refreshHarborPhysicsProbe();
 
@@ -4063,7 +4068,8 @@ function rubeFillProbe() {
   }
 }
 
-// Initial probe
+// Initial probe — safe to read rubeState / vessel / debris from here on
+rubeProbeReady = true;
 rubeFillProbe();
 window.__frameRube = (mode) => {
   // Camera helper: plate | gate | vessel | chain
