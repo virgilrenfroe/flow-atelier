@@ -4142,31 +4142,216 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
 // density only sets draft, and halfExtents follow these sizes.
 // Linear size is a quay crate against the ~0.60 door (tallest 0.24, under
 // half a ground storey). The old 0.45–0.55 boxes read as half a shopfront.
+//
+// Wear atlas — 06-intermediate-assets/quay-crate-atlas.png (+ normal, rough).
+// One shared photo sheet, freight-graf / street-ground wear, not a wood tile.
+// 2560×2048, 5 columns × 4 rows, each cell 512×512.
+// Columns follow HARBOR_CRATE_DEFS order (the paint family that used to be
+// a flat color). Marks are original stencil only:
+//   0 HARBOR cream · 1 SIGNAL taupe · 2 QUAY ochre · 3 FENESTRA · 4 HARBOR worn
+// Rows, top of the PNG first (UV v = 1 is the top of the image):
+//   0 front  → BoxGeometry +Z
+//   1 back   → −Z
+//   2 side   → +X, and −X with U mirrored. −Y (bottom) reuses this row, V-flipped.
+//   3 lid    → +Y
+// Each face cover-crops its square cell so the stencil isn't stretched onto a
+// wide or flat box. A 2% inset keeps the bilinear filter off the neighbor cell.
+// Normal + rough ship with the albedo: board-gap grooves and a matte/iron split
+// catch the lanterns. Strength stays low so graffiti ink doesn't emboss.
+const CRATE_ATLAS_COLS = 5;
+const CRATE_ATLAS_ROWS = 4;
+const CRATE_FACE_ROW = { front: 0, back: 1, side: 2, lid: 3 };
+const CRATE_MARKS = ['HARBOR', 'SIGNAL', 'QUAY', 'FENESTRA', 'HARBOR'];
+
+function crateFaceWindow(faceW, faceH) {
+  const aspect = faceW / Math.max(faceH, 1e-4);
+  let u0 = 0;
+  let v0 = 0;
+  let u1 = 1;
+  let v1 = 1;
+  if (aspect >= 1) {
+    const hv = 1 / aspect;
+    v0 = (1 - hv) * 0.5;
+    v1 = v0 + hv;
+  } else {
+    const wu = aspect;
+    u0 = (1 - wu) * 0.5;
+    u1 = u0 + wu;
+  }
+  const inset = 0.02;
+  return [
+    u0 + (u1 - u0) * inset,
+    v0 + (v1 - v0) * inset,
+    u1 - (u1 - u0) * inset,
+    v1 - (v1 - v0) * inset,
+  ];
+}
+
+function crateAtlasUV(col, row, lu, lv) {
+  const du = 1 / CRATE_ATLAS_COLS;
+  const dv = 1 / CRATE_ATLAS_ROWS;
+  return [
+    col * du + lu * du,
+    (1 - (row + 1) * dv) + lv * dv,
+  ];
+}
+
+// BoxGeometry default segments: 6 faces × 4 verts, order +X −X +Y −Y +Z −Z.
+function stampHarborCrateUVs(geo, col, sx, sy, sz) {
+  const uv = geo.attributes.uv;
+  const faces = [
+    { row: CRATE_FACE_ROW.side, w: sz, h: sy, mirrorU: false, flipV: false },
+    { row: CRATE_FACE_ROW.side, w: sz, h: sy, mirrorU: true, flipV: false },
+    { row: CRATE_FACE_ROW.lid, w: sx, h: sz, mirrorU: false, flipV: false },
+    { row: CRATE_FACE_ROW.side, w: sx, h: sz, mirrorU: false, flipV: true },
+    { row: CRATE_FACE_ROW.front, w: sx, h: sy, mirrorU: false, flipV: false },
+    { row: CRATE_FACE_ROW.back, w: sx, h: sy, mirrorU: false, flipV: false },
+  ];
+  const per = uv.count / faces.length;
+  for (let f = 0; f < faces.length; f++) {
+    const face = faces[f];
+    const win = crateFaceWindow(face.w, face.h);
+    for (let k = 0; k < per; k++) {
+      const i = f * per + k;
+      let u = uv.getX(i);
+      let v = uv.getY(i);
+      if (face.mirrorU) u = 1 - u;
+      if (face.flipV) v = 1 - v;
+      const lu = win[0] + u * (win[2] - win[0]);
+      const lv = win[1] + v * (win[3] - win[1]);
+      const at = crateAtlasUV(col, face.row, lu, lv);
+      uv.setXY(i, at[0], at[1]);
+    }
+  }
+  uv.needsUpdate = true;
+  geo.computeTangents();
+}
+
+function makeCrateFallbackMap() {
+  const cell = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = CRATE_ATLAS_COLS * cell;
+  canvas.height = CRATE_ATLAS_ROWS * cell;
+  const g = canvas.getContext('2d');
+  const dyes = ['#d9d0c2', '#c4b8a6', '#a68448', '#b3a794', '#8a7562'];
+  for (let col = 0; col < CRATE_ATLAS_COLS; col++) {
+    for (let row = 0; row < CRATE_ATLAS_ROWS; row++) {
+      const x = col * cell;
+      const y = row * cell;
+      g.fillStyle = dyes[col];
+      g.fillRect(x, y, cell, cell);
+      g.strokeStyle = 'rgba(36,28,20,0.38)';
+      g.lineWidth = 2;
+      for (let s = 16; s < cell; s += 26) {
+        g.beginPath();
+        g.moveTo(x + 6, y + s);
+        g.lineTo(x + cell - 6, y + s);
+        g.stroke();
+      }
+      g.strokeStyle = 'rgba(18,14,10,0.55)';
+      g.strokeRect(x + 5, y + 5, cell - 10, cell - 10);
+      if (row === 0) {
+        g.fillStyle = 'rgba(18,14,12,0.84)';
+        g.font = '700 26px sans-serif';
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.fillText(CRATE_MARKS[col], x + cell * 0.5, y + cell * 0.52);
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function prepCrateColor(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+function prepCrateData(tex) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const crateFallbackMap = makeCrateFallbackMap();
+const crateWearMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  map: crateFallbackMap,
+  roughness: 0.88,
+  metalness: 0.04,
+  emissive: 0xfff1dc,
+  emissiveMap: crateFallbackMap,
+  emissiveIntensity: 0.08,
+});
+window.__harborCrates = {
+  ready: false,
+  atlas: '06-intermediate-assets/quay-crate-atlas.png',
+  normal: '06-intermediate-assets/quay-crate-normal.png',
+  rough: '06-intermediate-assets/quay-crate-rough.png',
+  cols: CRATE_ATLAS_COLS,
+  rows: CRATE_ATLAS_ROWS,
+  faces: ['front', 'back', 'side', 'lid'],
+  marks: CRATE_MARKS.slice(),
+};
+const crateCache = location.protocol === 'file:' ? '' : '?v=cratewear1';
+Promise.all([
+  atlasLoader.loadAsync(new URL('quay-crate-atlas.png' + crateCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-crate-normal.png' + crateCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-crate-rough.png' + crateCache, atlasBase).href),
+]).then(([color, normal, rough]) => {
+  const map = prepCrateColor(color);
+  crateWearMat.map = map;
+  crateWearMat.emissiveMap = map;
+  crateWearMat.normalMap = prepCrateData(normal);
+  crateWearMat.normalScale.set(0.65, 0.65);
+  crateWearMat.roughnessMap = prepCrateData(rough);
+  // Roughness map is absolute (G). Three multiplies by the scalar.
+  crateWearMat.roughness = 1;
+  crateWearMat.needsUpdate = true;
+  window.__harborCrates.ready = true;
+  window.__harborCrates.map = `${color.image.width}x${color.image.height}`;
+  // ?still=1 stops the loop before the PNG returns. One more frame shows the photo.
+  if (stillMode) tick();
+}).catch((err) => {
+  console.warn('Quay crate atlas failed — canvas wear remains', err);
+});
+
 const HARBOR_CRATE_DEFS = [
-  // mid — cream, rides mid-high
+  // mid — cream column 0, rides mid-high
   { size: [0.26, 0.24, 0.26], mass: 1.1, color: 0xe8dfd0, emissive: 0xf0c24b, ei: 0.05, pos: [-2.4, 0.9, 3.35], yaw: 0.2, label: 'mid' },
-  // dense — taupe, rides low with freeboard (must not sink)
+  // dense — taupe column 1, rides low with freeboard (must not sink)
   { size: [0.34, 0.18, 0.26], mass: 2.2, color: 0xd4cbb8, emissive: 0x8a7bb8, ei: 0.04, pos: [-0.3, 1.1, 3.55], yaw: -0.35, label: 'dense' },
-  // light — gold, rides high
+  // light — ochre column 2, rides high
   { size: [0.22, 0.20, 0.22], mass: 0.7, color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.1, pos: [1.5, 0.85, 3.25], yaw: 0.55, label: 'light' },
-  // mid-heavy — low float, still clear of the basin floor
+  // mid-heavy — column 3, low float, still clear of the basin floor
   { size: [0.28, 0.22, 0.24], mass: 1.8, color: 0xc8bda8, emissive: 0x8a7bb8, ei: 0.035, pos: [3.4, 1.0, 3.45], yaw: 0.1, label: 'mid' },
-  // cork — very light, high bob
+  // cork — worn column 4, very light, high bob
   { size: [0.24, 0.16, 0.24], mass: 0.45, color: 0xc4a574, emissive: 0xf0c24b, ei: 0.06, pos: [-4.1, 0.75, 3.5], yaw: -0.2, label: 'light' },
 ];
 
-function makeHarborCrate(def) {
+function makeHarborCrate(def, col) {
   const [sx, sy, sz] = def.size;
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(sx, sy, sz),
-    new THREE.MeshStandardMaterial({
-      color: def.color,
-      roughness: 0.74,
-      metalness: 0.08,
-      emissive: def.emissive,
-      emissiveIntensity: def.ei,
-    })
-  );
+  const geo = new THREE.BoxGeometry(sx, sy, sz);
+  stampHarborCrateUVs(geo, col, sx, sy, sz);
+  const mesh = new THREE.Mesh(geo, crateWearMat);
+  mesh.name = `quay-crate-${col}`;
   const body = new CANNON.Body({
     mass: physFreeze ? 0 : def.mass,
     material: physCrateMat,
@@ -4196,7 +4381,7 @@ function makeHarborCrate(def) {
   physCrates.push(entry);
   return entry;
 }
-for (const def of HARBOR_CRATE_DEFS) makeHarborCrate(def);
+HARBOR_CRATE_DEFS.forEach((def, col) => makeHarborCrate(def, col));
 
 // Grab / toss interaction (physics-props pattern)
 const physRay = new THREE.Raycaster();
