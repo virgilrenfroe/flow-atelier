@@ -964,6 +964,25 @@ shopBreakTex.wrapT = THREE.ClampToEdgeWrapping;
 shopBreakTex.colorSpace = THREE.NoColorSpace;
 shopBreakTex.needsUpdate = true;
 
+// Façade sheath placeholders. Real sheets bind in loadSheathAtlases; uSheathOn
+// stays 0 until then so a failed load keeps the night-concrete grain.
+function facadeSheathPlaceholder() {
+  const c = document.createElement('canvas');
+  c.width = 2;
+  c.height = 2;
+  const g = c.getContext('2d');
+  g.fillStyle = '#141820';
+  g.fillRect(0, 0, 2, 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+const sheathCircuitPlaceholder = facadeSheathPlaceholder();
+const sheathGrowthPlaceholder = facadeSheathPlaceholder();
+
 const buildingMat = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
@@ -988,6 +1007,9 @@ const buildingMat = new THREE.ShaderMaterial({
     uSignAtlas: { value: null },
     uSignOn: { value: 0.0 },
     uShopBreak: { value: shopBreakTex },
+    uSheathCircuit: { value: sheathCircuitPlaceholder },
+    uSheathGrowth: { value: sheathGrowthPlaceholder },
+    uSheathOn: { value: 0.0 },
   },
   vertexShader: /* glsl */`
     varying vec3 vColor;
@@ -1063,6 +1085,9 @@ const buildingMat = new THREE.ShaderMaterial({
     uniform sampler2D uSignAtlas;
     uniform float uSignOn;
     uniform sampler2D uShopBreak;
+    uniform sampler2D uSheathCircuit;
+    uniform sampler2D uSheathGrowth;
+    uniform float uSheathOn;
 
     // Ground-floor shop pane break mask. Rows: 4 faces × 16 cell slots.
     // Slot = floor(along / cellW) + 8. Face +X 0, −X 1, +Z 2, −Z 3.
@@ -1393,9 +1418,36 @@ const buildingMat = new THREE.ShaderMaterial({
       ));
       frameBand *= (1.0 - inDoorCol);
       inPane *= (1.0 - inDoorCol);
-      // Dark mullion on concrete — clearer pane contrast vs textured body
-      vec3 mullionCol = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
-      vec3 body = mix(wallCol, mullionCol, frameBand * 0.94);
+      // Dual sheath on vertical concrete only (Virgil: circuit under, living cover).
+      // Samples stay outside the branch — WebGL1 derivatives need a uniform flow.
+      // Tile is façade-local metres (concUV), not world XZ. Growth alpha is the
+      // cover: smoothstep keeps moss shut and leaves peeks in deep cracks and
+      // flaked patches. Low-frequency wear plus corner thinning open a few
+      // places the tile itself does not, so the sheet does not stamp.
+      vec2 sheathUv = concUV / 1.68 + vec2(vId * 0.37, vId * 0.21);
+      vec4 circuit = texture2D(uSheathCircuit, sheathUv);
+      vec4 growth = texture2D(uSheathGrowth, sheathUv);
+      float cover = smoothstep(0.18, 0.70, growth.a);
+      float worn = smoothstep(0.64, 0.80, fbm(concUV * 0.16 + vec2(vId * 0.07, 2.7)));
+      cover *= mix(1.0, 0.12, worn);
+      float edgePeek = 1.0 - smoothstep(0.045, 0.26, edgeDistM);
+      cover *= mix(1.0, 0.22, edgePeek);
+      cover = clamp(cover, 0.0, 1.0);
+      vec3 under = mix(wallCol, circuit.rgb, 0.86);
+      float trace = circuit.a * (1.0 - cover);
+      vec3 sheathCol = mix(under, growth.rgb, cover);
+      // Night glint on uncovered traces. Small lift — lanterns still own bloom.
+      sheathCol += circuit.rgb * trace * 0.32;
+      sheathCol = mix(sheathCol, sheathCol * vec3(0.88, 0.94, 1.04), (1.0 - ndl) * 0.30);
+      float sheathGate = step(0.5, uSheathOn) * isVert;
+      vec3 faceCol = mix(wallCol, sheathCol, sheathGate);
+      // Unsheathed mullion (roof fallback / failed atlas) stays the old dark bar.
+      vec3 mullionPlain = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
+      // Sheathed mullion is the same growth, dimmed, so the frame still cuts
+      // the fenestra and a little moss / trace still reads on the bar.
+      vec3 mullionSheath = mix(sheathCol * vec3(0.52, 0.58, 0.46), vec3(0.008, 0.012, 0.011), 0.24);
+      vec3 mullionCol = mix(mullionPlain, mullionSheath, sheathGate);
+      vec3 body = mix(faceCol, mullionCol, frameBand * 0.94);
 
       // Shared 3D room seed (building-local) — same volume from +X or +Z.
       // Keep 2D cell/f/pane for façade mullion grid only.
@@ -1795,6 +1847,41 @@ function loadStreetAtlas() {
   });
 }
 loadStreetAtlas();
+
+// Circuit underlayer + moss/kudzu/fungus cover. Vertical concrete only.
+// A failed load leaves uSheathOn at 0 (procedural night concrete).
+const sheathCache = location.protocol === 'file:' ? '' : '?v=sheath1';
+function prepSheath(tex) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.needsUpdate = true;
+  return tex;
+}
+function loadSheathAtlases() {
+  const circuitUrl = new URL('facade-circuit.png' + sheathCache, atlasBase).href;
+  const growthUrl = new URL('facade-growth.png' + sheathCache, atlasBase).href;
+  window.__sheathAtlas = 'pending';
+  Promise.all([
+    atlasLoader.loadAsync(circuitUrl),
+    atlasLoader.loadAsync(growthUrl),
+  ]).then(([circuitTex, growthTex]) => {
+    if (!circuitTex.image || !growthTex.image) throw new Error('empty sheath atlas');
+    buildingMat.uniforms.uSheathCircuit.value = prepSheath(circuitTex);
+    buildingMat.uniforms.uSheathGrowth.value = prepSheath(growthTex);
+    buildingMat.uniforms.uSheathOn.value = 1.0;
+    buildingMat.needsUpdate = true;
+    window.__sheathAtlas = 'circuit-moss';
+  }).catch((err) => {
+    console.warn('Harbor façade sheath skipped — concrete grain remains', err);
+    window.__sheathAtlas = 'fallback';
+  });
+}
+loadSheathAtlases();
 
 function prepAtlas(tex) {
   tex.colorSpace = THREE.SRGBColorSpace;
