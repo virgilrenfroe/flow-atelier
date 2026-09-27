@@ -3754,31 +3754,36 @@ if (bollards.instanceColor) bollards.instanceColor.needsUpdate = true;
 bollards.frustumCulled = false;
 scene.add(bollards);
 
+const quayPostAnchor = [];
 for (let i = 0; i < 18; i++) {
   const x = -10 + i * 1.2 + (Math.random() - 0.5) * 0.15;
   const z = 3.85 + (Math.random() - 0.5) * 0.2;
+  const sy = 0.9 + Math.random() * 0.25;
   dummy.position.set(x, 0.04, z);
-  dummy.scale.set(1, 0.9 + Math.random() * 0.25, 1);
+  dummy.scale.set(1, sy, 1);
   dummy.rotation.set(0, 0, 0);
   dummy.updateMatrix();
   posts.setMatrixAt(i, dummy.matrix);
   posts.setColorAt(i, iron);
+  // Cylinder is translated so its top sits at local y = 1.35 before instance scale.
+  quayPostAnchor.push({ x, z, top: 0.04 + 1.35 * sy });
 }
 posts.instanceMatrix.needsUpdate = true;
 if (posts.instanceColor) posts.instanceColor.needsUpdate = true;
 posts.frustumCulled = false;
 scene.add(posts);
 
-// Lantern heads — iron cage, sooty glass, filament. Same anchors as the old spheres.
-// Atlas quadrants (flipY): metal TL, glass TR, roughness BL, air-glow BR.
+// Lantern heads — iron cage, sooty glass, filament.
+// Atlas quadrants (flipY, UV v=1 at the top of the PNG): metal TL, glass TR, roughness BL, air-glow BR.
+// Seat Y is the bottom of the iron foot. Instanced heads rest on the post crown.
 const lanternTime = { value: 0 };
 const lanternPulse = { value: freezeMotion ? 0.35 : 1 };
 const lanternAtlasUniform = {
   value: new THREE.DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1),
 };
 lanternAtlasUniform.value.needsUpdate = true;
-const lampWarm = new THREE.Color(0xffb15a);
-const lampCool = new THREE.Color(0x9eb6e8);
+const lampWarm = new THREE.Color(0xff9a3c);
+const lampCool = new THREE.Color(0x7eb6ff);
 const lanternPointLights = [];
 
 function harborMerge(parts, label) {
@@ -3787,6 +3792,8 @@ function harborMerge(parts, label) {
   if (!merged) throw new Error('Harbor lantern merge failed: ' + label);
   return merged;
 }
+
+const LANTERN_FOOT_Y = -0.163;
 
 function harborLanternGeos() {
   const housing = [];
@@ -3835,9 +3842,14 @@ function harborLanternGeos() {
   const cup = new THREE.CylinderGeometry(0.09, 0.056, 0.058, 10);
   cup.translate(0, -0.082, 0);
   housing.push(cup);
-  const socket = new THREE.CylinderGeometry(0.03, 0.038, 0.042, 8);
+  const socket = new THREE.CylinderGeometry(0.034, 0.042, 0.042, 8);
   socket.translate(0, -0.124, 0);
   housing.push(socket);
+  // Separate from the caged housing so the seat stays matte. A metal specular
+  // on this upward face was the white leak on the post crown.
+  const footH = 0.02;
+  const foot = new THREE.CylinderGeometry(0.098, 0.09, footH, 12);
+  foot.translate(0, LANTERN_FOOT_Y + footH * 0.5, 0);
 
   const pane = new THREE.PlaneGeometry(0.136, 0.112);
   const glass = [];
@@ -3868,9 +3880,12 @@ function harborLanternGeos() {
   const pan = new THREE.CircleGeometry(0.072, 12);
   pan.rotateX(-Math.PI / 2);
   pan.translate(0, -0.046, 0);
-  const glow = new THREE.PlaneGeometry(0.7, 0.78);
+  // Soft air halo around the glass. Kept above the foot so it does not paint the post.
+  const glow = new THREE.PlaneGeometry(0.48, 0.4);
+  glow.translate(0, 0.1, 0);
   return {
     housing: harborMerge(housing, 'housing'),
+    foot,
     glass: harborMerge(glass, 'glass'),
     bulb,
     filament,
@@ -3882,10 +3897,23 @@ function harborLanternGeos() {
 const lanternGeos = harborLanternGeos();
 const lanternHousingMat = new THREE.MeshStandardMaterial({
   color: 0x6a5d52,
-  roughness: 0.62,
-  metalness: 0.72,
-  emissive: 0x2a1a10,
-  emissiveIntensity: 0.14,
+  roughness: 1,
+  metalness: 0.82,
+  emissive: 0x120e0a,
+  emissiveIntensity: 0.035,
+});
+// Atlas roughness still modulates. Floor + high metalness keeps highlights iron-colored.
+lanternHousingMat.onBeforeCompile = (shader) => {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <roughnessmap_fragment>',
+    `#include <roughnessmap_fragment>
+     roughnessFactor = max(roughnessFactor, 0.84);`
+  );
+};
+const lanternFootMat = new THREE.MeshStandardMaterial({
+  color: 0x1c1816,
+  roughness: 1,
+  metalness: 0.04,
 });
 const lanternPickMat = new THREE.MeshBasicMaterial({
   transparent: true,
@@ -3957,13 +3985,16 @@ function makeLanternGlassMat(tint) {
         float soot = smoothstep(0.55, 0.12, lum);
         float pulse = 0.94 + 0.06 * sin(uTime * 2.15 + vWorldPos.x * 0.85) * uPulse;
         float paneEdge = smoothstep(0.42, 0.98, max(abs(p.x), abs(p.y)));
-        vec3 interior = vColor * (0.16 + 0.92 * lum) * mix(1.0, 0.34, soot) * mix(1.0, 0.28, paneEdge) * pulse;
-        vec3 sky = vec3(0.58, 0.66, 0.82);
+        // Stay under the bloom threshold so the pane does not blow the post crown white.
+        // Hue comes from vColor: amber vs steel, not a shared warm highlight.
+        vec3 hue = clamp((vColor - vec3(0.16)) * 1.4, 0.0, 1.15);
+        vec3 interior = hue * (0.2 + 0.62 * lum) * mix(1.0, 0.4, soot) * mix(1.0, 0.34, paneEdge) * pulse;
+        vec3 sky = mix(vColor, vec3(0.62, 0.7, 0.86), 0.42);
         vec3 L = normalize(vec3(0.42, 0.86, 0.22));
         vec3 H = normalize(L + V);
-        float spec = pow(max(dot(N, H), 0.0), 42.0);
-        vec3 col = mix(interior, sky, fres * 0.58);
-        col += vec3(1.0, 0.94, 0.82) * spec * (0.28 + fres * 0.45);
+        float spec = pow(max(dot(N, H), 0.0), 48.0);
+        vec3 col = mix(interior, sky, fres * 0.32);
+        col += mix(vColor, vec3(1.0), 0.22) * spec * 0.07;
         float dist = length(cameraPosition - vWorldPos);
         float fog = 1.0 - exp(-0.00032 * dist * dist);
         col = mix(col, vec3(0.02, 0.024, 0.04), clamp(fog, 0.0, 0.62));
@@ -4021,9 +4052,12 @@ function makeLanternFilamentMat(tint) {
       void main(){
         vec3 N = normalize(vNormalW);
         vec3 V = normalize(cameraPosition - vWorldPos);
-        float facing = pow(abs(dot(N, V)), 0.4);
-        float pulse = 0.9 + 0.1 * sin(uTime * 3.0 + vWorldPos.x * 0.9) * uPulse;
-        vec3 col = vColor * (1.85 + 1.7 * facing) * pulse;
+        float facing = pow(abs(dot(N, V)), 0.45);
+        float pulse = 0.92 + 0.08 * sin(uTime * 3.0 + vWorldPos.x * 0.9) * uPulse;
+        // Keep one channel dominant so the core stays amber or steel instead of clipping white.
+        vec3 tint = clamp((vColor - vec3(0.22)) * 1.65, 0.0, 1.35);
+        float heat = 0.82 + 0.2 * facing;
+        vec3 col = tint * heat * pulse;
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -4042,7 +4076,7 @@ const lanternGlowVert = /* glsl */`
     #else
       vColor = uTint;
     #endif
-    vec3 centerLocal = vec3(0.0, 0.02, 0.0);
+    vec3 centerLocal = vec3(0.0, 0.03, 0.0);
     #ifdef USE_INSTANCING
       vec3 center = (instanceMatrix * vec4(centerLocal, 1.0)).xyz;
       float s = length(instanceMatrix[0].xyz);
@@ -4086,27 +4120,46 @@ function makeLanternGlowMat(tint) {
         float missing = step(a + rgb.r, 0.004);
         vec2 p = vUv - 0.5;
         float d = length(p);
-        float fall = exp(-d * d * 14.0) * (1.0 - smoothstep(0.28, 0.5, d));
+        float fall = exp(-d * d * 11.0) * (1.0 - smoothstep(0.22, 0.52, d));
         a = mix(a, fall, missing);
-        rgb = mix(rgb, vec3(1.0, 0.84, 0.62), missing);
+        rgb = mix(rgb, vec3(1.0), missing);
+        float hem = smoothstep(0.0, 0.62, vUv.y);
+        a *= mix(0.08, 1.0, hem);
         float pulse = 0.92 + 0.08 * sin(uTime * 2.15 + vWorldPos.x * 0.8) * uPulse;
-        vec3 col = vColor * rgb * 0.16 * pulse;
-        gl_FragColor = vec4(col, a * 0.28);
+        vec3 glowRgb = mix(vec3(1.0), rgb, 0.28);
+        vec3 col = vColor * glowRgb * 0.14 * pulse;
+        gl_FragColor = vec4(col, a * 0.2);
       }
     `,
   });
 }
 
 function makeLanternPanMat(tint) {
-  const m = new THREE.MeshBasicMaterial({ color: tint.clone().multiplyScalar(0.42) });
-  return m;
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uTint: { value: tint.clone() },
+    },
+    vertexShader: lanternVert,
+    fragmentShader: /* glsl */`
+      varying vec3 vColor;
+      varying vec2 vUv;
+      void main(){
+        vec2 p = vUv * 2.0 - 1.0;
+        float d = length(p);
+        float pool = exp(-d * d * 2.6) * (1.0 - smoothstep(0.25, 0.92, d));
+        vec3 iron = vec3(0.045, 0.04, 0.036);
+        vec3 col = mix(iron, vColor * 0.16, pool);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  });
 }
 
 const lanternGlassMat = makeLanternGlassMat(lampWarm);
 const lanternBulbMat = makeLanternBulbMat(lampWarm);
 const lanternFilamentMat = makeLanternFilamentMat(lampWarm);
 const lanternGlowMat = makeLanternGlowMat(lampWarm);
-const lanternPanMat = new THREE.MeshBasicMaterial({ color: 0x6e6e6e });
+const lanternPanMat = makeLanternPanMat(lampWarm);
 const lanternGlassWarm = makeLanternGlassMat(lampWarm);
 const lanternGlassCool = makeLanternGlassMat(lampCool);
 const lanternBulbWarm = makeLanternBulbMat(lampWarm);
@@ -4125,7 +4178,8 @@ const lanternBulb = new THREE.InstancedMesh(lanternGeos.bulb, lanternBulbMat, LA
 const lanternFilament = new THREE.InstancedMesh(lanternGeos.filament, lanternFilamentMat, LANTERN_N);
 const lanternPan = new THREE.InstancedMesh(lanternGeos.pan, lanternPanMat, LANTERN_N);
 const lanternGlow = new THREE.InstancedMesh(lanternGeos.glow, lanternGlowMat, LANTERN_N);
-const lanternParts = [lanterns, lanternGlass, lanternBulb, lanternFilament, lanternPan, lanternGlow];
+const lanternFoot = new THREE.InstancedMesh(lanternGeos.foot, lanternFootMat, LANTERN_N);
+const lanternParts = [lanterns, lanternFoot, lanternGlass, lanternBulb, lanternFilament, lanternPan, lanternGlow];
 const lanternTinted = [lanternGlass, lanternBulb, lanternFilament, lanternPan, lanternGlow];
 const lanternTintAttr = new THREE.InstancedBufferAttribute(new Float32Array(LANTERN_N * 3), 3);
 for (let i = 0; i < lanternParts.length; i++) {
@@ -4146,10 +4200,12 @@ lanternBulb.layers.enable(BLOOM_LAYER);
 lanternFilament.layers.enable(BLOOM_LAYER);
 lanternGlass.layers.enable(BLOOM_LAYER);
 for (let i = 0; i < LANTERN_N; i++) {
-  const x = -10 + i * 1.2;
-  const z = 3.85;
-  dummy.position.set(x, 1.45, z);
-  dummy.scale.setScalar(0.85 + (i % 3) * 0.08);
+  const post = quayPostAnchor[i];
+  const s = 0.85 + (i % 3) * 0.08;
+  // 8mm bite hides the post cap inside the foot. No gap, no glowing crown.
+  const y = post.top - 0.002 - LANTERN_FOOT_Y * s;
+  dummy.position.set(post.x, y, post.z);
+  dummy.scale.setScalar(s);
   dummy.rotation.set(0, 0, 0);
   dummy.updateMatrix();
   lanterns.setMatrixAt(i, dummy.matrix);
@@ -4205,8 +4261,10 @@ function makeHarborLanternMesh(warm) {
   const glow = new THREE.Mesh(lanternGeos.glow, warm ? lanternGlowWarm : lanternGlowCool);
   glow.userData.lanternAir = true;
   glow.renderOrder = 3;
-  root.add(housing, pan, filament, bulb, glass, glow);
-  const lamp = new THREE.PointLight(warm ? 0xffb067 : 0xb7c6ef, warm ? 2.15 : 1.45, 7.4, 2);
+  const foot = new THREE.Mesh(lanternGeos.foot, lanternFootMat);
+  root.add(housing, foot, pan, filament, bulb, glass, glow);
+  // Short pool on the quay. Cutoff stays inside the promenade, short of fenestra façades (~z 1.15).
+  const lamp = new THREE.PointLight(warm ? 0xffb067 : 0xc5d6ff, warm ? 1.25 : 0.95, 2.25, 2);
   lamp.position.set(0, 0.02, 0);
   root.add(lamp);
   lanternPointLights.push({ light: lamp, base: lamp.intensity, phase: warm ? 0.35 : 2.2 });
@@ -4448,8 +4506,20 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   });
   physAdd(armMesh, armBody, 'arm', 0);
 
-  const lx = px + def.armLen + 0.02;
-  const ly = armY - 0.38;
+  // Knob sits a few millimetres into the bail so the hang reads linked, not floating.
+  // Cap stays clear of the arm (bail top 0.1825, cap top 0.157).
+  const hookDrop = 0.11;
+  const bailY = 0.174;
+  const lx = px + def.armLen - 0.02;
+  const ly = armY - hookDrop - bailY;
+  const hook = new THREE.Group();
+  hook.position.set(lx, armY - 0.03, pz);
+  const hookStem = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.052, 6), ironMatStd);
+  hookStem.position.y = -0.022;
+  const hookKnob = new THREE.Mesh(new THREE.SphereGeometry(0.018, 10, 8), ironMatStd);
+  hookKnob.position.y = -0.062;
+  hook.add(hookStem, hookKnob);
+  scene.add(hook);
   const lanternMesh = makeHarborLanternMesh(def.warm);
 
   const lanternMass = 0.55;
@@ -4466,8 +4536,8 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   const lanternEntry = physAdd(lanternMesh, lanternBody, 'lantern', lanternMass);
   lanternEntry.halfExtents = new CANNON.Vec3(0.11, 0.15, 0.11);
   lanternEntry.armBody = armBody;
-  lanternEntry.pivotA = new CANNON.Vec3(def.armLen * 0.5, 0, 0);
-  lanternEntry.pivotB = new CANNON.Vec3(0, 0.16, 0);
+  lanternEntry.pivotA = new CANNON.Vec3(def.armLen * 0.5 - 0.02, -hookDrop, 0);
+  lanternEntry.pivotB = new CANNON.Vec3(0, bailY, 0);
   physLanterns.push(lanternEntry);
 
   if (!physFreeze) {
