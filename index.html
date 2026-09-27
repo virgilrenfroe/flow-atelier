@@ -1510,7 +1510,7 @@ cityscapeLink.innerHTML = 'Cityscape <kbd>C</kbd>';
 chipsEl.appendChild(cityscapeLink);
 const harborLink = document.createElement('a');
 harborLink.className = 'mode-chip';
-harborLink.href = 'harbor.html';
+harborLink.href = 'harbor.html?v=ghostfix-20260927';
 harborLink.title = 'Harbor district night';
 harborLink.innerHTML = 'Harbor <kbd>H</kbd>';
 chipsEl.appendChild(harborLink);
@@ -1581,7 +1581,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
   else if (k === 'h' && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    location.href = 'harbor.html';
+    location.href = 'harbor.html?v=ghostfix-20260927';
     e.preventDefault();
   }
   else if (k === ' ' || e.code === 'Space') { setPaused(!paused); e.preventDefault(); }
