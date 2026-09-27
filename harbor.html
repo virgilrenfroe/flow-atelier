@@ -3736,6 +3736,13 @@ const furnMat = new THREE.ShaderMaterial({
 });
 const bollards = new THREE.InstancedMesh(bollardGeo, furnMat, FURN_COUNT);
 const posts = new THREE.InstancedMesh(postGeo, furnMat.clone(), 18);
+// Bollards keep the rim highlight. On posts it is a pale band on the upper
+// shaft, and it reads as a bright collar where the lantern meets the crown.
+posts.material.fragmentShader = posts.material.fragmentShader.replace(
+  '      float cap = smoothstep(0.82, 0.95, vUv.y);\n      body += vec3(0.15, 0.16, 0.2) * cap;\n',
+  ''
+);
+posts.material.needsUpdate = true;
 const iron = new THREE.Color(0x2a2e3a);
 const ironWarm = new THREE.Color(0x3a3228);
 let fi = 0;
@@ -3842,13 +3849,16 @@ function harborLanternGeos() {
   const cup = new THREE.CylinderGeometry(0.09, 0.056, 0.058, 10);
   cup.translate(0, -0.082, 0);
   housing.push(cup);
-  const socket = new THREE.CylinderGeometry(0.034, 0.042, 0.042, 8);
-  socket.translate(0, -0.124, 0);
-  housing.push(socket);
-  // Separate from the caged housing so the seat stays matte. A metal specular
-  // on this upward face was the white leak on the post crown.
-  const footH = 0.02;
-  const foot = new THREE.CylinderGeometry(0.098, 0.09, footH, 12);
+  // Skirt continues the cup (bottom y=-0.111, r=0.056) down to the seat.
+  // Bottom radius stays just over the post crown (r=0.055) at the smallest
+  // head scale (0.85), so the neck is not a stem floating above the pole.
+  const skirt = new THREE.CylinderGeometry(0.062, 0.074, 0.048, 12);
+  skirt.translate(0, -0.131, 0);
+  housing.push(skirt);
+  // Matte contact ring only. The lip is a few millimetres past the post,
+  // not a saucer, and it covers the crown so the join is iron on iron.
+  const footH = 0.016;
+  const foot = new THREE.CylinderGeometry(0.082, 0.07, footH, 12);
   foot.translate(0, LANTERN_FOOT_Y + footH * 0.5, 0);
 
   const pane = new THREE.PlaneGeometry(0.136, 0.112);
@@ -3911,9 +3921,9 @@ lanternHousingMat.onBeforeCompile = (shader) => {
   );
 };
 const lanternFootMat = new THREE.MeshStandardMaterial({
-  color: 0x1c1816,
+  color: 0x3a342e,
   roughness: 1,
-  metalness: 0.04,
+  metalness: 0.06,
 });
 const lanternPickMat = new THREE.MeshBasicMaterial({
   transparent: true,
@@ -4202,8 +4212,8 @@ lanternGlass.layers.enable(BLOOM_LAYER);
 for (let i = 0; i < LANTERN_N; i++) {
   const post = quayPostAnchor[i];
   const s = 0.85 + (i % 3) * 0.08;
-  // 8mm bite hides the post cap inside the foot. No gap, no glowing crown.
-  const y = post.top - 0.002 - LANTERN_FOOT_Y * s;
+  // 1.5mm bite: the collar covers the crown without the cage sinking into the pole.
+  const y = post.top - 0.0015 - LANTERN_FOOT_Y * s;
   dummy.position.set(post.x, y, post.z);
   dummy.scale.setScalar(s);
   dummy.rotation.set(0, 0, 0);
@@ -4477,15 +4487,20 @@ const PHYS_LANTERN_DEFS = [
   { post: [-5.4, 0.04, 3.85], armLen: 0.75, warm: true },
   { post: [2.4, 0.04, 3.85], armLen: 0.7, warm: false },
 ];
+// Centered on the body. physSync copies the body center onto the mesh, so a
+// +0.7 translate put the pole 0.7m above the deck and ran it through the arm.
 const physPostGeo = new THREE.CylinderGeometry(0.05, 0.065, 1.4, 8);
-physPostGeo.translate(0, 0.7, 0);
 const physArmGeo = new THREE.BoxGeometry(1, 0.06, 0.06);
+const physCapitalGeo = new THREE.CylinderGeometry(0.07, 0.064, 0.1, 8);
 
 for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   const def = PHYS_LANTERN_DEFS[i];
   const [px, py, pz] = def.post;
   const postH = 1.4;
-  const armY = py + postH - 0.08;
+  const postTop = py + postH;
+  // Capital (height 0.1) is centered here, 4mm above the post top, so the arm
+  // leaves the middle of a socket and about 2cm of capital shows above the bar.
+  const armY = postTop - 0.046;
   const armTipX = px + def.armLen * 0.5;
 
   const postMesh = new THREE.Mesh(physPostGeo, ironMatStd);
@@ -4505,6 +4520,10 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
     position: new CANNON.Vec3(armTipX, armY, pz),
   });
   physAdd(armMesh, armBody, 'arm', 0);
+
+  const capital = new THREE.Mesh(physCapitalGeo, ironMatStd);
+  capital.position.set(px, armY, pz);
+  scene.add(capital);
 
   // Knob sits a few millimetres into the bail so the hang reads linked, not floating.
   // Cap stays clear of the arm (bail top 0.1825, cap top 0.157).
