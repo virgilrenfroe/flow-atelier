@@ -245,7 +245,7 @@
     <div class="hero">
       <p class="eyebrow">Step 01 · real windows · craft ladder</p>
       <h1 class="stack"><span class="focus">Harbor</span><span>district</span><span>night</span></h1>
-      <p id="hero-blurb">Windows as openings: rectilinear box façades, local UV, dark mullions, flat fenestra interiors, Fresnel glass. Occupied-32 + shop atlases on planar panes. No curved massing, no sway, no world-UV swirl.</p>
+      <p id="hero-blurb">Windows as openings: rectilinear box façades, local UV, dark mullions, cool night-dock fenestra interiors, Fresnel glass. Occupied-32 + shop atlases on planar panes. No curved massing, no sway, no world-UV swirl.</p>
     </div>
     <div class="signal-chip" id="signal-chip">Signal · product hero</div>
     <div class="hud" id="hud" aria-live="polite">
@@ -905,13 +905,11 @@ const buildingMat = new THREE.ShaderMaterial({
     }
 
     // Shared UV center-crop for EVERY interior atlas sample (room + shop + face-map).
-    // 0.60 ≈ crop 20% margin each side — removes dollhouse plate side-wall strips.
-    // Recheck 2026-09-26: remaining beige-IN-PANE is NOT (a) plate side walls
-    // (crop handles those) NOR (b) wallCol between panes (dark frameBand/mullion).
-    // It is (c) baked room color — occupied-32/shop cells paint taupe back walls,
-    // floors, and furniture zones across the cropped center (many cells still
-    // 30–90% warm after crop). Glass Fresnel streetTint is a minor glancing add.
-    const float ATLAS_UV_CROP = 0.60;
+    // 0.52 ≈ crop 24% margin each side — panes read furniture/back wall, not side wall.
+    // 2026-09-26: beige-IN-PANE was (c) baked room color (taupe cells), not wall bands.
+    // 2026-09-27 cool rebake: occupied-32 + shop plates graded to rooms-ref night-dock
+    // warmth (R−B ≈ 6); crop tightened 0.60 → 0.52. Massing/façades untouched.
+    const float ATLAS_UV_CROP = 0.52;
     vec2 cropAtlasUV(vec2 uv) {
       return 0.5 + (clamp(uv, 0.0, 1.0) - 0.5) * ATLAS_UV_CROP;
     }
@@ -1286,6 +1284,8 @@ const mesh = new THREE.InstancedMesh(boxGeo, buildingMat, INSTANCE_COUNT);
 // ——— Atlas textures (fenestra occupied-32 residential · 16 shop) ———
 const atlasLoader = new THREE.TextureLoader();
 const atlasBase = new URL('./06-intermediate-assets/', import.meta.url);
+// file:// cannot use ?v= query on local PNGs; http(s) gets cache-bust.
+const atlasCache = location.protocol === 'file:' ? '' : '?v=cool127';
 function prepAtlas(tex) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.ClampToEdgeWrapping;
@@ -1323,16 +1323,16 @@ async function loadHarborAtlases() {
   // room-atlas-48.png is NOT the approved upstairs sheet.
   try {
     const [roomTex, shopTex] = await Promise.all([
-      atlasLoader.loadAsync(new URL('room-atlas-occupied-32.png', atlasBase).href),
-      atlasLoader.loadAsync(new URL('shop-atlas.png', atlasBase).href),
+      atlasLoader.loadAsync(new URL('room-atlas-occupied-32.png' + atlasCache, atlasBase).href),
+      atlasLoader.loadAsync(new URL('shop-atlas.png' + atlasCache, atlasBase).href),
     ]);
     wireRoomShopAtlases(roomTex, shopTex, 8.0, 4.0, 32.0);
   } catch (err) {
     console.warn('Harbor occupied-32 load failed — trying room-atlas.png', err);
     try {
       const [roomTex, shopTex] = await Promise.all([
-        atlasLoader.loadAsync(new URL('room-atlas.png', atlasBase).href),
-        atlasLoader.loadAsync(new URL('shop-atlas.png', atlasBase).href),
+        atlasLoader.loadAsync(new URL('room-atlas.png' + atlasCache, atlasBase).href),
+        atlasLoader.loadAsync(new URL('shop-atlas.png' + atlasCache, atlasBase).href),
       ]);
       wireRoomShopAtlases(roomTex, shopTex, 4.0, 4.0, 16.0);
     } catch (e2) {
