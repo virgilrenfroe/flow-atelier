@@ -1162,27 +1162,40 @@ const buildingMat = new THREE.ShaderMaterial({
       inPane *= mix(step(edgeKillM, edgeDistM), 1.0, atlasFlat);
       float edgeFade = mix(smoothstep(edgeKillM, edgeSoftM, edgeDistM), 1.0, atlasFlat);
 
-      // Ground floor only: a clear door bay (center of the façade, plus one
-      // more on wide fronts). Narrow single-bay faces split the cell so a
-      // door and a signed window both fit.
-      float bayIndex = floor((faceAlong + halfAlong) / max(cellW, 1e-4));
-      float bayCount = max(floor((halfAlong * 2.0) / max(cellW, 1e-4) + 1e-3), 1.0);
-      float centerBay = floor((bayCount - 1.0) * 0.5);
-      float onCenter = 1.0 - step(0.51, abs(bayIndex - centerBay));
-      float wideExtra = step(4.5, bayCount) * (1.0 - step(0.25, abs(bayIndex)));
-      float doorCell = max(onCenter, wideExtra);
-      float wideFace = step(1.5, bayCount);
-      float doorX = mix(step(f.x, 0.50), step(0.07, f.x) * step(f.x, 0.93), wideFace);
-      float isDoorFrag = isShop * mix(1.0, doorCell, wideFace) * doorX;
-      float doorOpen = isDoorFrag
-        * step(0.03, lpM.y) * step(lpM.y, cellH * 0.98);
-      inPane = max(inPane, doorOpen * isVert);
+      // Glazed shop entry. The bay is an opening into the lit shop, not a painted
+      // leaf stuck on the atlas. Shop glass (door + side windows) keeps the atlas;
+      // only a recessed jamb and thin stiles sit in front of it.
+      float faceLen = halfAlong * 2.0;
+      // Low shop boxes are often under 2.2 tall — they still get an entry.
+      // Door height shrinks so the header stays on the façade.
+      float doorOk = step(1.45, vScale.y) * step(1.28, faceLen) * isVert;
+      float faceIsX = step(abs(Ln.z), abs(Ln.x));
+      float doorSeed = hash(vec2(vId * 0.37 + 1.7, mix(4.1, 8.6, faceIsX)));
+      float doorW = mix(0.74, 1.48, step(2.15, faceLen));
+      float doorH = min(1.92, vScale.y - 0.32);
+      // Keep a window bay beside the entry when the façade is wide enough.
+      float maxShift = max(halfAlong - doorW * 0.5 - 0.78, 0.0);
+      float doorCenter = (doorSeed - 0.5) * 2.0 * min(maxShift, 0.36);
+      float dAx = faceAlong - doorCenter;
+      float axDoor = dAx / max(doorW, 0.2) + 0.5;
+      float inDoorX = step(0.0, axDoor) * step(axDoor, 1.0);
+      float inDoorY = step(0.045, lpM.y) * step(lpM.y, doorH);
+      float inDoor = doorOk * inDoorX * inDoorY;
+      float transomTop = min(doorH + 0.20, vScale.y - 0.08);
+      float inTransom = doorOk * step(doorH + 0.09, transomTop)
+                      * step(abs(dAx), doorW * 0.5 - 0.02)
+                      * step(doorH + 0.045, lpM.y) * step(lpM.y, transomTop);
+      float shopEntry = max(inDoor, inTransom);
 
-      // Frame / mullion bands — whole margin is dark mullion (not façade beige)
+      // Frame / mullion bands — whole margin is dark mullion (not façade beige).
+      // The entry opening is cut out of the grid so stacked window mullions
+      // do not slice the door or sit on top of the shop interior.
       float frameBand = isVert * (1.0 - step(
         min(mullU, mullV),
         min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))
       ));
+      frameBand *= (1.0 - shopEntry);
+      inPane *= (1.0 - shopEntry);
       // Dark mullion on concrete — clearer pane contrast vs textured body
       vec3 mullionCol = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
       vec3 body = mix(wallCol, mullionCol, frameBand * 0.94);
@@ -1298,38 +1311,14 @@ const buildingMat = new THREE.ShaderMaterial({
         glass = mix(glass, interior, glow * mix(0.55, 0.72, atlasPath) * (1.0 - fres * 0.9));
         body = glass;
 
-        // Street door: dark leaf to the pavement, shop glass only in the transom.
-        if (isDoorFrag > 0.5) {
-          float doorV = clamp(lpM.y / cellH, 0.0, 1.0);
-          float doorU = wideFace > 0.5
-            ? clamp((f.x - 0.07) / 0.86, 0.0, 1.0)
-            : clamp(f.x / 0.50, 0.0, 1.0);
-          float transom = smoothstep(0.74, 0.80, doorV);
-          float lite = step(0.28, doorU) * step(doorU, 0.72)
-                     * step(0.58, doorV) * step(doorV, 0.72);
-          vec3 doorCol = vec3(0.055, 0.052, 0.048);
-          float leftP = step(0.10, doorU) * step(doorU, 0.46)
-                      * step(0.08, doorV) * step(doorV, 0.52);
-          float rightP = step(0.54, doorU) * step(doorU, 0.90)
-                       * step(0.08, doorV) * step(doorV, 0.52);
-          doorCol = mix(doorCol, vec3(0.032, 0.030, 0.028), max(leftP, rightP));
-          float stile = smoothstep(0.02, 0.0, abs(doorU - 0.5) - 0.012);
-          doorCol = mix(doorCol, vec3(0.09, 0.082, 0.07), stile);
-          float handle = step(0.57, doorU) * step(doorU, 0.64)
-                       * step(0.36, doorV) * step(doorV, 0.44);
-          doorCol = mix(doorCol, vec3(0.62, 0.46, 0.20), handle);
-          float sill = 1.0 - smoothstep(0.0, 0.06, doorV);
-          doorCol = mix(doorCol, vec3(0.02, 0.02, 0.022), sill);
-          body = mix(doorCol, glass, max(transom, lite));
-        }
-
         // Retail names on ground-floor glass only — soft gold / sea-glass, not stickers.
+        // The glazed entry keeps its own transom; this band stays on the side panes.
         if (uSignOn > 0.5 && isShop > 0.5) {
           float signBand = smoothstep(0.60, 0.68, f.y) * (1.0 - smoothstep(0.90, 0.97, f.y));
           signBand *= smoothstep(0.10, 0.16, f.x) * (1.0 - smoothstep(0.84, 0.92, f.x));
-          signBand *= mix(1.0, smoothstep(0.76, 0.84, f.y), isDoorFrag);
+          signBand *= (1.0 - shopEntry);
           float faceKey = step(abs(Ln.z), abs(Ln.x));
-          float signIdx = floor(hash(vec2(vId * 1.31 + faceKey * 5.0, bayIndex * 0.47 + 2.2)) * 8.0);
+          float signIdx = floor(hash(vec2(vId * 1.31 + faceKey * 5.0, faceAlong * 0.17 + 2.2)) * 8.0);
           vec2 suv = vec2(
             clamp((f.x - 0.12) / 0.76, 0.0, 1.0),
             clamp((f.y - 0.62) / 0.30, 0.0, 1.0)
@@ -1339,6 +1328,75 @@ const buildingMat = new THREE.ShaderMaterial({
           body = mix(body, sgn.rgb, a);
           body += sgn.rgb * a * 0.18;
         }
+      }
+
+      // Through-glass entry: one shop interior across the whole bay (aspect-correct
+      // crop, no vertical smear). Stiles/kick are thin metal on the glass, not a
+      // solid door color over the furniture.
+      if (inDoor > 0.5) {
+        float ay = clamp((lpM.y - 0.045) / max(doorH - 0.045, 0.2), 0.0, 1.0);
+        float ax = clamp(axDoor, 0.0, 1.0);
+        float openingAspect = doorW / max(doorH - 0.045, 0.2);
+        vec2 atlasUV = vec2(0.5 + (ax - 0.5) * openingAspect, ay);
+        float faceShopSeed = vId * 0.17 + mix(6.4, 2.2, faceIsX);
+        float doorGlow = max(glow, 0.92);
+        if (uAtlasOn > 0.5 && uFaceMapOn < 0.5) {
+          interior = shadeRoomAtlas(atlasUV, doorGlow, 1.0, faceShopSeed);
+        } else if (uFaceMapOn > 0.5) {
+          float roomIdx = floor(hash(vec2(faceShopSeed, 3.3)) * uFaceCount);
+          interior = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, roomIdx, cropAtlasUV(atlasUV));
+          interior *= mix(0.55, 1.05, doorGlow);
+        } else {
+          interior = mix(vec3(0.05, 0.035, 0.025), vec3(0.42, 0.26, 0.12), doorGlow);
+        }
+        float edgeIn = min(min(ax, 1.0 - ax), min(ay, 1.0 - ay));
+        interior *= mix(0.42, 1.0, smoothstep(0.0, 0.055, edgeIn));
+        float centerStile = (1.0 - smoothstep(0.014, 0.034, abs(ax - 0.5))) * step(1.05, doorW);
+        float sideStile = max(
+          1.0 - smoothstep(0.0, 0.028, ax),
+          1.0 - smoothstep(0.0, 0.028, 1.0 - ax)
+        );
+        float midRail = 1.0 - smoothstep(0.006, 0.016, abs(ay - 0.58));
+        float topRail = 1.0 - smoothstep(0.0, 0.02, 1.0 - ay);
+        float botRail = 1.0 - smoothstep(0.012, 0.04, ay);
+        float muntin = max(max(centerStile, sideStile), max(midRail, max(topRail, botRail)));
+        vec3 stileCol = vec3(0.025, 0.027, 0.032);
+        vec3 glassCol = mix(interior, stileCol, clamp(muntin, 0.0, 1.0));
+        vec3 Vd = normalize(cameraPosition - vWorldPos);
+        float fresD = pow(1.0 - max(dot(N, Vd), 0.0), 2.5);
+        vec3 reflD = mix(vec3(0.16, 0.12, 0.07), vec3(0.11, 0.15, 0.26), clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+        glassCol = mix(glassCol, reflD, fresD * mix(0.42, 0.1, muntin));
+        body = glassCol;
+      }
+
+      // Illuminated transom — sign band above the header, not on the door leaf.
+      if (inTransom > 0.5) {
+        float sy = clamp((lpM.y - (doorH + 0.05)) / max(transomTop - doorH - 0.05, 0.05), 0.0, 1.0);
+        float sx = clamp(axDoor, 0.0, 1.0);
+        float stripe = smoothstep(0.34, 0.46, sy) * (1.0 - smoothstep(0.60, 0.74, sy));
+        vec3 panel = vec3(0.09, 0.055, 0.03);
+        vec3 litSign = vec3(0.95, 0.62, 0.24);
+        body = mix(panel, litSign, stripe);
+        body *= smoothstep(0.0, 0.05, min(sx, 1.0 - sx));
+        body += vec3(0.22, 0.1, 0.03) * stripe;
+      }
+
+      // Recessed jamb / header around the opening. Side windows keep their atlas.
+      float jambReach = 0.05;
+      float inJambBox = step(abs(dAx), doorW * 0.5 + jambReach) * step(0.0, lpM.y) * step(lpM.y, doorH + 0.048);
+      float jamb = doorOk * inJambBox * (1.0 - inDoor) * (1.0 - inTransom) * step(0.05, lpM.y);
+      body = mix(body, vec3(0.012, 0.013, 0.016), jamb * 0.94);
+      float sill = doorOk * step(abs(dAx), doorW * 0.5 + 0.04) * step(0.0, lpM.y) * step(lpM.y, 0.048);
+      body = mix(body, vec3(0.16, 0.15, 0.135), sill);
+
+      // Sign band on the glass beside the entry (top of those panes only).
+      float beside = step(doorW * 0.5 + 0.05, abs(dAx)) * step(abs(dAx), doorW * 0.5 + cellW * 1.05);
+      float headBand = step(0.78, f.y) * step(1.15, lpM.y) * step(lpM.y, doorH);
+      if (doorOk * beside * headBand * inPane > 0.5) {
+        float sy2 = clamp((f.y - 0.78) / 0.22, 0.0, 1.0);
+        float stripe2 = smoothstep(0.22, 0.42, sy2) * (1.0 - smoothstep(0.62, 0.86, sy2));
+        vec3 band = mix(vec3(0.11, 0.065, 0.035), vec3(0.88, 0.56, 0.2), stripe2);
+        body = mix(body, band, 0.78);
       }
 
       // Soft roof wash
@@ -1556,6 +1614,7 @@ const tmpC = new THREE.Color();
 
 // Rectilinear district massing only (Virgil 2026-09-26): unit BoxGeometry × scale.
 // No yaw / chamfer / cylinder silhouettes — planar façades so local UV + room/shop atlas stay square.
+const harborBoxes = [];
 function placeBuilding(x, z, w, h, d, color, _yawIgnored) {
   if (placed >= INSTANCE_COUNT) return false;
   // Snap tiny footprints up so pencil towers never read as curved posts
@@ -1571,6 +1630,7 @@ function placeBuilding(x, z, w, h, d, color, _yawIgnored) {
   dummy.updateMatrix();
   mesh.setMatrixAt(placed, dummy.matrix);
   mesh.setColorAt(placed, color);
+  harborBoxes.push({ x, z, w, h, d });
   placed++;
   return true;
 }
@@ -1782,6 +1842,493 @@ window.__harborBuildings = (() => {
   }
   return list;
 })();
+
+// ——— Rooftop strand lights (2–4 flat roofs, visible from the Harbor orbit) ———
+// Café bulbs on a sagging cable. Emissive bulbs + one warm pool per roof —
+// not a bulb light each — so phones stay in budget. Massing stays a box.
+function pickStrandRoofs(boxes) {
+  const cam = new THREE.Vector3(16.5, 10.5, 20.5);
+  const look = new THREE.Vector3(0, 1.6, -2.5);
+  const viewDir = look.clone().sub(cam).normalize();
+  const cands = [];
+  for (const b of boxes) {
+    if (b.h < 3.4 || b.h > 11.5) continue;
+    const longSide = Math.max(b.w, b.d);
+    const shortSide = Math.min(b.w, b.d);
+    if (longSide < 1.45 || shortSide < 0.95) continue;
+    const roof = new THREE.Vector3(b.x, b.h, b.z);
+    const toRoof = roof.clone().sub(cam).normalize();
+    const facing = toRoof.dot(viewDir);
+    if (facing < 0.72) continue;
+    const score = facing * 3 + b.z * 0.12 + Math.min(b.h, 8) * 0.05 + shortSide;
+    cands.push({ b, score });
+  }
+  cands.sort((a, c) => c.score - a.score);
+  const picked = [];
+  for (const c of cands) {
+    if (picked.every((p) => Math.hypot(p.b.x - c.b.x, p.b.z - c.b.z) > 3.4)) picked.push(c);
+    if (picked.length === 3) break;
+  }
+  return picked.map((p) => p.b);
+}
+
+const strandGroup = new THREE.Group();
+strandGroup.name = 'rooftop-strands';
+scene.add(strandGroup);
+const strandPostGeo = new THREE.CylinderGeometry(0.015, 0.018, 1, 6);
+strandPostGeo.translate(0, 0.5, 0);
+const strandPostMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2e34, roughness: 0.62, metalness: 0.35,
+});
+const strandWireMat = new THREE.MeshStandardMaterial({
+  color: 0x1a1c22, roughness: 0.72, metalness: 0.25,
+});
+const strandBulbGeo = new THREE.SphereGeometry(0.032, 7, 5);
+const strandBulbMat = new THREE.MeshStandardMaterial({
+  color: 0x3a2a1c,
+  emissive: 0xffc48a,
+  emissiveIntensity: 2.8,
+  roughness: 0.32,
+  metalness: 0.04,
+});
+const STRAND_BULB_MAX = 48;
+const strandBulbs = new THREE.InstancedMesh(strandBulbGeo, strandBulbMat, STRAND_BULB_MAX);
+strandBulbs.count = 0;
+strandBulbs.frustumCulled = false;
+strandBulbs.layers.enable(BLOOM_LAYER);
+strandBulbs.name = 'rooftop-strand-bulbs';
+scene.add(strandBulbs);
+const strandBulbBase = [];
+const strandDummy = new THREE.Object3D();
+const strandRoofs = pickStrandRoofs(harborBoxes);
+
+function addStrand(a, b, sag, phase) {
+  const span = a.distanceTo(b);
+  if (span < 0.55) return;
+  const postH = 0.34;
+  for (const p of [a, b]) {
+    const post = new THREE.Mesh(strandPostGeo, strandPostMat);
+    post.scale.y = postH;
+    post.position.set(p.x, p.y, p.z);
+    strandGroup.add(post);
+  }
+  const topA = a.clone(); topA.y += postH;
+  const topB = b.clone(); topB.y += postH;
+  const pts = [];
+  const segN = 16;
+  for (let i = 0; i <= segN; i++) {
+    const t = i / segN;
+    const p = new THREE.Vector3().lerpVectors(topA, topB, t);
+    p.y -= Math.sin(t * Math.PI) * sag;
+    pts.push(p);
+  }
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), segN, 0.006, 4, false),
+    strandWireMat
+  );
+  strandGroup.add(tube);
+  const side = new THREE.Vector3().subVectors(topB, topA);
+  side.y = 0;
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  side.cross(new THREE.Vector3(0, 1, 0)).normalize();
+  const bulbs = 8;
+  for (let i = 0; i < bulbs; i++) {
+    if (strandBulbs.count >= STRAND_BULB_MAX) break;
+    const t = (i + 0.5) / bulbs;
+    const p = new THREE.Vector3().lerpVectors(topA, topB, t);
+    p.y -= Math.sin(t * Math.PI) * sag;
+    const idx = strandBulbs.count++;
+    const amp = Math.sin(t * Math.PI) * 0.02;
+    strandBulbBase.push({
+      x: p.x, y: p.y, z: p.z, phase: phase + i * 0.45, ax: side.x, az: side.z, amp,
+    });
+    strandDummy.position.copy(p);
+    strandDummy.scale.set(1, 1, 1);
+    strandDummy.rotation.set(0, 0, 0);
+    strandDummy.updateMatrix();
+    strandBulbs.setMatrixAt(idx, strandDummy.matrix);
+  }
+  const mid = new THREE.Vector3().lerpVectors(topA, topB, 0.5);
+  mid.y -= sag * 0.65;
+  const pool = new THREE.PointLight(0xffb067, 11, 5.5, 2);
+  pool.position.copy(mid);
+  strandGroup.add(pool);
+}
+
+strandRoofs.forEach((b, i) => {
+  const alongX = b.w >= b.d;
+  const cross = alongX ? b.d : b.w;
+  const offsets = cross > 1.35 && i < 2 ? [-0.22, 0.22] : [0];
+  const sag = 0.14 + (i % 3) * 0.02;
+  for (const off of offsets) {
+    let a;
+    let end;
+    if (alongX) {
+      const z = b.z + off;
+      a = new THREE.Vector3(b.x - b.w * 0.5 + 0.18, b.h, z);
+      end = new THREE.Vector3(b.x + b.w * 0.5 - 0.18, b.h, z);
+    } else {
+      const x = b.x + off;
+      a = new THREE.Vector3(x, b.h, b.z - b.d * 0.5 + 0.18);
+      end = new THREE.Vector3(x, b.h, b.z + b.d * 0.5 - 0.18);
+    }
+    addStrand(a, end, sag, i * 1.7 + off);
+  }
+});
+strandBulbs.instanceMatrix.needsUpdate = true;
+window.__harborStrands = {
+  roofs: strandRoofs.map((b) => ({ x: b.x, z: b.z, w: b.w, h: b.h, d: b.d })),
+  bulbs: strandBulbs.count,
+};
+
+function swayStrandBulbs(t) {
+  if (!strandBulbs.count) return;
+  const live = freezeMotion ? 0 : 1;
+  for (let i = 0; i < strandBulbs.count; i++) {
+    const b = strandBulbBase[i];
+    const s = Math.sin(t * 0.8 + b.phase) * b.amp * live;
+    strandDummy.position.set(b.x + b.ax * s, b.y + s * 0.35, b.z + b.az * s);
+    strandDummy.scale.set(1, 1, 1);
+    strandDummy.rotation.set(0, 0, 0);
+    strandDummy.updateMatrix();
+    strandBulbs.setMatrixAt(i, strandDummy.matrix);
+  }
+  strandBulbs.instanceMatrix.needsUpdate = true;
+}
+
+// ——— Night traffic signals ———
+// A few corner heads on the existing grid, inland of the quay. The Rube plate,
+// vessel, and crate deck stay clear (no poles on the quay-front street).
+// Vertical 3-lamp heads, dark housing, one soft pool per crossing.
+const SIGNAL_GREEN_T = 3.6;
+const SIGNAL_AMBER_T = 1.2;
+const SIGNAL_RED_T = 4.8;
+const SIGNAL_CYCLE = SIGNAL_GREEN_T + SIGNAL_AMBER_T + SIGNAL_RED_T; // 9.6
+const SIGNAL_ORBIT_CAM = new THREE.Vector3(16.5, 10.5, 20.5);
+const SIGNAL_LAMP_HEX = [0xff2424, 0xffa010, 0x1ec85a]; // red, amber, green
+const SIGNAL_LAMP_OFF = [0x3a1416, 0x3a2c12, 0x14301c];
+
+function signalStage(t, phase) {
+  let u = (t + phase) % SIGNAL_CYCLE;
+  if (u < 0) u += SIGNAL_CYCLE;
+  if (u < SIGNAL_GREEN_T) return 2;
+  if (u < SIGNAL_GREEN_T + SIGNAL_AMBER_T) return 1;
+  return 0;
+}
+
+function streetCrossing(c, r) {
+  return {
+    c,
+    r,
+    x: gridOriginX - STREET_W * 0.5 + c * cellW,
+    z: gridOriginZ + STREET_W * 0.5 - r * cellD,
+  };
+}
+
+function signalRayBlocked(origin, target) {
+  const dirx = target.x - origin.x;
+  const diry = target.y - origin.y;
+  const dirz = target.z - origin.z;
+  for (let i = 0; i < harborBoxes.length; i++) {
+    const b = harborBoxes[i];
+    const minX = b.x - b.w * 0.5;
+    const maxX = b.x + b.w * 0.5;
+    const minZ = b.z - b.d * 0.5;
+    const maxZ = b.z + b.d * 0.5;
+    let tmin = 0;
+    let tmax = 1;
+    const slabs = [
+      [dirx, origin.x, minX, maxX],
+      [diry, origin.y, 0, b.h],
+      [dirz, origin.z, minZ, maxZ],
+    ];
+    let hit = true;
+    for (let a = 0; a < 3; a++) {
+      const d = slabs[a][0];
+      const o = slabs[a][1];
+      let t1 = slabs[a][2];
+      let t2 = slabs[a][3];
+      if (Math.abs(d) < 1e-8) {
+        if (o < t1 || o > t2) { hit = false; break; }
+        continue;
+      }
+      t1 = (t1 - o) / d;
+      t2 = (t2 - o) / d;
+      if (t1 > t2) { const s = t1; t1 = t2; t2 = s; }
+      if (t1 > tmin) tmin = t1;
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) { hit = false; break; }
+    }
+    if (hit && tmin < 0.9 && tmax > 0.04) return true;
+  }
+  return false;
+}
+
+function signalPoleBlocked(x, z) {
+  for (let i = 0; i < harborBoxes.length; i++) {
+    const b = harborBoxes[i];
+    if (Math.abs(x - b.x) < b.w * 0.5 + 0.08 && Math.abs(z - b.z) < b.d * 0.5 + 0.08) return true;
+  }
+  return false;
+}
+
+function pickTrafficCorners() {
+  const inset = STREET_W * 0.5 - SIDEWALK_W * 0.5;
+  const signs = [1, -1];
+  const cands = [];
+  for (let r = 1; r <= GRID_ROWS - 1; r++) {
+    for (let c = 1; c <= GRID_COLS - 1; c++) {
+      const cross = streetCrossing(c, r);
+      for (let a = 0; a < 2; a++) {
+        for (let b = 0; b < 2; b++) {
+          const sx = signs[a];
+          const sz = signs[b];
+          const poleX = cross.x + sx * inset;
+          const poleZ = cross.z + sz * inset;
+          if (poleZ > 0.05) continue;
+          if (signalPoleBlocked(poleX, poleZ)) continue;
+          const dx = cross.x - poleX;
+          const dz = cross.z - poleZ;
+          const len = Math.hypot(dx, dz) || 1;
+          const arm = 0.78;
+          const headX = poleX + (dx / len) * arm;
+          const headZ = poleZ + (dz / len) * arm;
+          const headY = 2.52;
+          if (Math.hypot(headX + 3.15, headZ - 3.12) < 4.2) continue;
+          const open = !signalRayBlocked(SIGNAL_ORBIT_CAM, { x: headX, y: headY, z: headZ });
+          const dist = Math.hypot(headX, headZ + 2.5);
+          cands.push({
+            c, r, poleX, poleZ, headX, headY, headZ, cross,
+            score: (open ? 12 : 0) - dist * 0.22 + headZ * 0.08,
+          });
+        }
+      }
+    }
+  }
+  cands.sort((p, q) => q.score - p.score);
+  const picked = [];
+  for (let i = 0; i < cands.length; i++) {
+    const cand = cands[i];
+    let spread = true;
+    for (let j = 0; j < picked.length; j++) {
+      if (Math.hypot(picked[j].headX - cand.headX, picked[j].headZ - cand.headZ) < 6.2) {
+        spread = false;
+        break;
+      }
+    }
+    if (!spread) continue;
+    picked.push(cand);
+    if (picked.length === 4) break;
+  }
+  return picked;
+}
+
+const trafficGroup = new THREE.Group();
+trafficGroup.name = 'traffic-signals';
+scene.add(trafficGroup);
+
+const signalIron = new THREE.MeshStandardMaterial({
+  color: 0x1a1c22, roughness: 0.55, metalness: 0.48,
+});
+const signalVisorMat = new THREE.MeshStandardMaterial({
+  color: 0x101114, roughness: 0.72, metalness: 0.22,
+});
+const signalPoleGeo = new THREE.CylinderGeometry(0.04, 0.048, 1, 8);
+signalPoleGeo.translate(0, 0.5, 0);
+const signalBaseGeo = new THREE.BoxGeometry(0.18, 0.035, 0.18);
+const signalArmGeo = new THREE.BoxGeometry(0.046, 0.042, 1);
+const signalHangerGeo = new THREE.CylinderGeometry(0.018, 0.018, 1, 6);
+signalHangerGeo.translate(0, -0.5, 0);
+const signalHousingGeo = new THREE.BoxGeometry(0.26, 0.84, 0.15);
+const signalBackGeo = new THREE.BoxGeometry(0.32, 0.9, 0.028);
+const signalVisorGeo = new THREE.BoxGeometry(0.22, 0.02, 0.12);
+const signalLampGeo = new THREE.SphereGeometry(0.072, 10, 8);
+
+const SIGNAL_MAX = 4;
+const signalPoles = new THREE.InstancedMesh(signalPoleGeo, signalIron, SIGNAL_MAX);
+const signalBases = new THREE.InstancedMesh(signalBaseGeo, signalIron, SIGNAL_MAX);
+const signalArms = new THREE.InstancedMesh(signalArmGeo, signalIron, SIGNAL_MAX);
+const signalHangers = new THREE.InstancedMesh(signalHangerGeo, signalIron, SIGNAL_MAX * 2);
+const signalHousings = new THREE.InstancedMesh(signalHousingGeo, signalIron, SIGNAL_MAX * 2);
+const signalBacks = new THREE.InstancedMesh(signalBackGeo, signalVisorMat, SIGNAL_MAX * 2);
+const signalVisors = new THREE.InstancedMesh(signalVisorGeo, signalVisorMat, SIGNAL_MAX * 6);
+const signalLensMat = new THREE.MeshStandardMaterial({
+  color: 0x221418, roughness: 0.42, metalness: 0.06,
+  emissive: 0x120808, emissiveIntensity: 0.25,
+});
+const signalLenses = new THREE.InstancedMesh(signalLampGeo, signalLensMat, SIGNAL_MAX * 6);
+const signalLitMat = [
+  new THREE.MeshStandardMaterial({
+    color: 0x3a1010, emissive: SIGNAL_LAMP_HEX[0], emissiveIntensity: 2.7,
+    roughness: 0.28, metalness: 0.02,
+  }),
+  new THREE.MeshStandardMaterial({
+    color: 0x3a2a10, emissive: SIGNAL_LAMP_HEX[1], emissiveIntensity: 2.45,
+    roughness: 0.28, metalness: 0.02,
+  }),
+  new THREE.MeshStandardMaterial({
+    color: 0x103018, emissive: SIGNAL_LAMP_HEX[2], emissiveIntensity: 2.55,
+    roughness: 0.28, metalness: 0.02,
+  }),
+];
+const signalLit = [
+  new THREE.InstancedMesh(signalLampGeo, signalLitMat[0], SIGNAL_MAX * 2),
+  new THREE.InstancedMesh(signalLampGeo, signalLitMat[1], SIGNAL_MAX * 2),
+  new THREE.InstancedMesh(signalLampGeo, signalLitMat[2], SIGNAL_MAX * 2),
+];
+const signalMeshes = [
+  signalPoles, signalBases, signalArms, signalHangers, signalHousings,
+  signalBacks, signalVisors, signalLenses,
+].concat(signalLit);
+for (let i = 0; i < signalMeshes.length; i++) {
+  signalMeshes[i].count = 0;
+  signalMeshes[i].frustumCulled = false;
+  scene.add(signalMeshes[i]);
+}
+for (let i = 0; i < signalLit.length; i++) signalLit[i].layers.enable(BLOOM_LAYER);
+signalLenses.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(SIGNAL_MAX * 6 * 3), 3);
+
+const signalDummy = new THREE.Object3D();
+const signalColor = new THREE.Color();
+function signalSet(mesh, i, x, y, z, yaw, sx, sy, sz) {
+  signalDummy.position.set(x, y, z);
+  signalDummy.rotation.set(0, yaw, 0);
+  signalDummy.scale.set(sx, sy, sz);
+  signalDummy.updateMatrix();
+  mesh.setMatrixAt(i, signalDummy.matrix);
+  if (i + 1 > mesh.count) mesh.count = i + 1;
+}
+
+const signalCorners = pickTrafficCorners();
+const signalRigs = [];
+const signalLampHome = [[], [], []];
+
+for (let n = 0; n < signalCorners.length; n++) {
+  const corner = signalCorners[n];
+  const phase = n * (SIGNAL_CYCLE / signalCorners.length);
+  const poleH = 3.02;
+  const dx = corner.cross.x - corner.poleX;
+  const dz = corner.cross.z - corner.poleZ;
+  const len = Math.hypot(dx, dz) || 1;
+  const ux = dx / len;
+  const uz = dz / len;
+  const armLen = 0.78;
+  const endX = corner.poleX + ux * armLen;
+  const endZ = corner.poleZ + uz * armLen;
+  const armYaw = Math.atan2(ux, uz);
+  const sideX = -uz;
+  const sideZ = ux;
+  const armY = poleH - 0.02;
+  const hy = armY - 0.62;
+
+  signalSet(signalPoles, n, corner.poleX, 0, corner.poleZ, 0, 1, poleH, 1);
+  signalSet(signalBases, n, corner.poleX, 0.02, corner.poleZ, 0, 1, 1, 1);
+  signalSet(
+    signalArms, n,
+    (corner.poleX + endX) * 0.5, armY, (corner.poleZ + endZ) * 0.5,
+    armYaw, 1, 1, armLen
+  );
+
+  const heads = [
+    { yaw: 0, ox: sideX * 0.16, oz: sideZ * 0.16, phase },
+    { yaw: Math.PI / 2, ox: -sideX * 0.16, oz: -sideZ * 0.16, phase: phase + SIGNAL_RED_T },
+  ];
+  const lampY = [0.24, 0, -0.24];
+  for (let h = 0; h < heads.length; h++) {
+    const head = heads[h];
+    const hx = endX + head.ox;
+    const hz = endZ + head.oz;
+    const faceX = Math.sin(head.yaw);
+    const faceZ = Math.cos(head.yaw);
+    const hi = n * 2 + h;
+    const hangerLen = armY - (hy + 0.42);
+    signalSet(signalHangers, hi, hx, armY, hz, 0, 1, hangerLen, 1);
+    signalSet(signalHousings, hi, hx, hy, hz, head.yaw, 1, 1, 1);
+    signalSet(signalBacks, hi, hx - faceX * 0.09, hy, hz - faceZ * 0.09, head.yaw, 1, 1, 1);
+    for (let k = 0; k < 3; k++) {
+      const ly = hy + lampY[k];
+      const lx = hx + faceX * 0.09;
+      const lz = hz + faceZ * 0.09;
+      const vi = n * 6 + h * 3 + k;
+      signalSet(signalVisors, vi, lx + faceX * 0.04, ly + 0.078, lz + faceZ * 0.04, head.yaw, 1, 1, 1);
+      signalSet(signalLenses, vi, lx, ly, lz, 0, 1, 1, 1);
+      signalColor.setHex(SIGNAL_LAMP_OFF[k]);
+      signalLenses.setColorAt(vi, signalColor);
+      const li = n * 2 + h;
+      signalLampHome[k].push({ x: lx, y: ly, z: lz, phase: head.phase, color: k, index: li });
+      signalSet(signalLit[k], li, lx, -40, lz, 0, 0.001, 0.001, 0.001);
+    }
+  }
+
+  const pool = new THREE.PointLight(SIGNAL_LAMP_HEX[0], 1.7, 4.6, 2);
+  pool.position.set(endX, hy, endZ);
+  trafficGroup.add(pool);
+  signalRigs.push({
+    phase,
+    ewPhase: phase + SIGNAL_RED_T,
+    light: pool,
+    pole: { x: corner.poleX, z: corner.poleZ },
+    head: { x: endX, y: hy, z: endZ },
+    crossing: { c: corner.c, r: corner.r, x: corner.cross.x, z: corner.cross.z },
+  });
+}
+
+for (let i = 0; i < signalMeshes.length; i++) signalMeshes[i].instanceMatrix.needsUpdate = true;
+if (signalLenses.instanceColor) signalLenses.instanceColor.needsUpdate = true;
+
+function updateTrafficSignals(t) {
+  if (!signalRigs.length) return;
+  for (let k = 0; k < 3; k++) {
+    const homes = signalLampHome[k];
+    for (let i = 0; i < homes.length; i++) {
+      const lamp = homes[i];
+      const on = signalStage(t, lamp.phase) === lamp.color;
+      const s = on ? 1.12 : 0.001;
+      signalSet(
+        signalLit[k], lamp.index,
+        lamp.x, on ? lamp.y : -40, lamp.z,
+        0, s, s, s
+      );
+    }
+    signalLit[k].instanceMatrix.needsUpdate = true;
+  }
+  const stages = [];
+  for (let i = 0; i < signalRigs.length; i++) {
+    const rig = signalRigs[i];
+    const stage = signalStage(t, rig.phase);
+    stages.push(stage);
+    const homes = signalLampHome[stage];
+    let glow = null;
+    for (let j = 0; j < homes.length; j++) {
+      if (homes[j].phase === rig.phase) { glow = homes[j]; break; }
+    }
+    if (glow) {
+      rig.light.color.setHex(SIGNAL_LAMP_HEX[stage]);
+      rig.light.position.set(glow.x, glow.y, glow.z);
+    }
+  }
+  if (window.__harborSignals) window.__harborSignals.stages = stages;
+}
+
+updateTrafficSignals(freezeMotion ? 1.25 : 0);
+window.__harborSignals = {
+  count: signalRigs.length,
+  cycle: SIGNAL_CYCLE,
+  meshes: {
+    poles: signalPoles.count,
+    housings: signalHousings.count,
+    visors: signalVisors.count,
+    lenses: signalLenses.count,
+    lit: signalLit.map((m) => m.count),
+  },
+  heads: signalRigs.map((r) => ({
+    x: r.head.x, y: r.head.y, z: r.head.z,
+    poleX: r.pole.x, poleZ: r.pole.z,
+    phase: r.phase,
+    crossing: r.crossing,
+  })),
+  stages: signalRigs.map((r) => signalStage(freezeMotion ? 1.25 : 0, r.phase)),
+};
 
 // ——— Ground / district pad (under streets; darker than asphalt) ———
 // Stop at quay/seawall — do NOT cover the outboard basin (was Plane 90×70 @ z=-4
@@ -2126,24 +2673,16 @@ seawallToe.position.set(
 );
 scene.add(seawallToe);
 
-// ——— Seawall graffiti (one atlas, both faces) ———
-// Original night-quay paint only: weathered throw-ups, drips, and a few
-// monochrome stencils (rat, balloon gesture, short ironic lines). Not copies
-// of any existing street piece, photo, or stencil sheet. Cool concrete,
-// light-catching paint — no neon.
-const GRAF_CELL = 256;
-const GRAF_COLS = 8;
-const GRAF_ROWS = 2;
+// ——— Seawall graffiti (freight band, both faces) ———
+// Original throw-ups only — bubble letters with fill, hard outline, and a 3D
+// block, layered like railroad boxcar paint. No stencils, no figures, no
+// copied crew names or railroad marks.
+const GRAF_W = 4096;
+const GRAF_H = 512;
 const grafCanvas = document.createElement('canvas');
-grafCanvas.width = GRAF_COLS * GRAF_CELL;
-grafCanvas.height = GRAF_ROWS * GRAF_CELL;
+grafCanvas.width = GRAF_W;
+grafCanvas.height = GRAF_H;
 const grafCtx = grafCanvas.getContext('2d');
-
-const GRAF_INK = 'rgba(14, 15, 18, 0.94)';
-const GRAF_CHALK = 'rgba(214, 210, 198, 0.93)';
-const GRAF_OX = 'rgba(118, 48, 54, 0.9)';
-const GRAF_GOLD = 'rgba(172, 142, 84, 0.86)';
-const GRAF_VIOLET = 'rgba(96, 88, 122, 0.8)';
 
 function grafRng(seed) {
   let a = seed >>> 0;
@@ -2155,499 +2694,464 @@ function grafRng(seed) {
   };
 }
 
-function grafSpray(ctx, x, y, r, color, n, rnd) {
-  ctx.save();
-  ctx.fillStyle = color;
-  for (let i = 0; i < n; i++) {
-    const a = rnd() * Math.PI * 2;
-    const d = Math.pow(rnd(), 0.45) * r;
-    ctx.globalAlpha = 0.08 + rnd() * 0.28;
+const GLYPH_W = {
+  A: 0.84, B: 0.80, C: 0.76, D: 0.80, E: 0.72, F: 0.68, G: 0.80,
+  H: 0.80, I: 0.40, K: 0.80, L: 0.70, M: 1.00, N: 0.82, O: 0.84,
+  P: 0.74, R: 0.80, S: 0.74, T: 0.72, U: 0.80, W: 1.05,
+};
+const GLYPH = {
+  A(ctx, x, y, w, h) {
     ctx.beginPath();
-    ctx.arc(x + Math.cos(a) * d, y + Math.sin(a) * d, r * (0.03 + rnd() * 0.08), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function grafDrip(ctx, x, y, len, w, color, rnd) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = w;
-  ctx.lineCap = 'round';
-  ctx.globalAlpha = 0.85;
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  const steps = 4;
-  for (let i = 1; i <= steps; i++) {
-    ctx.lineTo(x + (rnd() - 0.5) * w * 1.4, y + (len * i) / steps);
-  }
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(x + (rnd() - 0.5) * w, y + len, w * 0.75, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function grafWeather(ctx, w, h, rnd, heavy) {
-  ctx.save();
-  ctx.globalCompositeOperation = 'destination-out';
-  const n = heavy ? 64 : 16;
-  for (let i = 0; i < n; i++) {
-    ctx.globalAlpha = (heavy ? 0.25 : 0.12) + rnd() * (heavy ? 0.55 : 0.28);
-    const s = 1 + rnd() * (heavy ? 5 : 3);
-    ctx.fillRect(rnd() * w, rnd() * h, s, s * (0.4 + rnd()));
-  }
-  ctx.globalAlpha = heavy ? 0.4 : 0.18;
-  ctx.lineWidth = 1;
-  for (let i = 0; i < (heavy ? 5 : 2); i++) {
-    ctx.beginPath();
-    const sx = rnd() * w;
-    const sy = rnd() * h;
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(sx + 16 + rnd() * 70, sy + (rnd() - 0.5) * 8);
+    ctx.moveTo(x + w * 0.16, y + h * 0.90);
+    ctx.lineTo(x + w * 0.50, y + h * 0.10);
+    ctx.lineTo(x + w * 0.84, y + h * 0.90);
+    ctx.moveTo(x + w * 0.30, y + h * 0.58);
+    ctx.lineTo(x + w * 0.70, y + h * 0.58);
     ctx.stroke();
-  }
-  const fade = ctx.createLinearGradient(0, h * (heavy ? 0.62 : 0.78), 0, h);
-  fade.addColorStop(0, 'rgba(0,0,0,0)');
-  fade.addColorStop(1, heavy ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.22)');
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = fade;
-  ctx.fillRect(0, 0, w, h);
-  ctx.restore();
-}
-
-function grafFont(size) {
-  return `700 ${size}px "Arial Black", "Noto Sans", "Liberation Sans", sans-serif`;
-}
-
-function grafFillText(ctx, text, x, y, size, color) {
-  ctx.save();
-  ctx.font = grafFont(size);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round';
-  ctx.miterLimit = 2;
-  ctx.lineWidth = Math.max(2, size * 0.11);
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.45;
-  ctx.strokeText(text, x, y);
-  ctx.globalAlpha = 0.96;
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
-  ctx.restore();
-}
-
-function grafThrowUp(ctx, text, x, y, size, fill, outline) {
-  ctx.save();
-  ctx.font = grafFont(size);
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round';
-  ctx.lineWidth = size * 0.22;
-  ctx.strokeStyle = outline;
-  ctx.strokeText(text, x, y);
-  ctx.fillStyle = fill;
-  ctx.fillText(text, x + size * 0.035, y + size * 0.05);
-  ctx.restore();
-}
-
-function grafRatUpright(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.48, h * 0.55, w * 0.42, 'rgba(214,210,198,0.7)', 36, rnd);
-  ctx.save();
-  ctx.translate(w * 0.08, h * 0.06);
-  ctx.scale(w / 256, h / 256);
-  ctx.fillStyle = GRAF_INK;
-  ctx.beginPath();
-  ctx.moveTo(78, 168);
-  ctx.bezierCurveTo(18, 150, 8, 214, 46, 228);
-  ctx.bezierCurveTo(24, 206, 36, 176, 86, 184);
-  ctx.bezierCurveTo(70, 210, 108, 228, 132, 196);
-  ctx.bezierCurveTo(168, 214, 196, 176, 178, 150);
-  ctx.bezierCurveTo(214, 142, 228, 108, 196, 96);
-  ctx.bezierCurveTo(214, 78, 196, 52, 168, 64);
-  ctx.bezierCurveTo(154, 40, 128, 48, 136, 78);
-  ctx.bezierCurveTo(112, 70, 96, 96, 108, 124);
-  ctx.bezierCurveTo(86, 112, 62, 132, 78, 168);
-  ctx.closePath();
-  ctx.fill();
-  // Hollow harbor lamp, gapped from the paw so it stays a second shape.
-  ctx.beginPath();
-  ctx.arc(214, 58, 18, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalCompositeOperation = 'destination-out';
-  ctx.beginPath();
-  ctx.arc(214, 58, 8, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = GRAF_CHALK;
-  ctx.globalAlpha = 0.9;
-  ctx.fillRect(206, 56, 16, 3);
-  ctx.restore();
-  grafDrip(ctx, w * 0.42, h * 0.78, h * 0.16, 3.2, GRAF_INK, rnd);
-  grafDrip(ctx, w * 0.58, h * 0.8, h * 0.12, 2.4, GRAF_INK, rnd);
-}
-
-function grafFigureBalloons(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.42, h * 0.48, w * 0.4, 'rgba(214,210,198,0.65)', 28, rnd);
-  ctx.save();
-  ctx.translate(0, h * 0.02);
-  ctx.scale(w / 256, h / 256);
-  ctx.fillStyle = GRAF_CHALK;
-  ctx.strokeStyle = GRAF_CHALK;
-  ctx.lineWidth = 2;
-  ctx.lineCap = 'round';
-  // Back-view hooded coat — adult proportion, not a dress silhouette.
-  ctx.beginPath();
-  ctx.moveTo(92, 78);
-  ctx.quadraticCurveTo(78, 46, 104, 36);
-  ctx.quadraticCurveTo(128, 46, 116, 78);
-  ctx.lineTo(132, 92);
-  ctx.lineTo(140, 168);
-  ctx.lineTo(68, 168);
-  ctx.lineTo(76, 92);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillRect(78, 168, 16, 52);
-  ctx.fillRect(112, 168, 16, 52);
-  // Raised arm, stopped short of the balloons.
-  ctx.beginPath();
-  ctx.moveTo(124, 96);
-  ctx.quadraticCurveTo(156, 78, 168, 58);
-  ctx.lineTo(160, 52);
-  ctx.quadraticCurveTo(142, 74, 114, 90);
-  ctx.closePath();
-  ctx.fill();
-  // Three round balloons, different sizes. One has already landed.
-  for (const [bx, by, br] of [[196, 42, 20], [228, 78, 13], [186, 86, 10], [46, 196, 16]]) {
+  },
+  B(ctx, x, y, w, h) {
     ctx.beginPath();
-    ctx.arc(bx, by, br, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 0.85;
-  ctx.beginPath();
-  ctx.moveTo(164, 56);
-  ctx.lineTo(186, 48);
-  ctx.moveTo(164, 56);
-  ctx.lineTo(218, 74);
-  ctx.moveTo(164, 56);
-  ctx.lineTo(182, 80);
-  ctx.moveTo(86, 160);
-  ctx.quadraticCurveTo(40, 188, 52, 184);
-  ctx.stroke();
-  ctx.restore();
-}
-
-function grafExitBySea(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.5, h * 0.42, w * 0.46, 'rgba(14,15,18,0.55)', 30, rnd);
-  grafFillText(ctx, 'EXIT BY SEA', w * 0.46, h * 0.38, h * 0.22, GRAF_INK);
-  ctx.save();
-  ctx.translate(w * 0.78, h * 0.62);
-  ctx.fillStyle = GRAF_INK;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(18, 0);
-  ctx.lineTo(9, 22);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillRect(6, -16, 6, 16);
-  ctx.restore();
-  grafDrip(ctx, w * 0.28, h * 0.52, h * 0.28, 3, GRAF_INK, rnd);
-  grafDrip(ctx, w * 0.52, h * 0.5, h * 0.22, 2.2, GRAF_INK, rnd);
-  grafDrip(ctx, w * 0.66, h * 0.5, h * 0.34, 3.4, GRAF_INK, rnd);
-}
-
-function grafPaidInSalt(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.5, h * 0.48, w * 0.4, 'rgba(172,142,84,0.45)', 18, rnd);
-  grafFillText(ctx, 'PAID IN', w * 0.5, h * 0.36, h * 0.16, GRAF_CHALK);
-  grafFillText(ctx, 'SALT', w * 0.5, h * 0.58, h * 0.2, GRAF_CHALK);
-  ctx.save();
-  ctx.strokeStyle = GRAF_GOLD;
-  ctx.globalAlpha = 0.7;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.18, h * 0.22);
-  ctx.lineTo(w * 0.84, h * 0.74);
-  ctx.stroke();
-  ctx.restore();
-  grafDrip(ctx, w * 0.38, h * 0.7, h * 0.2, 2.4, GRAF_CHALK, rnd);
-  grafDrip(ctx, w * 0.62, h * 0.72, h * 0.16, 2, GRAF_GOLD, rnd);
-}
-
-function grafThrowDock(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.48, h * 0.5, w * 0.4, 'rgba(118,48,54,0.45)', 26, rnd);
-  ctx.save();
-  ctx.globalAlpha = 0.55;
-  grafThrowUp(ctx, 'HULL', w * 0.42, h * 0.40, h * 0.42, GRAF_VIOLET, 'rgba(214,210,198,0.35)');
-  ctx.restore();
-  grafThrowUp(ctx, 'DOCK', w * 0.56, h * 0.52, h * 0.46, GRAF_OX, GRAF_CHALK);
-  ctx.save();
-  ctx.strokeStyle = 'rgba(14,15,18,0.55)';
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.12, h * 0.3);
-  ctx.lineTo(w * 0.9, h * 0.62);
-  ctx.stroke();
-  ctx.restore();
-  for (let i = 0; i < 5; i++) {
-    grafDrip(ctx, w * (0.28 + i * 0.1), h * 0.7, h * (0.16 + rnd() * 0.18), 2 + rnd() * 2, i % 2 ? GRAF_OX : GRAF_INK, rnd);
-  }
-}
-
-function grafNoWake(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.5, h * 0.4, w * 0.36, 'rgba(14,15,18,0.5)', 20, rnd);
-  ctx.save();
-  ctx.translate(w * 0.5, h * 0.40);
-  ctx.strokeStyle = GRAF_INK;
-  ctx.fillStyle = GRAF_INK;
-  ctx.lineWidth = 8;
-  ctx.beginPath();
-  ctx.arc(0, 0, h * 0.24, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(-h * 0.16, h * 0.06);
-  ctx.quadraticCurveTo(-h * 0.05, -h * 0.06, 0, h * 0.04);
-  ctx.quadraticCurveTo(h * 0.08, h * 0.12, h * 0.16, 0);
-  ctx.stroke();
-  ctx.lineWidth = 7;
-  ctx.beginPath();
-  ctx.moveTo(-h * 0.18, h * 0.18);
-  ctx.lineTo(h * 0.18, -h * 0.18);
-  ctx.stroke();
-  ctx.restore();
-  grafFillText(ctx, 'NO WAKE', w * 0.5, h * 0.78, h * 0.13, GRAF_INK);
-}
-
-function grafRatCrate(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.4, h * 0.62, w * 0.32, 'rgba(14,15,18,0.45)', 16, rnd);
-  ctx.save();
-  ctx.scale(w / 256, h / 256);
-  ctx.fillStyle = GRAF_INK;
-  // Seated rat, tail wrapped, crate beside it — quay joke, not a placard rat.
-  ctx.beginPath();
-  ctx.ellipse(108, 156, 40, 28, -0.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(156, 132, 22, 18, 0.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(148, 108, 10, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(70, 160);
-  ctx.quadraticCurveTo(30, 188, 48, 210);
-  ctx.quadraticCurveTo(78, 196, 86, 172);
-  ctx.fill();
-  ctx.strokeStyle = GRAF_INK;
-  ctx.lineWidth = 8;
-  ctx.strokeRect(176, 150, 52, 46);
-  ctx.beginPath();
-  ctx.moveTo(176, 150);
-  ctx.lineTo(228, 196);
-  ctx.moveTo(228, 150);
-  ctx.lineTo(176, 196);
-  ctx.stroke();
-  ctx.restore();
-  grafDrip(ctx, w * 0.7, h * 0.78, h * 0.14, 2.5, GRAF_INK, rnd);
-}
-
-function grafBalloonsRing(ctx, w, h, rnd) {
-  grafSpray(ctx, w * 0.5, h * 0.42, w * 0.38, 'rgba(214,210,198,0.5)', 18, rnd);
-  ctx.save();
-  ctx.strokeStyle = GRAF_CHALK;
-  ctx.fillStyle = GRAF_CHALK;
-  ctx.lineWidth = 6;
-  ctx.beginPath();
-  ctx.ellipse(w * 0.5, h * 0.78, w * 0.16, h * 0.07, 0, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.46, h * 0.74);
-  ctx.lineTo(w * 0.32, h * 0.28);
-  ctx.moveTo(w * 0.52, h * 0.72);
-  ctx.lineTo(w * 0.58, h * 0.22);
-  ctx.moveTo(w * 0.5, h * 0.74);
-  ctx.lineTo(w * 0.74, h * 0.34);
-  ctx.stroke();
-  for (const [bx, by, br] of [
-    [w * 0.32, h * 0.22, h * 0.1],
-    [w * 0.58, h * 0.16, h * 0.13],
-    [w * 0.76, h * 0.28, h * 0.08],
-  ]) {
+    ctx.moveTo(x + w * 0.26, y + h * 0.10);
+    ctx.lineTo(x + w * 0.26, y + h * 0.90);
+    ctx.stroke();
     ctx.beginPath();
-    ctx.arc(bx, by, br, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.arc(x + w * 0.42, y + h * 0.32, h * 0.20, -Math.PI * 0.55, Math.PI * 0.55);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.40, y + h * 0.68, h * 0.22, -Math.PI * 0.5, Math.PI * 0.55);
+    ctx.stroke();
+  },
+  C(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.arc(x + w * 0.54, y + h * 0.50, h * 0.36, 0.65, Math.PI * 2 - 0.65);
+    ctx.stroke();
+  },
+  D(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.26, y + h * 0.10);
+    ctx.lineTo(x + w * 0.26, y + h * 0.90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.40, y + h * 0.50, h * 0.36, -Math.PI * 0.5, Math.PI * 0.5);
+    ctx.stroke();
+  },
+  E(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.28, y + h * 0.12);
+    ctx.lineTo(x + w * 0.28, y + h * 0.88);
+    ctx.moveTo(x + w * 0.24, y + h * 0.14);
+    ctx.lineTo(x + w * 0.78, y + h * 0.14);
+    ctx.moveTo(x + w * 0.24, y + h * 0.50);
+    ctx.lineTo(x + w * 0.68, y + h * 0.50);
+    ctx.moveTo(x + w * 0.24, y + h * 0.86);
+    ctx.lineTo(x + w * 0.78, y + h * 0.86);
+    ctx.stroke();
+  },
+  F(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.30, y + h * 0.12);
+    ctx.lineTo(x + w * 0.30, y + h * 0.90);
+    ctx.moveTo(x + w * 0.26, y + h * 0.14);
+    ctx.lineTo(x + w * 0.80, y + h * 0.14);
+    ctx.moveTo(x + w * 0.26, y + h * 0.50);
+    ctx.lineTo(x + w * 0.70, y + h * 0.50);
+    ctx.stroke();
+  },
+  G(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.arc(x + w * 0.52, y + h * 0.50, h * 0.36, 0.45, Math.PI * 2 - 0.35);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.52, y + h * 0.50);
+    ctx.lineTo(x + w * 0.82, y + h * 0.50);
+    ctx.lineTo(x + w * 0.82, y + h * 0.72);
+    ctx.stroke();
+  },
+  H(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.24, y + h * 0.10);
+    ctx.lineTo(x + w * 0.24, y + h * 0.90);
+    ctx.moveTo(x + w * 0.76, y + h * 0.10);
+    ctx.lineTo(x + w * 0.76, y + h * 0.90);
+    ctx.moveTo(x + w * 0.24, y + h * 0.50);
+    ctx.lineTo(x + w * 0.76, y + h * 0.50);
+    ctx.stroke();
+  },
+  I(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.50, y + h * 0.10);
+    ctx.lineTo(x + w * 0.50, y + h * 0.90);
+    ctx.stroke();
+  },
+  K(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.28, y + h * 0.10);
+    ctx.lineTo(x + w * 0.28, y + h * 0.90);
+    ctx.moveTo(x + w * 0.78, y + h * 0.12);
+    ctx.quadraticCurveTo(x + w * 0.40, y + h * 0.42, x + w * 0.34, y + h * 0.48);
+    ctx.quadraticCurveTo(x + w * 0.46, y + h * 0.58, x + w * 0.82, y + h * 0.90);
+    ctx.stroke();
+  },
+  L(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.30, y + h * 0.10);
+    ctx.lineTo(x + w * 0.30, y + h * 0.82);
+    ctx.lineTo(x + w * 0.82, y + h * 0.82);
+    ctx.stroke();
+  },
+  M(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.12, y + h * 0.90);
+    ctx.lineTo(x + w * 0.12, y + h * 0.12);
+    ctx.lineTo(x + w * 0.50, y + h * 0.58);
+    ctx.lineTo(x + w * 0.88, y + h * 0.12);
+    ctx.lineTo(x + w * 0.88, y + h * 0.90);
+    ctx.stroke();
+  },
+  N(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.20, y + h * 0.90);
+    ctx.lineTo(x + w * 0.20, y + h * 0.12);
+    ctx.lineTo(x + w * 0.80, y + h * 0.88);
+    ctx.lineTo(x + w * 0.80, y + h * 0.10);
+    ctx.stroke();
+  },
+  O(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.50, y + h * 0.50, w * 0.32, h * 0.36, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  },
+  P(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.28, y + h * 0.10);
+    ctx.lineTo(x + w * 0.28, y + h * 0.90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.46, y + h * 0.34, h * 0.22, -Math.PI * 0.55, Math.PI * 0.6);
+    ctx.stroke();
+  },
+  R(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.26, y + h * 0.10);
+    ctx.lineTo(x + w * 0.26, y + h * 0.90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.44, y + h * 0.32, h * 0.20, -Math.PI * 0.55, Math.PI * 0.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.42, y + h * 0.52);
+    ctx.lineTo(x + w * 0.82, y + h * 0.90);
+    ctx.stroke();
+  },
+  S(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.78, y + h * 0.22);
+    ctx.bezierCurveTo(x + w * 0.70, y + h * 0.02, x + w * 0.18, y + h * 0.08, x + w * 0.22, y + h * 0.36);
+    ctx.bezierCurveTo(x + w * 0.26, y + h * 0.58, x + w * 0.78, y + h * 0.48, x + w * 0.74, y + h * 0.70);
+    ctx.bezierCurveTo(x + w * 0.70, y + h * 0.98, x + w * 0.16, y + h * 0.90, x + w * 0.20, y + h * 0.74);
+    ctx.stroke();
+  },
+  T(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.12, y + h * 0.16);
+    ctx.lineTo(x + w * 0.88, y + h * 0.16);
+    ctx.moveTo(x + w * 0.50, y + h * 0.14);
+    ctx.lineTo(x + w * 0.50, y + h * 0.90);
+    ctx.stroke();
+  },
+  U(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.22, y + h * 0.12);
+    ctx.lineTo(x + w * 0.22, y + h * 0.58);
+    ctx.quadraticCurveTo(x + w * 0.22, y + h * 0.92, x + w * 0.50, y + h * 0.90);
+    ctx.quadraticCurveTo(x + w * 0.78, y + h * 0.88, x + w * 0.78, y + h * 0.58);
+    ctx.lineTo(x + w * 0.78, y + h * 0.12);
+    ctx.stroke();
+  },
+  W(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.10, y + h * 0.12);
+    ctx.lineTo(x + w * 0.28, y + h * 0.90);
+    ctx.lineTo(x + w * 0.50, y + h * 0.40);
+    ctx.lineTo(x + w * 0.72, y + h * 0.90);
+    ctx.lineTo(x + w * 0.90, y + h * 0.12);
+    ctx.stroke();
+  },
+};
+
+function grafMeasure(word, h) {
+  let x = 0;
+  for (let i = 0; i < word.length; i++) {
+    const gw = h * (GLYPH_W[word[i]] || 0.75);
+    x += gw;
+    if (i < word.length - 1) x -= h * 0.06;
   }
-  ctx.restore();
+  return x;
 }
 
-function grafTagCluster(ctx, w, h, rnd) {
-  const words = [
-    { t: 'CARGO', x: 0.30, y: 0.34, s: 0.2, rot: -0.18, c: GRAF_OX },
-    { t: 'BERTH', x: 0.62, y: 0.48, s: 0.16, rot: 0.12, c: GRAF_CHALK },
-    { t: 'SALT', x: 0.40, y: 0.68, s: 0.14, rot: -0.08, c: GRAF_GOLD },
-  ];
-  for (const word of words) {
-    ctx.save();
-    ctx.translate(w * word.x, h * word.y);
-    ctx.rotate(word.rot);
-    grafFillText(ctx, word.t, 0, 0, h * word.s, word.c);
-    ctx.restore();
-    grafSpray(ctx, w * word.x, h * word.y, w * 0.18, word.c, 10, rnd);
-  }
-  for (let i = 0; i < 6; i++) {
-    grafDrip(ctx, w * (0.18 + i * 0.12), h * (0.42 + (i % 3) * 0.08), h * (0.18 + rnd() * 0.2), 2 + (i % 3), i % 2 ? GRAF_OX : GRAF_INK, rnd);
+function grafDrawWord(ctx, word, x, y, h) {
+  let cursor = x;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i];
+    const draw = GLYPH[ch];
+    const gw = h * (GLYPH_W[ch] || 0.75);
+    if (draw) {
+      ctx.save();
+      const cx = cursor + gw * 0.5;
+      const cy = y + h * 0.5;
+      ctx.translate(cx, cy);
+      ctx.rotate(((i % 3) - 1) * 0.03);
+      ctx.translate(-cx, -cy);
+      draw(ctx, cursor, y + Math.sin(i * 1.6) * h * 0.012, gw, h);
+      ctx.restore();
+    }
+    cursor += gw - h * 0.06;
   }
 }
 
-function grafLowTide(ctx, w, h, rnd) {
-  grafFillText(ctx, 'LOW TIDE', w * 0.5, h * 0.34, h * 0.15, GRAF_INK);
+function grafPaintThrow(ctx, word, x, y, h, style, alpha, rot) {
+  const width = grafMeasure(word, h);
+  const pad = Math.ceil(h * 0.55);
+  const offW = Math.ceil(width + pad * 2);
+  const offH = Math.ceil(h * 1.9);
+  const base = document.createElement('canvas');
+  base.width = offW;
+  base.height = offH;
+  const fill = document.createElement('canvas');
+  fill.width = offW;
+  fill.height = offH;
+  const ox = pad * 0.7;
+  const oy = h * 0.18;
+  const fillW = h * 0.33;
+  const outlineW = fillW + h * 0.15;
+  const keyW = outlineW + h * (style.key ? 0.09 : 0.0);
+
+  function strokeLayer(g, lineW, color, dx, dy) {
+    g.save();
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.lineWidth = lineW;
+    g.strokeStyle = color;
+    g.translate(dx, dy);
+    grafDrawWord(g, word, ox, oy, h);
+    g.restore();
+  }
+
+  const bg = base.getContext('2d');
+  strokeLayer(bg, keyW, style.shadow, h * 0.065, h * 0.085);
+  if (style.key) strokeLayer(bg, keyW, style.key, 0, 0);
+  strokeLayer(bg, outlineW, style.outline, 0, 0);
+
+  const fg = fill.getContext('2d');
+  strokeLayer(fg, fillW, '#ffffff', 0, 0);
+  fg.save();
+  fg.globalCompositeOperation = 'source-atop';
+  const grad = fg.createLinearGradient(0, oy, 0, oy + h);
+  grad.addColorStop(0, style.top);
+  grad.addColorStop(0.45, style.mid);
+  grad.addColorStop(1, style.bot);
+  fg.fillStyle = grad;
+  fg.fillRect(0, 0, offW, offH);
+  if (style.dots) {
+    const rnd = grafRng(word.length * 17 + Math.floor(h));
+    fg.fillStyle = style.dots;
+    for (let i = 0; i < 70; i++) {
+      const px = ox + rnd() * width;
+      const py = oy + rnd() * h * 0.85;
+      fg.beginPath();
+      fg.arc(px, py, h * (0.012 + rnd() * 0.02), 0, Math.PI * 2);
+      fg.fill();
+    }
+  }
+  fg.globalAlpha = 0.42;
+  fg.strokeStyle = 'rgba(255,255,255,0.9)';
+  fg.lineWidth = fillW * 0.28;
+  fg.lineCap = 'round';
+  fg.lineJoin = 'round';
+  fg.beginPath();
+  fg.rect(0, 0, offW, oy + h * 0.42);
+  fg.clip();
+  grafDrawWord(fg, word, ox, oy, h);
+  fg.restore();
+
+  fg.strokeStyle = style.drip;
+  fg.fillStyle = style.drip;
+  fg.lineCap = 'round';
+  const rnd = grafRng(4000 + word.charCodeAt(0) * 13 + Math.floor(x));
+  const drips = style.ghost ? 2 : 4;
+  for (let i = 0; i < drips; i++) {
+    const px = ox + (0.15 + 0.7 * (i + rnd()) / drips) * width;
+    const len = h * (0.18 + rnd() * 0.42);
+    fg.globalAlpha = 0.75;
+    fg.lineWidth = h * (0.018 + rnd() * 0.02);
+    fg.beginPath();
+    fg.moveTo(px, oy + h * 0.78);
+    fg.lineTo(px + (rnd() - 0.5) * h * 0.06, oy + h * 0.78 + len);
+    fg.stroke();
+    fg.beginPath();
+    fg.arc(px, oy + h * 0.78 + len, h * 0.02, 0, Math.PI * 2);
+    fg.fill();
+  }
+
   ctx.save();
-  ctx.strokeStyle = GRAF_INK;
-  ctx.fillStyle = GRAF_INK;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.18, h * 0.58);
-  ctx.lineTo(w * 0.82, h * 0.58);
-  ctx.stroke();
-  for (let i = 0; i < 6; i++) {
-    const x = w * (0.22 + i * 0.1);
-    const tick = i === 4 ? h * 0.12 : h * 0.06;
-    ctx.fillRect(x, h * 0.58 - tick, 3, tick);
-  }
-  ctx.restore();
-  grafDrip(ctx, w * 0.22, h * 0.58, h * 0.24, 2.6, GRAF_INK, rnd);
-  grafDrip(ctx, w * 0.7, h * 0.42, h * 0.3, 2.2, GRAF_INK, rnd);
-  grafSpray(ctx, w * 0.5, h * 0.4, w * 0.3, 'rgba(14,15,18,0.35)', 12, rnd);
-}
-
-function grafRunningRat(ctx, w, h, rnd) {
-  for (let i = 0; i < 4; i++) {
-    grafDrip(ctx, w * (0.2 + i * 0.18), 4, h * (0.2 + rnd() * 0.25), 2.5, GRAF_OX, rnd);
-  }
-  ctx.save();
-  ctx.translate(w * 0.06, h * 0.42);
-  ctx.scale(w / 256, h / 256);
-  ctx.fillStyle = GRAF_INK;
-  ctx.beginPath();
-  ctx.ellipse(120, 70, 58, 24, -0.15, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(186, 58, 22, 16, 0.3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(178, 40, 8, 10, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(62, 74);
-  ctx.quadraticCurveTo(16, 96, 28, 40);
-  ctx.quadraticCurveTo(48, 70, 74, 78);
-  ctx.fill();
-  ctx.fillRect(86, 86, 8, 28);
-  ctx.fillRect(112, 88, 8, 30);
-  ctx.fillRect(146, 84, 8, 26);
-  ctx.restore();
-  grafSpray(ctx, w * 0.55, h * 0.68, w * 0.3, 'rgba(14,15,18,0.4)', 14, rnd);
-}
-
-function grafPaintCell(ctx, col, row, span, draw, heavy) {
-  const x = col * GRAF_CELL;
-  const y = row * GRAF_CELL;
-  const w = span * GRAF_CELL;
-  const h = GRAF_CELL;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
+  ctx.globalAlpha = alpha;
   ctx.translate(x, y);
-  const rnd = grafRng(4100 + col * 19 + row * 97 + span * 13);
-  draw(ctx, w, h, rnd);
-  grafWeather(ctx, w, h, grafRng(9000 + col * 5 + row * 41), !!heavy);
+  ctx.rotate(rot || 0);
+  ctx.drawImage(base, 0, 0);
+  ctx.drawImage(fill, 0, 0);
   ctx.restore();
 }
 
-// Row 0 — water face (orbit): big stencils and one throw-up.
-grafPaintCell(grafCtx, 0, 0, 1, grafRatUpright);
-grafPaintCell(grafCtx, 1, 0, 2, grafThrowDock, true);
-grafPaintCell(grafCtx, 3, 0, 1, grafFigureBalloons);
-grafPaintCell(grafCtx, 4, 0, 2, grafExitBySea);
-grafPaintCell(grafCtx, 6, 0, 1, grafRunningRat);
-grafPaintCell(grafCtx, 7, 0, 1, grafPaidInSalt);
-// Row 1 — promenade face (walk): tags at eye height, more layering.
-grafPaintCell(grafCtx, 0, 1, 2, grafTagCluster, true);
-grafPaintCell(grafCtx, 2, 1, 1, grafNoWake);
-grafPaintCell(grafCtx, 3, 1, 1, grafRatCrate);
-grafPaintCell(grafCtx, 4, 1, 1, grafBalloonsRing);
-grafPaintCell(grafCtx, 5, 1, 2, grafThrowDock, true);
-grafPaintCell(grafCtx, 7, 1, 1, grafLowTide);
+const GRAF_CHROME = {
+  top: '#f4f7fa', mid: '#b7c2cc', bot: '#e3eaef',
+  outline: '#14171c', key: '#f7fafc', shadow: '#0c0e12',
+  drip: '#9aa6b0',
+};
+const GRAF_TEAL = {
+  top: '#d5ebe4', mid: '#6e9e98', bot: '#c4ddd6',
+  outline: '#101416', key: '#e7f3ef', shadow: '#0c1212',
+  drip: '#5e8e88', dots: 'rgba(18, 42, 40, 0.45)',
+};
+const GRAF_OX = {
+  top: '#e7c2b8', mid: '#a85a52', bot: '#d7a096',
+  outline: '#1a1212', key: '#f3e6e2', shadow: '#120c0c',
+  drip: '#8a4540',
+};
+const GRAF_SILVER = {
+  top: '#eef2f4', mid: '#aeb6be', bot: '#d5dbe0',
+  outline: '#1a1c20', key: '#ffffff', shadow: '#101216',
+  drip: '#8b939c',
+};
+const GRAF_GHOST = {
+  top: '#d5dbe2', mid: '#9aa3ad', bot: '#c5ccd4',
+  outline: '#2a3038', key: null, shadow: '#1a1e24',
+  drip: '#8a929c', ghost: true,
+};
+
+function grafRustRow(ctx, y0, rowH, seed) {
+  const rnd = grafRng(seed);
+  for (let i = 0; i < 22; i++) {
+    const x = rnd() * GRAF_W;
+    const y = y0 + rowH * (0.35 + rnd() * 0.6);
+    const rad = 16 + rnd() * 54;
+    const g = ctx.createRadialGradient(x, y, 2, x, y, rad);
+    g.addColorStop(0, 'rgba(122, 68, 40, 0.42)');
+    g.addColorStop(1, 'rgba(122, 68, 40, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(x, y, rad * (0.7 + rnd() * 0.8), rad * 0.4, rnd() * 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function grafWearRow(ctx, y0, rowH, seed) {
+  const rnd = grafRng(seed);
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 110; i++) {
+    ctx.globalAlpha = 0.18 + rnd() * 0.55;
+    const x = rnd() * GRAF_W;
+    const y = y0 + rnd() * rowH;
+    ctx.fillRect(x, y, 16 + rnd() * 160, 1 + rnd() * 2.4);
+  }
+  for (let i = 0; i < 10; i++) {
+    ctx.globalAlpha = 0.28 + rnd() * 0.4;
+    ctx.fillRect(rnd() * GRAF_W, y0 + rnd() * rowH, 24 + rnd() * 90, 6 + rnd() * 16);
+  }
+  ctx.restore();
+}
+
+function grafRow(ctx, row, pieces) {
+  const rowH = GRAF_H / 2;
+  const y0 = row * rowH;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, y0, GRAF_W, rowH);
+  ctx.clip();
+  grafRustRow(ctx, y0, rowH, 1200 + row * 77);
+  const baseY = y0 + rowH * 0.08;
+  for (const p of pieces) {
+    const h = rowH * p.h;
+    const px = p.x * GRAF_W;
+    const py = baseY + (p.y || 0) * rowH;
+    grafPaintThrow(ctx, p.word, px, py, h, p.style, p.alpha, p.rot || 0);
+  }
+  grafWearRow(ctx, y0, rowH, 4400 + row * 19);
+  ctx.restore();
+}
+
+// Water face — long horizontal band, chrome and muted fills, ghosts underneath.
+grafRow(grafCtx, 0, [
+  { word: 'SLIP', x: 0.02, h: 0.46, y: 0.16, style: GRAF_GHOST, alpha: 0.34, rot: -0.04 },
+  { word: 'KEEL', x: 0.08, h: 0.62, y: 0.06, style: GRAF_CHROME, alpha: 0.96, rot: -0.02 },
+  { word: 'SPAR', x: 0.28, h: 0.40, y: 0.22, style: GRAF_GHOST, alpha: 0.30, rot: 0.05 },
+  { word: 'BRINE', x: 0.30, h: 0.60, y: 0.08, style: GRAF_TEAL, alpha: 0.95, rot: 0.015 },
+  { word: 'CASK', x: 0.50, h: 0.38, y: 0.26, style: GRAF_GHOST, alpha: 0.28, rot: -0.03 },
+  { word: 'HULL', x: 0.52, h: 0.62, y: 0.05, style: GRAF_OX, alpha: 0.96, rot: -0.01 },
+  { word: 'MOOR', x: 0.72, h: 0.58, y: 0.10, style: GRAF_SILVER, alpha: 0.94, rot: 0.02 },
+  { word: 'REEF', x: 0.86, h: 0.42, y: 0.20, style: GRAF_GHOST, alpha: 0.36, rot: 0.04 },
+]);
+// Promenade face — same freight language, different original tags.
+grafRow(grafCtx, 1, [
+  { word: 'WAKE', x: 0.03, h: 0.60, y: 0.08, style: GRAF_CHROME, alpha: 0.96, rot: 0.02 },
+  { word: 'SALT', x: 0.20, h: 0.40, y: 0.24, style: GRAF_GHOST, alpha: 0.32, rot: -0.04 },
+  { word: 'BERTH', x: 0.22, h: 0.58, y: 0.06, style: GRAF_OX, alpha: 0.95, rot: -0.015 },
+  { word: 'CORD', x: 0.46, h: 0.36, y: 0.28, style: GRAF_GHOST, alpha: 0.30, rot: 0.03 },
+  { word: 'REEF', x: 0.48, h: 0.60, y: 0.07, style: GRAF_TEAL, alpha: 0.95, rot: 0.01 },
+  { word: 'BILGE', x: 0.68, h: 0.56, y: 0.10, style: GRAF_SILVER, alpha: 0.94, rot: -0.02 },
+  { word: 'KEEL', x: 0.86, h: 0.40, y: 0.22, style: GRAF_GHOST, alpha: 0.33, rot: 0.04 },
+]);
 
 const grafTex = new THREE.CanvasTexture(grafCanvas);
 grafTex.colorSpace = THREE.SRGBColorSpace;
-grafTex.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+grafTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+grafTex.wrapS = THREE.ClampToEdgeWrapping;
+grafTex.wrapT = THREE.ClampToEdgeWrapping;
 grafTex.needsUpdate = true;
 const grafMat = new THREE.MeshStandardMaterial({
   map: grafTex,
   transparent: true,
-  alphaTest: 0.04,
-  roughness: 0.62,
-  metalness: 0.03,
-  emissive: 0xc5ccd4,
+  alphaTest: 0.05,
+  roughness: 0.48,
+  metalness: 0.16,
+  emissive: new THREE.Color(0xd5dde4),
   emissiveMap: grafTex,
-  emissiveIntensity: 0.16,
+  emissiveIntensity: 0.22,
   depthWrite: false,
   polygonOffset: true,
   polygonOffsetFactor: -2,
   polygonOffsetUnits: -2,
 });
 
-function grafAddPanel(col, row, span, x, y, z, rotY, worldH) {
-  const hWorld = worldH || 0.62;
-  const worldW = hWorld * span;
-  const geo = new THREE.PlaneGeometry(worldW, hWorld);
+function grafBandMesh(row, y, z, rotY) {
+  const rowAspect = (GRAF_H * 0.5) / GRAF_W;
+  const width = 19.6;
+  const height = width * rowAspect;
+  const geo = new THREE.PlaneGeometry(width, height);
   const uv = geo.attributes.uv;
-  const u0 = col / GRAF_COLS;
-  const u1 = (col + span) / GRAF_COLS;
-  const vTop = 1 - row / GRAF_ROWS;
-  const vBot = 1 - (row + 1) / GRAF_ROWS;
+  const vBase = row === 0 ? 0.5 : 0.0;
   for (let i = 0; i < uv.count; i++) {
-    uv.setXY(i, u0 + uv.getX(i) * (u1 - u0), vBot + uv.getY(i) * (vTop - vBot));
+    // Flip U so throw-ups read left-to-right from each face.
+    uv.setXY(i, 1 - uv.getX(i), vBase + uv.getY(i) * 0.5);
   }
   uv.needsUpdate = true;
   const mesh = new THREE.Mesh(geo, grafMat);
-  mesh.position.set(x, y, z);
+  mesh.position.set(0, y, z);
   mesh.rotation.y = rotY;
   mesh.renderOrder = 2;
-  seawallGraffiti.add(mesh);
+  mesh.name = row === 0 ? 'seawall-graffiti-water' : 'seawall-graffiti-promenade';
+  return mesh;
 }
 
 const seawallGraffiti = new THREE.Group();
 seawallGraffiti.name = 'seawall-graffiti';
+const grafMidY = (faceBottom + faceTop) * 0.5 + 0.04;
+seawallGraffiti.add(grafBandMesh(0, grafMidY, SEAWALL_Z + 0.11 + 0.02, 0));
+seawallGraffiti.add(grafBandMesh(1, grafMidY, SEAWALL_Z - 0.11 - 0.02, Math.PI));
 scene.add(seawallGraffiti);
-const grafWaterZ = SEAWALL_Z + 0.11 + 0.02;
-const grafPromZ = SEAWALL_Z - 0.11 - 0.02;
-const grafWaterY = 0.38;
-const grafPromY = 0.44;
-const grafWaterH = 0.70;
-const grafPromH = 0.60;
-// Water face — parapet height so stencils read from the basin orbit.
-grafAddPanel(3, 0, 1, -9.2, grafWaterY, grafWaterZ, 0, grafWaterH);
-grafAddPanel(0, 0, 1, -6.6, grafWaterY, grafWaterZ, 0, grafWaterH);
-grafAddPanel(1, 0, 2, -4.0, grafWaterY, grafWaterZ, 0, grafWaterH);
-grafAddPanel(3, 0, 1, -1.5, grafWaterY, grafWaterZ, 0, grafWaterH);
-grafAddPanel(4, 0, 2, 1.2, grafWaterY, grafWaterZ, 0, grafWaterH);
-grafAddPanel(6, 0, 1, 3.8, grafWaterY, grafWaterZ, 0, grafWaterH);
-grafAddPanel(7, 0, 1, 6.0, grafWaterY, grafWaterZ, 0, grafWaterH);
-grafAddPanel(0, 0, 1, 8.4, grafWaterY, grafWaterZ, 0, grafWaterH);
-// Promenade face — walkers meet tags and stencils just under eye height.
-grafAddPanel(0, 1, 2, -8.0, grafPromY, grafPromZ, Math.PI, grafPromH);
-grafAddPanel(2, 1, 1, -5.2, grafPromY, grafPromZ, Math.PI, grafPromH);
-grafAddPanel(3, 1, 1, -3.0, grafPromY, grafPromZ, Math.PI, grafPromH);
-grafAddPanel(4, 1, 1, -0.6, grafPromY, grafPromZ, Math.PI, grafPromH);
-grafAddPanel(5, 1, 2, 2.2, grafPromY, grafPromZ, Math.PI, grafPromH);
-grafAddPanel(7, 1, 1, 5.0, grafPromY, grafPromZ, Math.PI, grafPromH);
-grafAddPanel(2, 1, 1, 7.4, grafPromY, grafPromZ, Math.PI, grafPromH);
-grafAddPanel(4, 1, 1, 9.2, grafPromY, grafPromZ, Math.PI, grafPromH);
+window.__harborGraffiti = seawallGraffiti;
+window.__grafCanvas = grafCanvas;
+
 
 // Debug probe (harbor water/seawall layout)
 window.__harborWater = water;
@@ -3172,6 +3676,7 @@ function physBeginGrab(e) {
   physDragPlane.constant = -worldHit.y;
   physGrab = { entry, localOffset, planeY: worldHit.y };
   physSelected = entry;
+  window.__physGrabbed = { kind: entry.kind, shard: !!entry.shard, mass: entry.mass };
   entry.body.wakeUp();
   entry.body.angularVelocity.scale(0.4, entry.body.angularVelocity);
   return true;
@@ -3207,6 +3712,7 @@ function physEndGrab() {
     );
   }
   physGrab = null;
+  window.__physGrabbed = null;
   if (!walkMode && !tourMode) controls.enabled = true;
 }
 
@@ -3315,7 +3821,7 @@ function physSetConstraint(on) {
 // Crate density = mass / volume (~5.1 light cork … ~14.3 dense). The old water
 // density of 9 lost to the two heaviest crates, so they sat on the basin floor.
 // Water stays denser than every tossable crate. Plate latch still sums mass
-// (RUBE_MASS_THRESHOLD ≈ 2.5), never draft.
+// (RUBE_MASS_THRESHOLD 1.75, resting contact), never draft.
 function harborCrateDensity(def) {
   const [sx, sy, sz] = def.size;
   return def.mass / Math.max(sx * sy * sz, 1e-4);
@@ -4473,7 +4979,10 @@ physHooks.onProbe = () => {
 // Chain on quay: crate → pressure plate → hinged lantern tip → Signal pulse + pier gate.
 // Night-concrete / fenestra taste. Uses existing crates / constraint / wind / springs / buoyancy.
 // Shatter fires last when the gate finishes opening (debris-swap the fenestra vessel).
-const RUBE_MASS_THRESHOLD = 2.5; // Harbor crate masses ~0.45–2.2; one dense or mid+light
+// Two ordinary crates (mid 1.1 + light 0.7 = 1.8) or one dense (2.2).
+// Resting contact on the gold pad, not the old 2.5 center-in-box test.
+const RUBE_MASS_THRESHOLD = 1.75;
+const RUBE_LATCH_HOLD_MS = 280;
 // Promenade deck plane is y=0.04. Pad sits fully above it, on open deck
 // left of Signal (x=-6.5) and clear of crate spawns.
 const RUBE_DECK_Y = 0.04;
@@ -4484,7 +4993,10 @@ const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
 const rubeState = {
   stage: 'idle', // idle | plate | lantern | gate | done
   plateMass: 0,
+  plateResting: 0,
   platePressed: false,
+  plateHoldSince: 0,
+  plateBelowSince: 0,
   plateLatched: false,
   lanternFiredAt: 0,
   gateOpen: false,
@@ -4684,19 +5196,92 @@ rubeVesselMesh.add(
 );
 const rubeDebris = []; // { mesh, body }
 
+const rubeHeScratch = { x: 0, y: 0, z: 0 };
+const rubePtScratch = { x: 0, y: 0, z: 0 };
+
+function rubeWorldHe(entry) {
+  const he = entry.halfExtents || { x: 0.25, y: 0.25, z: 0.25 };
+  const q = entry.body.quaternion;
+  const x = q.x, y = q.y, z = q.z, w = q.w;
+  const r00 = 1 - 2 * (y * y + z * z);
+  const r01 = 2 * (x * y - z * w);
+  const r02 = 2 * (x * z + y * w);
+  const r10 = 2 * (x * y + z * w);
+  const r11 = 1 - 2 * (x * x + z * z);
+  const r12 = 2 * (y * z - x * w);
+  const r20 = 2 * (x * z - y * w);
+  const r21 = 2 * (y * z + x * w);
+  const r22 = 1 - 2 * (x * x + y * y);
+  rubeHeScratch.x = Math.abs(r00) * he.x + Math.abs(r01) * he.y + Math.abs(r02) * he.z;
+  rubeHeScratch.y = Math.abs(r10) * he.x + Math.abs(r11) * he.y + Math.abs(r12) * he.z;
+  rubeHeScratch.z = Math.abs(r20) * he.x + Math.abs(r21) * he.y + Math.abs(r22) * he.z;
+  return rubeHeScratch;
+}
+
+function rubeOverlapsPlate(entry) {
+  const he = rubeWorldHe(entry);
+  const hx = he.x;
+  const hz = he.z;
+  const p = entry.body.position;
+  const overlapW = (RUBE_PLATE.w * 0.5 + hx) - Math.abs(p.x - RUBE_PLATE.x);
+  const overlapD = (RUBE_PLATE.d * 0.5 + hz) - Math.abs(p.z - RUBE_PLATE.z);
+  if (overlapW <= 0.04 || overlapD <= 0.04) return false;
+  const foot = Math.max(hx * 2 * hz * 2, 1e-4);
+  const area = Math.min(overlapW, hx * 2) * Math.min(overlapD, hz * 2);
+  return area / foot >= 0.28;
+}
+
+function rubeContactOnPlate(contact) {
+  rubePtScratch.x = contact.bi.position.x + contact.ri.x;
+  rubePtScratch.z = contact.bi.position.z + contact.ri.z;
+  return Math.abs(rubePtScratch.x - RUBE_PLATE.x) <= RUBE_PLATE.w * 0.5
+    && Math.abs(rubePtScratch.z - RUBE_PLATE.z) <= RUBE_PLATE.d * 0.5;
+}
+
+// Resting weight only. A grab (physGrab) lifts that crate off the sum.
+// physSelected is the last raycast hit and must not add or remove plate mass.
 function rubeSamplePlateMass() {
-  let sum = 0;
-  const halfW = RUBE_PLATE.w * 0.5;
-  const halfD = RUBE_PLATE.d * 0.5;
+  const held = physGrab && physGrab.entry;
+  const crateByBody = new Map();
   for (const entry of physCrates) {
-    if (physSelected === entry) continue; // grabbed mass waits until released
-    const p = entry.body.position;
-    const he = entry.halfExtents || new CANNON.Vec3(0.25, 0.25, 0.25);
-    const overlapX = Math.abs(p.x - RUBE_PLATE.x) < halfW + he.x;
-    const overlapZ = Math.abs(p.z - RUBE_PLATE.z) < halfD + he.z;
-    const onDeck = p.y - he.y < 1.4;
-    if (overlapX && overlapZ && onDeck) sum += entry.mass;
+    if (!entry || !(entry.mass > 0) || !entry.body) continue;
+    if (entry === held) continue;
+    crateByBody.set(entry.body, entry);
   }
+  const supported = new Set();
+  const contacts = physWorld.contacts;
+  for (let pass = 0; pass < 3; pass++) {
+    for (let i = 0; i < contacts.length; i++) {
+      const c = contacts[i];
+      let crate = null;
+      let crateIsI = false;
+      if (crateByBody.has(c.bi)) {
+        crate = crateByBody.get(c.bi);
+        crateIsI = true;
+      } else if (crateByBody.has(c.bj)) {
+        crate = crateByBody.get(c.bj);
+      } else {
+        continue;
+      }
+      if (supported.has(crate)) continue;
+      // ni sign depends on which body is i. A support contact sits under the
+      // crate and is mostly vertical — not a side bump against the quay.
+      rubePtScratch.y = c.bi.position.y + c.ri.y;
+      if (rubePtScratch.y > crate.body.position.y - 0.02) continue;
+      if (Math.abs(c.ni.y) < 0.45) continue;
+      if (!rubeContactOnPlate(c)) continue;
+      const other = crateIsI ? c.bj : c.bi;
+      const onDeck = other === quayDeckBody;
+      const under = crateByBody.get(other);
+      const onStack = !!(under && supported.has(under));
+      if (!onDeck && !onStack) continue;
+      if (!rubeOverlapsPlate(crate)) continue;
+      supported.add(crate);
+    }
+  }
+  let sum = 0;
+  for (const entry of supported) sum += entry.mass;
+  rubeState.plateResting = supported.size;
   return sum;
 }
 
@@ -4754,19 +5339,22 @@ function rubeShatter() {
       emissive: palette[i % palette.length],
       emissiveIntensity: 0.08,
     });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s * (0.6 + Math.random()), s), mat);
+    const sy = s * (0.65 + Math.random() * 0.55);
+    const sz = s * (0.75 + Math.random() * 0.45);
+    const mass = 0.16 + Math.random() * 0.22;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, sy, sz), mat);
     if (i % 3 === 0) mesh.layers.enable(BLOOM_LAYER);
     const body = new CANNON.Body({
-      mass: physFreeze ? 0 : 0.08 + Math.random() * 0.12,
+      mass: physFreeze ? 0 : mass,
       material: physCrateMat,
-      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, s * 0.4, s * 0.5)),
+      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5)),
       position: new CANNON.Vec3(
         origin.x + (Math.random() - 0.5) * 0.2,
         origin.y + (Math.random() - 0.3) * 0.2,
         origin.z + (Math.random() - 0.5) * 0.2
       ),
-      linearDamping: 0.12,
-      angularDamping: 0.16,
+      linearDamping: 0.14,
+      angularDamping: 0.2,
       allowSleep: true,
     });
     if (!physFreeze) {
@@ -4781,20 +5369,36 @@ function rubeShatter() {
         (Math.random() - 0.5) * 8
       );
     }
-    physWorld.addBody(body);
-    scene.add(mesh);
-    mesh.position.copy(body.position);
-    rubeDebris.push({ mesh, body });
+    // Same entry as a quay crate: physEntry + physCrates so raycast grab/toss hits it.
+    const entry = physAdd(mesh, body, 'crate', mass);
+    entry.shard = true;
+    entry.halfExtents = new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5);
+    entry.volume = s * sy * sz;
+    entry.density = mass / Math.max(entry.volume, 1e-4);
+    entry.densityLabel = 'light';
+    entry.floatable = true;
+    physCrates.push(entry);
+    rubeDebris.push(entry);
   }
   rubeHint('Shatter · fenestra debris');
 }
 
 function rubeClearDebris() {
-  for (const d of rubeDebris) {
-    physWorld.removeBody(d.body);
-    scene.remove(d.mesh);
-    if (d.mesh.geometry) d.mesh.geometry.dispose();
-    if (d.mesh.material) d.mesh.material.dispose();
+  if (physGrab && physGrab.entry && physGrab.entry.shard) {
+    physGrab = null;
+    window.__physGrabbed = null;
+    if (!walkMode && !tourMode) controls.enabled = true;
+  }
+  if (physSelected && physSelected.shard) physSelected = null;
+  for (const entry of rubeDebris) {
+    physWorld.removeBody(entry.body);
+    scene.remove(entry.mesh);
+    const pi = physEntries.indexOf(entry);
+    if (pi >= 0) physEntries.splice(pi, 1);
+    const ci = physCrates.indexOf(entry);
+    if (ci >= 0) physCrates.splice(ci, 1);
+    if (entry.mesh.geometry) entry.mesh.geometry.dispose();
+    if (entry.mesh.material && entry.mesh.material.dispose) entry.mesh.material.dispose();
   }
   rubeDebris.length = 0;
 }
@@ -4802,7 +5406,10 @@ function rubeClearDebris() {
 function rubeReset() {
   rubeState.stage = 'idle';
   rubeState.plateMass = 0;
+  rubeState.plateResting = 0;
   rubeState.platePressed = false;
+  rubeState.plateHoldSince = 0;
+  rubeState.plateBelowSince = 0;
   rubeState.plateLatched = false;
   rubeState.lanternFiredAt = 0;
   rubeState.gateOpen = false;
@@ -4867,6 +5474,22 @@ function rubeTick() {
   rubeState.plateMass = rubeSamplePlateMass();
   const pressed = rubeState.plateMass >= RUBE_MASS_THRESHOLD - 1e-3;
   rubeState.platePressed = pressed;
+  const nowMs = performance.now();
+  if (rubeState.stage === 'idle') {
+    if (pressed) {
+      rubeState.plateBelowSince = 0;
+      if (!rubeState.plateHoldSince) rubeState.plateHoldSince = nowMs;
+    } else if (rubeState.plateHoldSince) {
+      // A one-frame contact gap must not wipe a crate that is still sitting there.
+      if (!rubeState.plateBelowSince) rubeState.plateBelowSince = nowMs;
+      if (nowMs - rubeState.plateBelowSince > 160) {
+        rubeState.plateHoldSince = 0;
+        rubeState.plateBelowSince = 0;
+      }
+    }
+  }
+  const heldLongEnough = rubeState.plateHoldSince
+    && nowMs - rubeState.plateHoldSince >= RUBE_LATCH_HOLD_MS;
   const t = Math.min(1, rubeState.plateMass / RUBE_MASS_THRESHOLD);
   const breathe = 0.5 + 0.5 * Math.sin(performance.now() * 0.00115);
   rubePlateMat.emissiveIntensity = 1.05 + breathe * 0.5 + t * 0.4;
@@ -4883,8 +5506,10 @@ function rubeTick() {
     rubePlateRing.scale.set(rs, rs, rs);
   }
 
-  // Stage machine — one-shot chain until Reset
-  if (rubeState.stage === 'idle' && pressed) {
+  // Stage machine — one-shot chain until Reset. Latch only after weight
+  // has been resting on the plate; grabbing a crate elsewhere does not press it.
+  // Once latched, the chain runs through to shatter even if a crate is lifted off.
+  if (rubeState.stage === 'idle' && pressed && heldLongEnough) {
     rubeState.stage = 'plate';
     rubeState.plateLatched = true;
     rubeFireLantern();
@@ -4931,6 +5556,7 @@ function rubeFillProbe() {
     ladder: { step4: 'rube', step5: 'shatter' },
     stage: rubeState.stage,
     plateMass: +rubeState.plateMass.toFixed(2),
+    plateResting: rubeState.plateResting,
     plate: {
       x: RUBE_PLATE.x,
       y: +rubePlateMesh.position.y.toFixed(3),
@@ -4945,6 +5571,7 @@ function rubeFillProbe() {
     },
     threshold: RUBE_MASS_THRESHOLD,
     platePressed: rubeState.platePressed,
+    plateHoldMs: rubeState.plateHoldSince ? Math.max(0, performance.now() - rubeState.plateHoldSince) : 0,
     plateLatched: rubeState.plateLatched,
     gateOpen: rubeState.gateOpen,
     gateY: +rubeState.gateY.toFixed(3),
@@ -4953,10 +5580,18 @@ function rubeFillProbe() {
     chain: 'crate → plate → lantern → Signal/gate → shatter',
   };
   window.__rube = probe;
+  window.__rubeShatter = rubeShatter;
   window.__shatter = {
     done: rubeState.shatterDone,
     debris: rubeDebris.length,
     vesselVisible: rubeVesselMesh.visible,
+    pickable: rubeDebris.filter((d) => d.kind === 'crate' && d.mass > 0 && d.mesh && d.mesh.userData.physEntry).length,
+    shards: rubeDebris.map((d) => ({
+      x: +d.body.position.x.toFixed(3),
+      y: +d.body.position.y.toFixed(3),
+      z: +d.body.position.z.toFixed(3),
+      mass: d.mass,
+    })),
   };
   if (window.__harborPhysics) {
     window.__harborPhysics.rube = probe;
@@ -5903,6 +6538,8 @@ function tick() {
   const pulse = freezeMotion ? 0.72 : 0.55 + 0.45 * Math.sin(t * 2.1);
 
   buildingMat.uniforms.uTime.value = t;
+  if (typeof swayStrandBulbs === 'function') swayStrandBulbs(t);
+  if (typeof updateTrafficSignals === 'function') updateTrafficSignals(t);
   asphaltMat.uniforms.uTime.value = t;
   quayMat.uniforms.uTime.value = t;
   waterMat.uniforms.uTime.value = t;
