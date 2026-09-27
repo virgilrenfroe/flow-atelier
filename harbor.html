@@ -1815,12 +1815,10 @@ const quayMat = new THREE.ShaderMaterial({
     void main(){
       vUv = uv;
       vec3 p = position;
-      float n = fbm(uv * 4.0 + uTime * 0.15);
-      p.z += n * uAmp;
-      p.z += sin(uv.x * 12.0 + uTime) * uAmp * 0.35;
-      vec2 d = uv - (uPointer * 0.5 + 0.5);
-      float rip = exp(-dot(d,d)*6.5) * uAmp * 2.2;
-      p.z += rip;
+      // Flat deck. A swell here (old ~10–20 cm) rose through the gold plate,
+      // whose rim sits only ~2 cm above y=0.04, and read as water on the quay.
+      float n = fbm(uv * 4.0);
+      p.z += (n - 0.5) * 0.003;
       vPos = p;
       vec4 wp = modelMatrix * vec4(p, 1.0);
       vWorldPos = wp.xyz;
@@ -1843,19 +1841,11 @@ const quayMat = new THREE.ShaderMaterial({
       stone *= 1.0 - seam * 0.18;
       float edge = smoothstep(0.025, 0.0, min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y)));
       stone = mix(stone, vec3(0.35, 0.3, 0.18), edge * 0.25);
-      float wash = fbm(vUv * 3.0 - uPointer * 0.2);
-      stone = mix(stone, vec3(0.54, 0.48, 0.72) * 0.38, wash * 0.32);
-      // Wet deck — kept dim so grazing camera + bloom never wash to white sheet
-      vec3 V = normalize(cameraPosition - vWorldPos);
-      float ndotv = max(dot(vec3(0.,1.,0.), V), 0.0);
-      float fres = pow(1.0 - ndotv, 3.0) * smoothstep(0.08, 0.35, ndotv); // kill edge-on blowout
-      float streak = pow(max(0.0, sin(vUv.x * 40.0 + fbm(vUv * 6.0) * 3.0 + uTime * 0.2)), 14.0);
-      streak *= smoothstep(0.2, 0.55, vUv.y);
-      vec3 wet = vec3(0.22, 0.28, 0.4) * streak * fres * 0.22;
-      float skyline = pow(max(0.0, sin(vUv.x * 22.0) * 0.5 + 0.5), 5.0);
-      skyline *= smoothstep(0.08, 0.3, vUv.y) * (1.0 - smoothstep(0.5, 0.9, vUv.y));
-      vec3 refl = vec3(0.35, 0.4, 0.55) * skyline * 0.08;
-      vec3 col = clamp(stone + wet + refl, 0.0, 0.35); // hard ceiling — asphalt, not floodlight
+      // Dry promenade. A static damp line only in the last strip against the
+      // seawall (uv.y 0 is the water edge). No animated wash across the plate.
+      float againstWall = 1.0 - smoothstep(0.0, 0.07, vUv.y);
+      stone = mix(stone, vec3(0.045, 0.055, 0.07), againstWall * 0.55);
+      vec3 col = clamp(stone, 0.0, 0.35);
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -1943,6 +1933,10 @@ const waterMat = new THREE.ShaderMaterial({
       if (nLocal.z < 0.0) nLocal = -nLocal;
 
       vec4 wp = modelMatrix * vec4(p, 1.0);
+      // Basin stays outboard of the seawall. Smaller Z is the promenade.
+      // Clamp so a crest cannot slide the surface onto the dry quay.
+      float clipZ = uWallZ + 0.20;
+      wp.z = max(wp.z, clipZ);
       vWorldPos = wp.xyz;
       vWorldN = normalize(mat3(modelMatrix) * nLocal);
       // Depth outboard of seawall (world +Z)
@@ -1982,6 +1976,9 @@ const waterMat = new THREE.ShaderMaterial({
     }
 
     void main(){
+      // Nothing landward of the seawall's water face — no sheet, no splash.
+      if (vWorldPos.z < uWallZ + 0.20) discard;
+      if (abs(vWorldPos.x) > 11.05) discard;
       vec3 N = normalize(vWorldN);
       float ampK = clamp(uAmp / 0.045, 0.0, 1.0);
       N = normalize(mix(vec3(0.0, 1.0, 0.0), N, ampK));
@@ -2014,7 +2011,9 @@ const waterMat = new THREE.ShaderMaterial({
       vec3 horizonCol = vec3(0.18, 0.20, 0.28);
       float upness = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
       vec3 reflCol = mix(horizonCol, skyCol, upness);
-      float quayBand = smoothstep(uWallZ + 0.8, uWallZ - 1.5, vWorldPos.z);
+      // edge0 must be < edge1 (GLSL smoothstep is undefined the other way).
+      float quayBand = smoothstep(uWallZ - 0.2, uWallZ + 1.6, vWorldPos.z);
+      quayBand = 1.0 - quayBand;
       reflCol = mix(reflCol, vec3(0.08, 0.07, 0.06), quayBand * 0.35 * uReflect);
       float streakA = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampA.x) * 0.55), 10.0);
       float streakB = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampB.x) * 0.55), 10.0);
@@ -2110,6 +2109,22 @@ scene.add(seawallWetCourse);
 const seawallCap = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W + 0.25, 0.1, 0.38), seawallCapMat);
 seawallCap.position.set(0, faceTop + 0.05, SEAWALL_Z + 0.04);
 scene.add(seawallCap);
+
+// Toe closes the gap between the wall's water face and the basin mesh so the
+// surface cannot read through onto the promenade. Top stays below the coping
+// and the graffiti band.
+const seawallToeD = 0.38;
+const seawallToeH = 0.72;
+const seawallToe = new THREE.Mesh(
+  new THREE.BoxGeometry(SEAWALL_W, seawallToeH, seawallToeD),
+  seawallWetMat
+);
+seawallToe.position.set(
+  0,
+  -0.06 - seawallToeH * 0.5,
+  SEAWALL_Z + 0.11 + seawallToeD * 0.5
+);
+scene.add(seawallToe);
 
 // ——— Seawall graffiti (one atlas, both faces) ———
 // Original night-quay paint only: weathered throw-ups, drips, and a few
@@ -5206,6 +5221,8 @@ const mistMat = new THREE.ShaderMaterial({
       float s = 5.0 + dens.r * 32.0 + dens.g * 22.0;
       gl_PointSize = s * uPixelRatio * (1.2 / -mv.z);
       vAlpha = dens.r * 0.62 + dens.g * 0.42;
+      // Spray stays in the basin. The promenade (and the gold plate) stay dry.
+      vAlpha *= smoothstep(5.35, 6.15, p.z);
       vCol = mix(vec3(0.54, 0.48, 0.72), vec3(0.94, 0.76, 0.29), dens.g);
       vCol = mix(vCol, vec3(1.0, 0.55, 0.28), dens.b * 0.55);
     }
