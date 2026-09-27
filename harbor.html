@@ -244,7 +244,7 @@
       </div>
     </div>
     <div class="hero">
-      <p class="eyebrow">Step 01 · real windows · craft ladder</p>
+      <p class="eyebrow">Step 01 · real windows · craft ladder · quay rube</p>
       <h1 class="stack"><span class="focus">Harbor</span><span>district</span><span>night</span></h1>
       <p id="hero-blurb">Windows as openings: rectilinear box façades, local UV, dark mullions, cool night-dock fenestra interiors, Fresnel glass. Occupied-32 + shop atlases on planar panes. No curved massing, no sway, no world-UV swirl.</p>
     </div>
@@ -260,7 +260,7 @@
     <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · not live</p>
   </div>
   <div id="walk-hint" aria-live="polite">Citizen · WASD · click to look · V to exit</div>
-  <div id="props-hint" aria-live="polite">Quay · toss into basin · B blast</div>
+  <div id="props-hint" aria-live="polite">Quay · crate → plate → lantern → Signal · shatter</div>
   <div id="props-actions" aria-label="Harbor effects">
     <button class="pill touch-only" id="hud-toggle" type="button" aria-pressed="false" title="Show exhibit chrome">Hud</button>
     <button class="pill touch-only" id="walk-toggle" type="button" aria-pressed="false" title="Citizen walk (V)">Walk</button>
@@ -2563,6 +2563,7 @@ function physReset() {
   }
   physSelected = null;
   if (typeof physHooks.onReset === 'function') physHooks.onReset();
+  if (typeof rubeReset === 'function') rubeReset();
 }
 
 function physSetConstraint(on) {
@@ -2753,7 +2754,7 @@ function physBlast() {
     propsHint.classList.add('on');
     setTimeout(() => {
       if (!showHud) {
-        propsHint.textContent = 'Quay · toss into basin · B blast';
+        propsHint.textContent = 'Quay · crate → plate → lantern → Signal · shatter';
         propsHint.classList.remove('on');
       }
     }, 1600);
@@ -2902,6 +2903,7 @@ function physStep() {
   physWorld.fixedStep();
   for (const entry of physEntries) physSync(entry);
   if (typeof physHooks.afterStep === 'function') physHooks.afterStep();
+  if (typeof rubeTick === 'function') rubeTick();
   if ((physStep._n = (physStep._n || 0) + 1) % 5 === 0) refreshHarborPhysicsProbe();
 }
 
@@ -2953,9 +2955,12 @@ function refreshHarborPhysicsProbe() {
         mass: c.mass,
       })),
     },
+    rube: null,
+    shatter: null,
   };
   window.__buoyancy = window.__harborPhysics.buoyancy;
   if (typeof physHooks.onProbe === 'function') physHooks.onProbe();
+  if (typeof rubeFillProbe === 'function') rubeFillProbe();
 }
 refreshHarborPhysicsProbe();
 
@@ -3677,6 +3682,403 @@ physHooks.onReset = () => {
 physHooks.onProbe = () => {
   springFillProbe();
 };
+
+// ——— Rube Goldberg (ladder step 4) + shatter/debris-swap (step 5) ———
+// Chain on quay: crate → pressure plate → hinged lantern tip → Signal pulse + pier gate.
+// Night-concrete / fenestra taste. Uses existing crates / constraint / wind / springs / buoyancy.
+// Shatter fires last when the gate finishes opening (debris-swap the fenestra vessel).
+const RUBE_MASS_THRESHOLD = 2.5; // Harbor crate masses ~0.45–2.2; one dense or mid+light
+const RUBE_PLATE = { x: -3.15, z: 3.12, w: 2.2, d: 1.7, h: 0.07 };
+const RUBE_GATE = { x: -5.15, z: 2.55, w: 1.35, h: 1.55, d: 0.12 };
+const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
+
+const rubeState = {
+  stage: 'idle', // idle | plate | lantern | gate | done
+  plateMass: 0,
+  platePressed: false,
+  plateLatched: false,
+  lanternFiredAt: 0,
+  gateOpen: false,
+  gateY: 0,
+  gateClosedY: 0,
+  gateOpenY: 0,
+  shatterDone: false,
+  signalPulseUntil: 0,
+  hintAt: 0,
+};
+
+// Pressure plate — gold top / night-concrete rim (sibling harbor-prop-physics pattern)
+const rubePlateMat = new THREE.MeshStandardMaterial({
+  color: 0xf0c24b,
+  roughness: 0.55,
+  metalness: 0.18,
+  emissive: 0xf0c24b,
+  emissiveIntensity: 0.06,
+});
+const rubePlateMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(RUBE_PLATE.w, RUBE_PLATE.h, RUBE_PLATE.d),
+  rubePlateMat
+);
+rubePlateMesh.position.set(RUBE_PLATE.x, RUBE_PLATE.h * 0.5 + 0.02, RUBE_PLATE.z);
+scene.add(rubePlateMesh);
+const rubePlateRim = new THREE.Mesh(
+  new THREE.BoxGeometry(RUBE_PLATE.w + 0.14, 0.045, RUBE_PLATE.d + 0.14),
+  new THREE.MeshStandardMaterial({ color: 0x2a2e36, roughness: 0.92, metalness: 0.08 })
+);
+rubePlateRim.position.set(RUBE_PLATE.x, 0.025, RUBE_PLATE.z);
+scene.add(rubePlateRim);
+const rubePlateLight = new THREE.PointLight(0xf0c24b, 0.18, 5.5, 2);
+rubePlateLight.position.set(RUBE_PLATE.x, 0.55, RUBE_PLATE.z);
+scene.add(rubePlateLight);
+
+// Sliding pier gate near Signal (kinematic) — night iron + gold accent bar
+const rubeGateMat = new THREE.MeshStandardMaterial({
+  color: 0x1c1f28,
+  roughness: 0.78,
+  metalness: 0.28,
+  emissive: 0xf0c24b,
+  emissiveIntensity: 0.04,
+});
+const rubeGateMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(RUBE_GATE.w, RUBE_GATE.h, RUBE_GATE.d),
+  rubeGateMat
+);
+rubeState.gateClosedY = RUBE_GATE.h * 0.5 + 0.04;
+rubeState.gateOpenY = rubeState.gateClosedY + RUBE_GATE.h + 0.12;
+rubeState.gateY = rubeState.gateClosedY;
+const rubeGateBody = new CANNON.Body({
+  mass: 0,
+  type: CANNON.Body.KINEMATIC,
+  shape: new CANNON.Box(new CANNON.Vec3(RUBE_GATE.w * 0.5, RUBE_GATE.h * 0.5, RUBE_GATE.d * 0.5)),
+  position: new CANNON.Vec3(RUBE_GATE.x, rubeState.gateClosedY, RUBE_GATE.z),
+});
+physWorld.addBody(rubeGateBody);
+rubeGateMesh.position.copy(rubeGateBody.position);
+scene.add(rubeGateMesh);
+const rubeGateBar = new THREE.Mesh(
+  new THREE.BoxGeometry(RUBE_GATE.w * 0.92, 0.06, RUBE_GATE.d + 0.02),
+  new THREE.MeshStandardMaterial({
+    color: 0xf0c24b, roughness: 0.4, metalness: 0.35,
+    emissive: 0xf0c24b, emissiveIntensity: 0.35,
+  })
+);
+rubeGateBar.position.y = RUBE_GATE.h * 0.18;
+rubeGateMesh.add(rubeGateBar);
+// Static gate posts (concrete taste)
+for (const sx of [-1, 1]) {
+  const post = new THREE.Mesh(
+    new THREE.BoxGeometry(0.16, RUBE_GATE.h + 0.25, 0.18),
+    new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.9, metalness: 0.06 })
+  );
+  post.position.set(RUBE_GATE.x + sx * (RUBE_GATE.w * 0.5 + 0.14), (RUBE_GATE.h + 0.25) * 0.5, RUBE_GATE.z);
+  scene.add(post);
+  const postBody = new CANNON.Body({
+    mass: 0,
+    type: CANNON.Body.STATIC,
+    shape: new CANNON.Box(new CANNON.Vec3(0.08, (RUBE_GATE.h + 0.25) * 0.5, 0.09)),
+    position: new CANNON.Vec3(post.position.x, post.position.y, post.position.z),
+  });
+  physWorld.addBody(postBody);
+}
+
+// Fenestra vessel — intact glass block on night-concrete plinth (shatter debris-swap target)
+const rubePlinth = new THREE.Mesh(
+  new THREE.BoxGeometry(0.42, 0.28, 0.42),
+  new THREE.MeshStandardMaterial({ color: 0x2e333e, roughness: 0.88, metalness: 0.05 })
+);
+rubePlinth.position.set(RUBE_VESSEL.x, 0.14, RUBE_VESSEL.z);
+scene.add(rubePlinth);
+const rubeVesselMat = new THREE.MeshStandardMaterial({
+  color: 0xb8c4d8,
+  roughness: 0.18,
+  metalness: 0.05,
+  transparent: true,
+  opacity: 0.72,
+  emissive: 0x8a7bb8,
+  emissiveIntensity: 0.12,
+});
+const rubeVesselMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.38, 0.28), rubeVesselMat);
+rubeVesselMesh.position.set(RUBE_VESSEL.x, RUBE_VESSEL.y, RUBE_VESSEL.z);
+rubeVesselMesh.layers.enable(BLOOM_LAYER);
+scene.add(rubeVesselMesh);
+// Thin mullion cross (fenestra read)
+const rubeMullionMat = new THREE.MeshStandardMaterial({ color: 0x1a1c22, roughness: 0.7, metalness: 0.2 });
+rubeVesselMesh.add(
+  new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.025, 0.025), rubeMullionMat),
+  new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.4, 0.025), rubeMullionMat),
+  new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, 0.3), rubeMullionMat)
+);
+const rubeDebris = []; // { mesh, body }
+
+function rubeSamplePlateMass() {
+  let sum = 0;
+  const halfW = RUBE_PLATE.w * 0.5;
+  const halfD = RUBE_PLATE.d * 0.5;
+  for (const entry of physCrates) {
+    if (physSelected === entry) continue; // grabbed mass waits until released
+    const p = entry.body.position;
+    const he = entry.halfExtents || new CANNON.Vec3(0.25, 0.25, 0.25);
+    const overlapX = Math.abs(p.x - RUBE_PLATE.x) < halfW + he.x;
+    const overlapZ = Math.abs(p.z - RUBE_PLATE.z) < halfD + he.z;
+    const onDeck = p.y - he.y < 1.4;
+    if (overlapX && overlapZ && onDeck) sum += entry.mass;
+  }
+  return sum;
+}
+
+function rubeFireLantern() {
+  // Tip the warm hinged lantern (index 0 @ -5.4) toward Signal / gate
+  const L = physLanterns[0] || physLanterns[physLanterns.length - 1];
+  if (!L || !L.body || physFreeze) return;
+  if (!L.constraint && physConstraintOn) {
+    // ensure hinge if player toggled off mid-chain — soft tip only when hinged
+  }
+  L.body.wakeUp();
+  // Lateral impulse + slight lift so PointToPoint swings visibly
+  const towardSignal = new CANNON.Vec3(-1.6, 0.35, -0.55);
+  L.body.applyImpulse(towardSignal, new CANNON.Vec3(0.05, -0.08, 0.04));
+  L.body.angularVelocity.x += 1.8;
+  L.body.angularVelocity.z += -2.4;
+  rubeState.lanternFiredAt = performance.now();
+}
+
+function rubePulseSignal(ms) {
+  rubeState.signalPulseUntil = performance.now() + (ms || 2200);
+  if (typeof beaconLight !== 'undefined' && beaconLight) {
+    beaconLight.intensity = 28;
+  }
+  if (typeof tipGlow !== 'undefined' && tipGlow && tipGlow.material && tipGlow.material.uniforms) {
+    tipGlow.material.uniforms.uPulse.value = 1.6;
+  }
+}
+
+function rubeHint(msg) {
+  if (!propsHint) return;
+  propsHint.textContent = msg;
+  if (!showHud && !quayTouchControls()) {
+    propsHint.classList.add('on');
+    rubeState.hintAt = performance.now();
+  }
+}
+
+function rubeShatter() {
+  if (rubeState.shatterDone || physFreeze) return;
+  rubeState.shatterDone = true;
+  rubeVesselMesh.visible = false;
+  for (const ch of rubeVesselMesh.children) ch.visible = false;
+
+  const palette = [0xb8c4d8, 0x8a7bb8, 0xf0c24b, 0xd4cbb8, 0x9aa8c0];
+  const origin = rubeVesselMesh.position;
+  for (let i = 0; i < 9; i++) {
+    const s = 0.06 + Math.random() * 0.09;
+    const mat = new THREE.MeshStandardMaterial({
+      color: palette[i % palette.length],
+      roughness: 0.35 + Math.random() * 0.4,
+      metalness: 0.05,
+      transparent: true,
+      opacity: 0.85,
+      emissive: palette[i % palette.length],
+      emissiveIntensity: 0.08,
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s * (0.6 + Math.random()), s), mat);
+    if (i % 3 === 0) mesh.layers.enable(BLOOM_LAYER);
+    const body = new CANNON.Body({
+      mass: physFreeze ? 0 : 0.08 + Math.random() * 0.12,
+      material: physCrateMat,
+      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, s * 0.4, s * 0.5)),
+      position: new CANNON.Vec3(
+        origin.x + (Math.random() - 0.5) * 0.2,
+        origin.y + (Math.random() - 0.3) * 0.2,
+        origin.z + (Math.random() - 0.5) * 0.2
+      ),
+      linearDamping: 0.12,
+      angularDamping: 0.16,
+      allowSleep: true,
+    });
+    if (!physFreeze) {
+      body.velocity.set(
+        (Math.random() - 0.5) * 3.2,
+        1.2 + Math.random() * 2.4,
+        (Math.random() - 0.5) * 3.2
+      );
+      body.angularVelocity.set(
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8
+      );
+    }
+    physWorld.addBody(body);
+    scene.add(mesh);
+    mesh.position.copy(body.position);
+    rubeDebris.push({ mesh, body });
+  }
+  rubeHint('Shatter · fenestra debris');
+}
+
+function rubeClearDebris() {
+  for (const d of rubeDebris) {
+    physWorld.removeBody(d.body);
+    scene.remove(d.mesh);
+    if (d.mesh.geometry) d.mesh.geometry.dispose();
+    if (d.mesh.material) d.mesh.material.dispose();
+  }
+  rubeDebris.length = 0;
+}
+
+function rubeReset() {
+  rubeState.stage = 'idle';
+  rubeState.plateMass = 0;
+  rubeState.platePressed = false;
+  rubeState.plateLatched = false;
+  rubeState.lanternFiredAt = 0;
+  rubeState.gateOpen = false;
+  rubeState.gateY = rubeState.gateClosedY;
+  rubeState.shatterDone = false;
+  rubeState.signalPulseUntil = 0;
+  rubeGateBody.position.y = rubeState.gateClosedY;
+  rubeGateBody.velocity.set(0, 0, 0);
+  rubeGateMesh.position.copy(rubeGateBody.position);
+  rubePlateMat.emissiveIntensity = 0.06;
+  rubePlateLight.intensity = 0.18;
+  rubeGateMat.emissiveIntensity = 0.04;
+  rubeClearDebris();
+  rubeVesselMesh.visible = true;
+  for (const ch of rubeVesselMesh.children) ch.visible = true;
+  if (typeof beaconLight !== 'undefined' && beaconLight) beaconLight.intensity = 16;
+  rubeHint('Quay · crate → plate → lantern → Signal · shatter');
+  refreshHarborPhysicsProbe();
+}
+
+function rubeTick() {
+  if (physFreeze) {
+    rubeGateBody.position.y = rubeState.gateY;
+    rubeGateMesh.position.copy(rubeGateBody.position);
+    for (const d of rubeDebris) {
+      d.mesh.position.copy(d.body.position);
+      d.mesh.quaternion.copy(d.body.quaternion);
+    }
+    return;
+  }
+
+  // Sync debris meshes
+  for (const d of rubeDebris) {
+    d.mesh.position.copy(d.body.position);
+    d.mesh.quaternion.copy(d.body.quaternion);
+  }
+
+  // Signal pulse decay
+  if (rubeState.signalPulseUntil > 0) {
+    const left = rubeState.signalPulseUntil - performance.now();
+    if (left <= 0) {
+      rubeState.signalPulseUntil = 0;
+      if (beaconLight) beaconLight.intensity = 16;
+    } else if (beaconLight) {
+      const k = left / 2200;
+      beaconLight.intensity = 16 + 14 * k;
+    }
+  }
+
+  // Fade chain hint
+  if (rubeState.hintAt && performance.now() - rubeState.hintAt > 3800) {
+    rubeState.hintAt = 0;
+    if (propsHint && !showHud) propsHint.classList.remove('on');
+  }
+
+  rubeState.plateMass = rubeSamplePlateMass();
+  const pressed = rubeState.plateMass >= RUBE_MASS_THRESHOLD - 1e-3;
+  rubeState.platePressed = pressed;
+  const t = Math.min(1, rubeState.plateMass / RUBE_MASS_THRESHOLD);
+  rubePlateMat.emissiveIntensity = 0.06 + t * 0.55;
+  rubePlateLight.intensity = 0.18 + t * 1.5;
+
+  // Stage machine — one-shot chain until Reset
+  if (rubeState.stage === 'idle' && pressed) {
+    rubeState.stage = 'plate';
+    rubeState.plateLatched = true;
+    rubeFireLantern();
+    rubeState.stage = 'lantern';
+    rubeHint('Rube · plate → lantern tip');
+  }
+
+  if (rubeState.stage === 'lantern') {
+    const L = physLanterns[0] || physLanterns[physLanterns.length - 1];
+    const elapsed = performance.now() - rubeState.lanternFiredAt;
+    let swung = elapsed > 420;
+    if (L && L.body) {
+      const spd = L.body.velocity.length() + L.body.angularVelocity.length() * 0.35;
+      if (spd > 1.1) swung = true;
+    }
+    if (swung || elapsed > 900) {
+      rubePulseSignal(2400);
+      rubeState.gateOpen = true;
+      rubeState.stage = 'gate';
+      rubeGateMat.emissiveIntensity = 0.22;
+      rubeHint('Rube · lantern → Signal / gate');
+    }
+  }
+
+  // Gate motion
+  const targetY = rubeState.gateOpen ? rubeState.gateOpenY : rubeState.gateClosedY;
+  const speed = 2.2;
+  // approx dt via fixed step feel
+  rubeState.gateY += (targetY - rubeState.gateY) * Math.min(1, speed * (1 / 60) * 3.2);
+  if (Math.abs(targetY - rubeState.gateY) < 0.003) rubeState.gateY = targetY;
+  rubeGateBody.position.y = rubeState.gateY;
+  rubeGateBody.velocity.set(0, 0, 0);
+  rubeGateMesh.position.copy(rubeGateBody.position);
+
+  if (rubeState.stage === 'gate' && rubeState.gateOpen
+    && Math.abs(rubeState.gateY - rubeState.gateOpenY) < 0.02) {
+    rubeState.stage = 'done';
+    rubeShatter(); // ladder step 5 — debris-swap last
+  }
+}
+
+function rubeFillProbe() {
+  const probe = {
+    ladder: { step4: 'rube', step5: 'shatter' },
+    stage: rubeState.stage,
+    plateMass: +rubeState.plateMass.toFixed(2),
+    threshold: RUBE_MASS_THRESHOLD,
+    platePressed: rubeState.platePressed,
+    plateLatched: rubeState.plateLatched,
+    gateOpen: rubeState.gateOpen,
+    gateY: +rubeState.gateY.toFixed(3),
+    shatterDone: rubeState.shatterDone,
+    debris: rubeDebris.length,
+    chain: 'crate → plate → lantern → Signal/gate → shatter',
+  };
+  window.__rube = probe;
+  window.__shatter = {
+    done: rubeState.shatterDone,
+    debris: rubeDebris.length,
+    vesselVisible: rubeVesselMesh.visible,
+  };
+  if (window.__harborPhysics) {
+    window.__harborPhysics.rube = probe;
+    window.__harborPhysics.shatter = window.__shatter;
+  }
+}
+
+// Initial probe
+rubeFillProbe();
+window.__frameRube = (mode) => {
+  // Camera helper: plate | gate | vessel | chain
+  const c = controls && controls.target ? controls : null;
+  if (!c) return;
+  if (mode === 'gate' || mode === 'signal') {
+    camera.position.set(-2.2, 2.4, 6.2);
+    controls.target.set(RUBE_GATE.x, 1.0, RUBE_GATE.z);
+  } else if (mode === 'vessel' || mode === 'shatter') {
+    camera.position.set(-2.8, 2.0, 5.8);
+    controls.target.set(RUBE_VESSEL.x, 0.6, RUBE_VESSEL.z);
+  } else {
+    camera.position.set(-1.5, 2.6, 7.0);
+    controls.target.set(RUBE_PLATE.x, 0.4, RUBE_PLATE.z);
+  }
+  controls.update();
+};
+
 window.__springLive = {
   tipBody,
   bannerSegs: physBannerSegs,
