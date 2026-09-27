@@ -2546,7 +2546,7 @@ function prepDeckData(tex) {
   return tex;
 }
 window.__quayDeck = { ready: false, repeat: [10, 2] };
-const deckCache = location.protocol === 'file:' ? '' : '?v=deck1';
+const deckCache = location.protocol === 'file:' ? '' : '?v=deck2';
 Promise.all([
   atlasLoader.loadAsync(new URL('quay-deck-atlas.png' + deckCache, atlasBase).href),
   atlasLoader.loadAsync(new URL('quay-deck-normal.png' + deckCache, atlasBase).href),

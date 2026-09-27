@@ -80,6 +80,44 @@ def normals_from_height(height, strength):
     return nx / ln, ny / ln, nz / ln
 
 
+def paint_star_screw(height, albedo, rough, recess_mask, rim_mask, cy, cx, radius, rotation):
+    """Countersunk 6-lobe (star-bit) recess. One connected hexalobe, not a slot, cross, or hex."""
+    r = int(np.ceil(radius * 1.45)) + 2
+    yy, xx = np.mgrid[-r : r + 1, -r : r + 1].astype(np.float32)
+    dist = np.sqrt(yy * yy + xx * xx)
+    ang = np.arctan2(yy, xx) + rotation
+    # ISO-style hexalobe: r = a + b cos(6θ). Waist is pinched so six lobes read.
+    lobe = np.cos(6.0 * ang)
+    recess_r = radius * (0.56 + 0.36 * lobe)
+    head = dist <= radius
+    recess = dist <= recess_r
+    rim = head & (dist >= radius * 0.72) & ~recess
+    bevel = (dist > radius) & (dist <= radius * 1.34)
+    ys = np.mod(cy + yy.astype(np.int32), height.shape[0])
+    xs = np.mod(cx + xx.astype(np.int32), height.shape[1])
+
+    h = height[ys, xs]
+    dome = np.clip(1.0 - dist / max(radius, 1.0), 0.0, 1.0)
+    h = np.where(head, np.maximum(h, 0.62) * 0.55 + 0.28 + dome * 0.08, h)
+    depth = np.clip((recess_r - dist) / (radius * 0.42), 0.0, 1.0)
+    h = np.where(recess, 0.34 - depth * 0.28, h)
+    bev = np.clip((radius * 1.34 - dist) / (radius * 0.34), 0.0, 1.0)
+    h = np.where(bevel, h * (0.62 + 0.38 * bev), h)
+    height[ys, xs] = h
+
+    metal = np.array([0.24, 0.255, 0.285], dtype=np.float32)
+    recess_col = np.array([0.010, 0.012, 0.018], dtype=np.float32)
+    rim_col = np.array([0.36, 0.385, 0.42], dtype=np.float32)
+    albedo[ys[head], xs[head]] = metal
+    albedo[ys[rim], xs[rim]] = rim_col
+    albedo[ys[recess], xs[recess]] = recess_col
+    rough[ys[head], xs[head]] = 0.18
+    rough[ys[rim], xs[rim]] = 0.10
+    rough[ys[recess], xs[recess]] = 0.72
+    recess_mask[ys[recess], xs[recess]] = True
+    rim_mask[ys[rim], xs[rim]] = True
+
+
 def stamp_disk(field, cy, cx, radius, profile):
     """Add profile(dist) into field, wrapping Y and X so the tile stays periodic."""
     r = int(np.ceil(radius)) + 1
@@ -218,45 +256,6 @@ def main():
     rough = np.clip(rough - damp * 0.10, 0.08, 0.98)
     height -= damp * 0.03
 
-    # Countersunk bolts. Inset from joints; staggered so the repeat is not a grid.
-    for i in range(N_PLANKS):
-        a, b = int(edges[i]), int(edges[i + 1])
-        span = b - a
-        inset = max(10, int(span * 0.22))
-        cols = (a + inset, b - inset)
-        # Four stations along the sheet. Offset per board, kept off the V wrap.
-        phase = (0.07 * i) % 0.16
-        stations = (0.14 + phase, 0.38 + phase * 0.5, 0.63 - phase * 0.25, 0.86 - phase)
-        for si, v in enumerate(stations):
-            cy = int(v * H) % H
-            cx = cols[si % 2]
-            radius = 6.5
-
-            def head(dist, radius=radius):
-                ring = np.clip(1.0 - np.abs(dist - radius * 0.72) / 1.6, 0.0, 1.0)
-                bowl = np.clip(1.0 - dist / radius, 0.0, 1.0)
-                return bowl * 0.10 + ring * 0.12
-
-            stamp_disk(height, cy, cx, radius, head)
-
-            r = 8
-            yy, xx = np.mgrid[-r : r + 1, -r : r + 1]
-            dist = np.sqrt(yy * yy + xx * xx)
-            mask = dist <= radius
-            slot = (np.abs(yy) <= 1.1) & (np.abs(xx) <= radius * 0.45)
-            metal = np.array([0.20, 0.215, 0.24], dtype=np.float32)
-            slot_col = np.array([0.03, 0.034, 0.042], dtype=np.float32)
-            ys = (cy + yy) % H
-            xs = (cx + xx) % W
-            albedo[ys[mask], xs[mask]] = metal
-            albedo[ys[slot], xs[slot]] = slot_col
-            rough[ys[mask], xs[mask]] = 0.22
-            rough[ys[slot], xs[slot]] = 0.55
-            # Raised rim catch.
-            rim = (dist >= radius * 0.55) & (dist <= radius * 0.85)
-            albedo[ys[rim], xs[rim]] = np.array([0.30, 0.325, 0.36], dtype=np.float32)
-            rough[ys[rim], xs[rim]] = 0.16
-
     # Short splits, one or two per board, away from the tile edge.
     for i in range(N_PLANKS):
         a, b = int(edges[i]), int(edges[i + 1])
@@ -279,6 +278,26 @@ def main():
     height += ((fine - 0.5) * 0.045 + (grit_n - 0.5) * 0.02) * (1.0 - gap[None, :])
     height = np.clip(height, 0.0, 1.2)
 
+    # Star-bit screws after grit and splits so the 6-lobe recess stays crisp.
+    # Inset from joints; staggered so the repeat is not a grid.
+    recess_mask = np.zeros((H, W), dtype=bool)
+    rim_mask = np.zeros((H, W), dtype=bool)
+    screw_radius = 22.0
+    for i in range(N_PLANKS):
+        a, b = int(edges[i]), int(edges[i + 1])
+        span = b - a
+        inset = max(int(screw_radius * 1.5), int(span * 0.22))
+        cols = (a + inset, b - inset)
+        phase = (0.07 * i) % 0.16
+        stations = (0.14 + phase, 0.38 + phase * 0.5, 0.63 - phase * 0.25, 0.86 - phase)
+        for si, v in enumerate(stations):
+            cy = int(v * H) % H
+            cx = int(cols[si % 2])
+            paint_star_screw(
+                height, albedo, rough, recess_mask, rim_mask,
+                cy, cx, screw_radius, rotation=0.31 * i + 0.17 * si,
+            )
+
     # Bake a cool key into the albedo so seams read even before the spec term.
     nx, ny, nz = normals_from_height(height, strength=5.5)
     ndl = np.clip(nx * 0.42 + ny * 0.22 + nz * 0.88, 0.0, 1.0)
@@ -286,6 +305,9 @@ def main():
     # Hemispheric cool fill, so groove bottoms are not crushed to black.
     albedo += nz[..., None] * np.array([0.012, 0.016, 0.024], dtype=np.float32)
     albedo = np.clip(albedo, 0.0, 0.42)
+    # Re-assert the star after the bake so lobe floors stay darker than the head.
+    albedo[recess_mask] = np.array([0.012, 0.015, 0.022], dtype=np.float32)
+    albedo[rim_mask] = np.maximum(albedo[rim_mask], np.array([0.30, 0.325, 0.36], dtype=np.float32))
 
     # Recompute normals after the albedo bake used the same height.
     nx, ny, nz = normals_from_height(height, strength=6.0)
