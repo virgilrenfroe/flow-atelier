@@ -164,7 +164,14 @@ def worn_mask(rng):
     return np.clip(worn, 0.0, 1.0)
 
 
-def build_circuit(rng, worn):
+def make_cracks(rng):
+    """Fissures a couple of centimetres wide once the tile is ~2 m on the wall."""
+    crack = torus_voronoi_edge(N, 28, 22.0, rng)
+    fine = torus_voronoi_edge(N, 64, 9.0, np.random.default_rng(int(rng.integers(0, 1_000_000))))
+    return np.clip(np.maximum(crack, fine * 0.85), 0.0, 1.0)
+
+
+def build_circuit(rng, worn, crack):
     concrete_n = fbm(N, rng, 5, 4)
     fine = fbm(N, rng, 3, 28)
     stain = fbm(N, rng, 3, 7)
@@ -188,9 +195,10 @@ def build_circuit(rng, worn):
     draw = ImageDraw.Draw(img)
 
     trace = np.zeros((N, N), np.float32)
-    teal = (36, 168, 176, 255)
-    amber = (196, 118, 42, 255)
-    copper = (120, 78, 48, 255)
+    # Bright enough to read in a night opening, not a neon flood.
+    teal = (46, 198, 206, 255)
+    amber = (214, 132, 46, 255)
+    copper = (132, 84, 52, 255)
 
     def stroke(p0, p1, color, width, strength):
         draw.line([p0, p1], fill=color, width=width)
@@ -222,7 +230,7 @@ def build_circuit(rng, worn):
                 trace[ya:, x0b:x1b] = np.maximum(trace[ya:, x0b:x1b], strength)
                 trace[: yb + 1, x0b:x1b] = np.maximum(trace[: yb + 1, x0b:x1b], strength)
 
-    grid = 48
+    grid = 84
     cells = N // grid
     # Sparse Manhattan traces. Highways on a few rows/cols.
     for j in range(cells):
@@ -236,19 +244,19 @@ def build_circuit(rng, worn):
             wx = min(N - 1, x0 + grid // 2)
             wy = min(N - 1, y)
             local = float(worn[wy, wx])
-            thresh = 0.78 - 0.28 * local - (0.18 if highway else 0.0)
+            thresh = 0.74 - 0.62 * local - (0.22 if highway else 0.0)
             if h > thresh:
                 col = amber if cell_hash(i, j, 4) > 0.72 else (teal if cell_hash(i, j, 5) > 0.35 else copper)
-                width = 3 if highway or local > 0.45 else 2
-                stroke((x0, y), (x1, y), col, width, 1.0 if col != copper else 0.55)
+                width = 16 if highway or local > 0.4 else 9
+                stroke((x0, y), (x1, y), col, width, 1.0 if col != copper else 0.7)
             x = i * grid + grid // 2
             y0 = j * grid
             y1 = y0 + grid
             v = cell_hash(i, j, 6)
-            vthresh = 0.80 - 0.30 * local
+            vthresh = 0.76 - 0.64 * local
             if v > vthresh:
                 col = amber if cell_hash(i, j, 7) > 0.78 else (teal if cell_hash(i, j, 8) > 0.4 else copper)
-                stroke((x, y0), (x, y1), col, 2, 1.0 if col != copper else 0.5)
+                stroke((x, y0), (x, y1), col, 10 if local > 0.35 else 8, 1.0 if col != copper else 0.65)
 
     # Vias and a few dark IC pads — pads stay matte, pins carry the glint.
     via_r = 5
@@ -283,23 +291,36 @@ def build_circuit(rng, worn):
             trace[y + h: min(N, y + h + 6), max(0, xi - 1): min(N, xi + 2)] = 0.9
 
     arr = np.array(img)
+    # Fissures themselves carry a trace, so a crack opens onto circuitry
+    # rather than bare concrete.
+    core = crack > 0.62
+    band = (np.arange(N, dtype=np.int32)[:, None] // 120) & 1
+    teal_m = core & (band == 0)
+    amber_m = core & (band == 1)
+    arr[teal_m, 0] = 46
+    arr[teal_m, 1] = 198
+    arr[teal_m, 2] = 206
+    arr[amber_m, 0] = 214
+    arr[amber_m, 1] = 132
+    arr[amber_m, 2] = 46
+    trace = np.maximum(trace, core.astype(np.float32))
     # alpha = trace strength. Concrete stays 0 so the shader glow is traces only.
     arr[:, :, 3] = np.clip(trace * 255.0, 0, 255).astype(np.uint8)
     return arr
 
 
-def build_growth(rng, worn):
+def build_growth(rng, worn, crack):
     base_n = fbm(N, rng, 5, 4)
     blot = fbm(N, rng, 4, 8)
     fine = fbm(N, rng, 3, 22)
     damp = fbm(N, rng, 3, 6)
-    # Deep wet olive. Local contrast so leaves and shelves survive night grade.
-    r = 16 + base_n * 22 + blot * 10
-    g = 28 + base_n * 36 + blot * 14
-    b = 14 + base_n * 16 + damp * 8
-    r += (fine - 0.5) * 10
-    g += (fine - 0.5) * 14
-    b += (damp - 0.5) * 8
+    # Dull night olive. Green stays ahead of red, but the value stays low.
+    r = 20 + base_n * 16 + blot * 6
+    g = 30 + base_n * 26 + blot * 8
+    b = 16 + base_n * 12 + damp * 5
+    r += (fine - 0.5) * 6
+    g += (fine - 0.5) * 8
+    b += (damp - 0.5) * 5
     # Blue-black damp pockets
     pocket = np.clip((damp - 0.62) / 0.25, 0.0, 1.0)
     r = r * (1 - 0.35 * pocket) + pocket * 10
@@ -321,15 +342,15 @@ def build_growth(rng, worn):
         # hanging bias: mostly downward, some lateral creep
         bias = float(rng.uniform(0.35, 1.15))
         vine_col = (
-            int(rng.integers(28, 58)),
-            int(rng.integers(36, 62)),
-            int(rng.integers(16, 30)),
+            int(rng.integers(16, 32)),
+            int(rng.integers(20, 36)),
+            int(rng.integers(12, 22)),
             255,
         )
         leaf_rgb = (
-            int(rng.integers(36, 78)),
-            int(rng.integers(64, 118)),
-            int(rng.integers(22, 48)),
+            int(rng.integers(26, 42)),
+            int(rng.integers(40, 62)),
+            int(rng.integers(18, 30)),
         )
         pts = []
         for s in range(steps):
@@ -368,10 +389,10 @@ def build_growth(rng, worn):
         y = float(rng.uniform(0, N))
         rad = float(rng.uniform(6, 28))
         col = (
-            int(rng.integers(18, 52)),
-            int(rng.integers(40, 92)),
-            int(rng.integers(16, 40)),
-            int(rng.integers(150, 220)),
+            int(rng.integers(18, 34)),
+            int(rng.integers(32, 52)),
+            int(rng.integers(14, 26)),
+            int(rng.integers(160, 220)),
         )
         sprite = Image.new("RGBA", (int(rad * 2 + 2), int(rad * 2 + 2)), (0, 0, 0, 0))
         ImageDraw.Draw(sprite).ellipse([1, 1, sprite.size[0] - 2, sprite.size[1] - 2], fill=col)
@@ -388,10 +409,10 @@ def build_growth(rng, worn):
             h = float(rng.uniform(7, 14))
             yy = cy + s * float(rng.uniform(6, 11))
             bone = (
-                int(rng.integers(118, 168)),
-                int(rng.integers(96, 132)),
-                int(rng.integers(62, 92)),
-                int(rng.integers(210, 250)),
+                int(rng.integers(58, 78)),
+                int(rng.integers(50, 66)),
+                int(rng.integers(38, 52)),
+                int(rng.integers(200, 240)),
             )
             sprite = Image.new("RGBA", (int(w + 8), int(h + 10)), (0, 0, 0, 0))
             sd = ImageDraw.Draw(sprite)
@@ -422,23 +443,21 @@ def build_growth(rng, worn):
 
     arr = np.array(img).astype(np.float32)
     # Crevice darkening along cracks, applied after the draw so vines sit in the mat.
-    crack = torus_voronoi_edge(N, 42, 3.2, rng)
-    fine_crack = torus_voronoi_edge(N, 90, 1.6, np.random.default_rng(rng.integers(0, 1_000_000)))
-    crack = np.clip(crack + fine_crack * 0.85, 0.0, 1.0)
-    shade = 1.0 - 0.42 * crack
+    shade = 1.0 - 0.28 * np.clip(crack, 0.0, 1.0)
     arr[:, :, 0] *= shade
     arr[:, :, 1] *= shade
-    arr[:, :, 2] *= shade * (1.0 - 0.08 * crack)
+    arr[:, :, 2] *= shade
+    # Cap, then sit the whole mat near the night-concrete value.
+    arr[:, :, 0] = np.minimum(arr[:, :, 0], 64.0) * 0.58
+    arr[:, :, 1] = np.minimum(arr[:, :, 1], 74.0) * 0.55
+    arr[:, :, 2] = np.minimum(arr[:, :, 2], 52.0) * 0.60
 
-    # Cover: mostly closed. Cracks and shared worn patches open onto the circuit.
-    cover = 232 + fbm(N, rng, 3, 10) * 23
-    cover -= crack * 210
-    cover -= worn * 195
-    # fray inside worn patches stays ragged rather than a clean hole
-    cover += (1.0 - crack) * worn * 28
-    cover = np.clip(cover, 6, 255)
-    arr[:, :, 3] = cover
-    return np.clip(arr, 0, 255).astype(np.uint8), crack, worn
+    # Hard openings only — the soft voronoi shoulder was a circuit haze.
+    crack_open = np.clip((crack - 0.66) / 0.24, 0.0, 1.0)
+    worn_open = np.clip((worn - 0.55) / 0.28, 0.0, 1.0)
+    cover = 252.0 - np.maximum(crack_open, worn_open) * 250.0
+    arr[:, :, 3] = np.clip(cover, 0.0, 255.0)
+    return np.clip(arr, 0, 255).astype(np.uint8)
 
 
 def preview(circuit, growth, path):
@@ -473,10 +492,12 @@ def main():
     rng = np.random.default_rng(0x4D4F5353)  # MOSS
     print("worn mask…")
     worn = worn_mask(rng)
+    print("cracks…")
+    crack = make_cracks(rng)
     print("circuit…")
-    circuit = build_circuit(rng, worn)
+    circuit = build_circuit(rng, worn, crack)
     print("growth…")
-    growth, crack, worn = build_growth(rng, worn)
+    growth = build_growth(rng, worn, crack)
     cpath = os.path.join(ROOT, "facade-circuit.png")
     gpath = os.path.join(ROOT, "facade-growth.png")
     Image.fromarray(circuit, "RGBA").save(cpath, optimize=True, compress_level=9)

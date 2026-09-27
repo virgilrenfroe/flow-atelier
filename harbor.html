@@ -1423,32 +1423,57 @@ const buildingMat = new THREE.ShaderMaterial({
       inPane *= (1.0 - inDoorCol);
       // Dual sheath on vertical concrete only (Virgil: circuit under, living cover).
       // Samples stay outside the branch — WebGL1 derivatives need a uniform flow.
-      // Tile is façade-local metres (concUV), not world XZ. Growth alpha is the
-      // cover: smoothstep keeps moss shut and leaves peeks in deep cracks and
-      // flaked patches. Low-frequency wear plus corner thinning open a few
-      // places the tile itself does not, so the sheet does not stamp.
-      vec2 sheathUv = concUV / 1.68 + vec2(vId * 0.37, vId * 0.21);
+      // Tile is façade-local metres (concUV), not world XZ.
+      // Growth alpha is mostly shut. Openings are the atlas cracks/flakes plus
+      // a few world-space worn patches, fissures, and a narrow corner peel —
+      // wide enough that the circuit actually reads at night.
+      vec2 sheathUv = concUV / 2.05 + vec2(vId * 0.37, vId * 0.21);
       vec4 circuit = texture2D(uSheathCircuit, sheathUv);
       vec4 growth = texture2D(uSheathGrowth, sheathUv);
-      float cover = smoothstep(0.18, 0.70, growth.a);
-      float worn = smoothstep(0.64, 0.80, fbm(concUV * 0.16 + vec2(vId * 0.07, 2.7)));
-      cover *= mix(1.0, 0.12, worn);
-      float edgePeek = 1.0 - smoothstep(0.045, 0.26, edgeDistM);
-      cover *= mix(1.0, 0.22, edgePeek);
+      // Cap the mat. A small olive lift stays under the paint threshold.
+      vec3 moss = min(growth.rgb, vec3(0.11, 0.14, 0.10));
+      moss.g = min(moss.g + 0.012, 0.14);
+      // Steep cover so a mip-blurred edge stays moss and a real opening stays open.
+      float cover = smoothstep(0.04, 0.30, growth.a);
+      // Binary openings — a soft shoulder was a bright circuit haze.
+      // Worn patches, a few per façade, large enough to show a run of traces.
+      float flake = step(0.80, fbm(concUV * 0.62 + vec2(2.2, vId * 0.09)));
+      // Fissures a few centimetres wide. Gated so they are not a barcode.
+      float seamU = abs(fract(concUV.x * 1.15 + vId * 0.13) - 0.5);
+      float seamV = abs(fract(concUV.y * 0.72 + 0.37) - 0.5);
+      float crackLine = max(step(seamU, 0.020), step(seamV, 0.016));
+      float crackGate = step(0.76, fbm(concUV * 0.48 + vec2(vId, 5.1)));
+      float edgePeek = step(edgeDistM, 0.10);
+      cover *= 1.0 - max(max(flake, crackLine * crackGate), edgePeek);
       cover = clamp(cover, 0.0, 1.0);
-      vec3 under = mix(wallCol, circuit.rgb, 0.86);
-      float trace = circuit.a * (1.0 - cover);
-      vec3 sheathCol = mix(under, growth.rgb, cover);
-      // Night glint on uncovered traces. Small lift — lanterns still own bloom.
-      sheathCol += circuit.rgb * trace * 0.32;
-      sheathCol = mix(sheathCol, sheathCol * vec3(0.88, 0.94, 1.04), (1.0 - ndl) * 0.30);
+      // Board that shows inside an opening: atlas traces, plus metre-scale
+      // runs so a flake is recognizably circuitry and not bare concrete.
+      float hOn = step(0.42, hash(vec2(floor(concUV.y * 3.4), vId + 1.0)));
+      float vOn = step(0.52, hash(vec2(floor(concUV.x * 2.8), vId + 4.0)));
+      float hLine = 1.0 - smoothstep(0.03, 0.11, abs(fract(concUV.y * 3.4) - 0.5));
+      float vLine = 1.0 - smoothstep(0.03, 0.10, abs(fract(concUV.x * 2.8) - 0.5));
+      float pcb = max(hLine * hOn, vLine * vOn);
+      float viaCell = hash(floor(concUV * 3.4) + vec2(vId, 2.0));
+      float via = smoothstep(0.16, 0.02, length(fract(concUV * 3.4) - 0.5));
+      pcb = max(pcb, via * step(0.78, viaCell));
+      float amberPick = step(0.67, hash(vec2(floor(concUV.y * 3.4 + concUV.x), vId)));
+      vec3 traceCol = mix(vec3(0.09, 0.40, 0.44), vec3(0.52, 0.26, 0.07), amberPick);
+      // Atlas traces are hot in the PNG; pull them into a night glint before mix.
+      vec3 circuitNight = mix(circuit.rgb * 0.72, circuit.rgb * vec3(0.42, 0.55, 0.55), circuit.a);
+      vec3 under = mix(circuitNight, traceCol, max(pcb, circuit.a));
+      vec3 sheathCol = mix(under, moss, cover);
+      // Subtle night glint on whatever trace is actually uncovered.
+      float exposed = max(pcb, circuit.a) * (1.0 - cover);
+      sheathCol += traceCol * exposed * 0.16;
+      sheathCol = mix(sheathCol, sheathCol * vec3(0.90, 0.94, 1.03), (1.0 - ndl) * 0.22);
       float sheathGate = step(0.5, uSheathOn) * isVert;
       vec3 faceCol = mix(wallCol, sheathCol, sheathGate);
       // Unsheathed mullion (roof fallback / failed atlas) stays the old dark bar.
       vec3 mullionPlain = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
-      // Sheathed mullion is the same growth, dimmed, so the frame still cuts
-      // the fenestra and a little moss / trace still reads on the bar.
-      vec3 mullionSheath = mix(sheathCol * vec3(0.52, 0.58, 0.46), vec3(0.008, 0.012, 0.011), 0.24);
+      // Frame stays darker than the pier. The glint is re-added so a trace
+      // on the bar is not crushed back into the moss.
+      vec3 mullionSheath = mix(sheathCol, vec3(0.010, 0.014, 0.012), 0.34);
+      mullionSheath += traceCol * exposed * 0.20;
       vec3 mullionCol = mix(mullionPlain, mullionSheath, sheathGate);
       vec3 body = mix(faceCol, mullionCol, frameBand * 0.94);
 
@@ -1853,15 +1878,16 @@ loadStreetAtlas();
 
 // Circuit underlayer + moss/kudzu/fungus cover. Vertical concrete only.
 // A failed load leaves uSheathOn at 0 (procedural night concrete).
-const sheathCache = location.protocol === 'file:' ? '' : '?v=sheath1';
+const sheathCache = location.protocol === 'file:' ? '' : '?v=sheath3';
 function prepSheath(tex) {
   tex.colorSpace = THREE.NoColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  // No mips — a blurred alpha turns the circuit into a bright haze.
+  tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = true;
-  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.generateMipmaps = false;
+  tex.anisotropy = 1;
   tex.needsUpdate = true;
   return tex;
 }
