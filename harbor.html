@@ -2410,12 +2410,33 @@ ground.rotation.x = -Math.PI / 2;
 ground.position.set(0, -0.04, (GROUND_Z_MAX + GROUND_Z_MIN) * 0.5);
 scene.add(ground);
 
-// ——— Hero quay slab — wet specular + fake skyline reflection ———
+// ——— Hero quay slab — wet night deck plates ———
+// Photo atlas (original, tileable): quay-deck-atlas / normal / rough.
+// Geometry stays the flat promenade. A swell here (old ~10–20 cm) rose through
+// the gold plate, whose rim sits only ~2 cm above y=0.04, and read as water.
+// Streets keep asphaltMat — this sampler is the hero slab only.
+function deckSolid(r, g, b, colorSpace) {
+  const data = new Uint8Array([r, g, b, 255]);
+  const tex = new THREE.DataTexture(data, 1, 1);
+  tex.colorSpace = colorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
 const quayMat = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
     uPointer: { value: new THREE.Vector2(0, 0) },
     uAmp: { value: freezeMotion ? 0 : 0.1 },
+    uDeckMap: { value: deckSolid(28, 34, 44, THREE.SRGBColorSpace) },
+    uDeckNormal: { value: deckSolid(128, 128, 255, THREE.NoColorSpace) },
+    uDeckRough: { value: deckSolid(118, 118, 118, THREE.NoColorSpace) },
+    // 8 planks across the sheet. Repeat 10 along the 22-unit edge → ~0.28 units per board.
+    uDeckRepeat: { value: new THREE.Vector2(10, 2) },
+    uDeckOn: { value: 0 },
+    uFogColor: { value: new THREE.Color(0x05060a) },
+    uFogDensity: { value: 0.018 },
   },
   vertexShader: /* glsl */`
     uniform float uTime;
@@ -2439,34 +2460,106 @@ const quayMat = new THREE.ShaderMaterial({
     }
   `,
   fragmentShader: /* glsl */`
-    uniform float uTime;
-    uniform vec2 uPointer;
+    uniform sampler2D uDeckMap;
+    uniform sampler2D uDeckNormal;
+    uniform sampler2D uDeckRough;
+    uniform vec2 uDeckRepeat;
+    uniform float uDeckOn;
+    uniform vec3 uFogColor;
+    uniform float uFogDensity;
     varying vec2 vUv;
     varying vec3 vPos;
     varying vec3 vWorldPos;
     ${NOISE_GLSL}
     void main(){
+      // uv.y 0 is the water edge. Boards run out to the seawall; seams tile on x.
+      vec2 uv = vUv * uDeckRepeat;
+      vec3 albedo = texture2D(uDeckMap, uv).rgb;
+      vec3 nTex = texture2D(uDeckNormal, uv).xyz * 2.0 - 1.0;
+      float rough = clamp(texture2D(uDeckRough, uv).g, 0.04, 1.0);
+      // Plane spin -X: +U is +X, +V is -Z, geometric normal is +Y.
+      vec3 N = normalize(vec3(nTex.x, nTex.z, -nTex.y));
+      vec3 V = normalize(cameraPosition - vWorldPos);
+      vec3 L = normalize(vec3(8.0, 14.0, 6.0));
+      vec3 H = normalize(L + V);
+      float gloss = (1.0 - rough);
+      float spec = pow(max(dot(N, H), 0.0), mix(68.0, 11.0, rough)) * gloss * gloss;
+      // Albedo already carries cool dock grade, joint AO, and grit.
+      // Spec is a static sheen on the plates — not a moving wash.
+      vec3 col = albedo;
+      col += vec3(0.58, 0.66, 0.78) * spec * 0.50;
+      float fres = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 4.0);
+      col += vec3(0.07, 0.09, 0.13) * fres * gloss * 0.45;
+
+      // Dry promenade. A static damp line only in the last strip against the
+      // seawall. No animated wash and no pointer puddle on the plate.
+      float againstWall = 1.0 - smoothstep(0.0, 0.07, vUv.y);
+      col = mix(col, col * vec3(0.40, 0.50, 0.62), againstWall * 0.62);
+
+      float edge = smoothstep(0.018, 0.0, min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y)));
+      col = mix(col, col + vec3(0.045, 0.034, 0.012), edge * 0.45);
+
+      // Missing atlas: previous dry stone, so the slab never drops out.
       vec3 stone = vec3(0.08, 0.09, 0.13);
-      float grain = fbm(vUv * 18.0 + uTime * 0.05);
+      float grain = fbm(vUv * 18.0);
       stone += grain * 0.045;
-      // plank / seam lines along quay
       float seam = smoothstep(0.02, 0.0, abs(fract(vUv.x * 14.0) - 0.5) - 0.46);
       stone *= 1.0 - seam * 0.18;
-      float edge = smoothstep(0.025, 0.0, min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y)));
-      stone = mix(stone, vec3(0.35, 0.3, 0.18), edge * 0.25);
-      // Dry promenade. A static damp line only in the last strip against the
-      // seawall (uv.y 0 is the water edge). No animated wash across the plate.
-      float againstWall = 1.0 - smoothstep(0.0, 0.07, vUv.y);
       stone = mix(stone, vec3(0.045, 0.055, 0.07), againstWall * 0.55);
-      vec3 col = clamp(stone, 0.0, 0.35);
+      col = mix(clamp(stone, 0.0, 0.35), col, uDeckOn);
+
+      float dist = length(vWorldPos - cameraPosition);
+      float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 12.0);
+      col = mix(col, uFogColor, clamp(fog, 0.0, 0.42));
+      // Stay under the bloom threshold (0.72) — lanterns and Signal own bloom.
+      col = clamp(col, 0.0, 0.62);
       gl_FragColor = vec4(col, 1.0);
     }
   `,
 });
 const quay = new THREE.Mesh(new THREE.PlaneGeometry(22, 6, 80, 40), quayMat);
+quay.name = 'hero-quay';
 quay.rotation.x = -Math.PI / 2;
 quay.position.set(0, 0.04, 2.4);
 scene.add(quay);
+
+function prepDeckColor(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+function prepDeckData(tex) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+window.__quayDeck = { ready: false, repeat: [10, 2] };
+const deckCache = location.protocol === 'file:' ? '' : '?v=deck1';
+Promise.all([
+  atlasLoader.loadAsync(new URL('quay-deck-atlas.png' + deckCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-deck-normal.png' + deckCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-deck-rough.png' + deckCache, atlasBase).href),
+]).then(([color, normal, rough]) => {
+  quayMat.uniforms.uDeckMap.value = prepDeckColor(color);
+  quayMat.uniforms.uDeckNormal.value = prepDeckData(normal);
+  quayMat.uniforms.uDeckRough.value = prepDeckData(rough);
+  quayMat.uniforms.uDeckOn.value = 1;
+  window.__quayDeck.ready = true;
+}).catch((err) => {
+  console.warn('Quay deck atlas failed — procedural promenade remains', err);
+});
 
 // ——— Water — Gerstner + Beer-Lambert + Schlick + lantern specular (from water lesson) ———
 // Placement locks unchanged: WATER_NEAR_Z outboard of seawall, Y below deck, dry quay.
