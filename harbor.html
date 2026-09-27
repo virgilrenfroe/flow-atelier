@@ -794,7 +794,7 @@ scene.add(curbs);
 // Teachers: van Dongen Interior Mapping (2008); Gotow Part 1; Chandler & Yang procwin;
 // Mapbox building.fragment faux rooms; three-fenestra (rooms behind glass + Fresnel) — implemented in GLSL.
 // Kill sway. Local façade UV from vLocalPos × instance scale. Mullions = opaque wall. Windows = holes + rooms.
-// Pass 7 · atlases wired: room-atlas-occupied-32 (8×4 fenestra) upstairs · shop-atlas ground band.
+// Pass 7 · atlases wired: room-atlas-occupied-32 (8×4 fenestra) on every floor above 0 · shop-atlas on floor 0 only.
 const INSTANCE_COUNT = 128;
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 boxGeo.translate(0, 0.5, 0);
@@ -820,6 +820,8 @@ const buildingMat = new THREE.ShaderMaterial({
     uFaceCount: { value: 7.0 },
     uFaceCols: { value: 4.0 },
     uFaceRows: { value: 2.0 },
+    uSignAtlas: { value: null },
+    uSignOn: { value: 0.0 },
   },
   vertexShader: /* glsl */`
     varying vec3 vColor;
@@ -892,6 +894,8 @@ const buildingMat = new THREE.ShaderMaterial({
     uniform float uFaceCount;
     uniform float uFaceCols;
     uniform float uFaceRows;
+    uniform sampler2D uSignAtlas;
+    uniform float uSignOn;
     ${NOISE_GLSL}
 
     // Sample atlas cell (cols×rows). huv in [0,1]. Flip V for image space.
@@ -904,6 +908,17 @@ const buildingMat = new THREE.ShaderMaterial({
       vec2 inset = cellSize * 0.001;
       vec2 cellOrigin = vec2(col * cellSize.x, 1.0 - (row + 1.0) * cellSize.y) + inset;
       return texture2D(atlas, cellOrigin + clamp(huv, 0.0, 1.0) * (cellSize - 2.0 * inset)).rgb;
+    }
+
+    vec4 sampleAtlasRGBA(sampler2D atlas, float cols, float rows, float idx, vec2 huv) {
+      float n = cols * rows;
+      float id = mod(floor(idx + 0.5), n);
+      float col = mod(id, cols);
+      float row = floor(id / cols);
+      vec2 cellSize = vec2(1.0 / cols, 1.0 / rows);
+      vec2 inset = cellSize * 0.004;
+      vec2 cellOrigin = vec2(col * cellSize.x, 1.0 - (row + 1.0) * cellSize.y) + inset;
+      return texture2D(atlas, cellOrigin + clamp(huv, 0.0, 1.0) * (cellSize - 2.0 * inset));
     }
 
     // Shared UV center-crop for EVERY interior atlas sample (room + shop + face-map).
@@ -1090,16 +1105,15 @@ const buildingMat = new THREE.ShaderMaterial({
       wallCol += vec3(0.008, 0.009, 0.011) * (blotch - 0.42) * isVert;
       // Slightly cooler shadow side — reads as matte concrete, not plastic
       wallCol = mix(wallCol, wallCol * vec3(0.92, 0.94, 1.02), (1.0 - ndl) * 0.35 * isVert);
-      // Ground-floor shop band in metres (taller cells + warmer interiors)
-      float shopBandM = 2.55;
-      float nearGround = (1.0 - smoothstep(shopBandM * 0.82, shopBandM * 1.08, lpM.y)) * step(0.15, lpM.y);
-
       // Cell size CONSTANT in metres (Virgil 2026-09-26).
-      // cellW/cellH that vary with height (nearGround mix) bend vertical mullions
-      // into curves — roomUV.x = facadeU/cellW(y) shifts sideways as Y changes.
-      // Same square pitch every floor; shop band only changes interior atlas/warmth.
+      // cellW/cellH that vary with height bend vertical mullions into curves.
+      // Same square pitch every floor. Shop atlas is floor index 0 only —
+      // a metre band (the old 2.55 m shopBand) covered several rows and
+      // painted retail interiors on the floors above the street.
       float cellW = 0.76;
       float cellH = 0.76;
+      float floorIndex = floor(max(lpM.y, 0.0) / cellH);
+      float isShop = (1.0 - step(0.5, floorIndex)) * step(0.02, lpM.y);
 
       // Dominant face → façade U along the horizontal tangent, V along height
       vec3 T, B, D; // tangent, bitangent, inward depth (unit-local)
@@ -1127,8 +1141,8 @@ const buildingMat = new THREE.ShaderMaterial({
       // Mullions / frames — thin dark bands; window = hole (Virgil 2026-09-26).
       // Old 0.14/0.16 left ~49% glass + beige wallCol rings (frameBand only covered
       // inner 55% of the margin). Shrink margins and paint the whole leftover as mullion.
-      float mullU = mix(0.05, 0.04, nearGround);
-      float mullV = mix(0.055, 0.045, nearGround);
+      float mullU = mix(0.05, 0.04, isShop);
+      float mullV = mix(0.055, 0.045, isShop);
       float inPane = step(mullU, f.x) * step(f.x, 1.0 - mullU)
                    * step(mullV, f.y) * step(f.y, 1.0 - mullV);
       // Keep clear of roof/plinth edge
@@ -1147,6 +1161,22 @@ const buildingMat = new THREE.ShaderMaterial({
       float atlasFlat = step(0.5, uAtlasOn) * (1.0 - step(0.5, uFaceMapOn));
       inPane *= mix(step(edgeKillM, edgeDistM), 1.0, atlasFlat);
       float edgeFade = mix(smoothstep(edgeKillM, edgeSoftM, edgeDistM), 1.0, atlasFlat);
+
+      // Ground floor only: a clear door bay (center of the façade, plus one
+      // more on wide fronts). Narrow single-bay faces split the cell so a
+      // door and a signed window both fit.
+      float bayIndex = floor((faceAlong + halfAlong) / max(cellW, 1e-4));
+      float bayCount = max(floor((halfAlong * 2.0) / max(cellW, 1e-4) + 1e-3), 1.0);
+      float centerBay = floor((bayCount - 1.0) * 0.5);
+      float onCenter = 1.0 - step(0.51, abs(bayIndex - centerBay));
+      float wideExtra = step(4.5, bayCount) * (1.0 - step(0.25, abs(bayIndex)));
+      float doorCell = max(onCenter, wideExtra);
+      float wideFace = step(1.5, bayCount);
+      float doorX = mix(step(f.x, 0.50), step(0.07, f.x) * step(f.x, 0.93), wideFace);
+      float isDoorFrag = isShop * mix(1.0, doorCell, wideFace) * doorX;
+      float doorOpen = isDoorFrag
+        * step(0.03, lpM.y) * step(lpM.y, cellH * 0.98);
+      inPane = max(inPane, doorOpen * isVert);
 
       // Frame / mullion bands — whole margin is dark mullion (not façade beige)
       float frameBand = isVert * (1.0 - step(
@@ -1170,7 +1200,7 @@ const buildingMat = new THREE.ShaderMaterial({
       float coolAmt = smoothstep(0.35, 0.7, vColor.b);
       float litThresh = mix(0.48, 0.30, warmAmt);
       litThresh = mix(litThresh, 0.46, coolAmt * 0.55);
-      litThresh = mix(litThresh, 0.16, nearGround * 0.9);
+      litThresh = mix(litThresh, 0.16, isShop * 0.9);
       float lit = step(litThresh, h0);
       float flickerGate = step(0.93, h1);
       float flicker = 1.0 - flickerGate * uLive * (0.25 + 0.55 * (0.5 + 0.5 * sin(uTime * (1.4 + h1 * 2.2) + h0 * 6.28)));
@@ -1195,7 +1225,7 @@ const buildingMat = new THREE.ShaderMaterial({
                   + vec3(localXY.x * cellW, localXY.y * cellH, 0.0);
         float cellSpan = mix(cellW, cellH, 0.5);
         // Shallower box — deep rooms exaggerate wall bow at glancing angles
-        float depthM = mix(0.78, 1.05, nearGround);
+        float depthM = mix(0.78, 1.05, isShop);
         vec3 camLocal = vec3(camM.x / cellW, camM.y / cellH, camM.z / cellSpan);
         float roomDepth = depthM / cellSpan;
 
@@ -1229,7 +1259,7 @@ const buildingMat = new THREE.ShaderMaterial({
           interior = mix(body, interior, edgeFade);
         } else if (uAtlasOn > 0.5) {
           // Flat ortho fenestra sample — no ray-box bow
-          interior = shadeRoomAtlas(pane, glow, nearGround, h0 + vId * 0.13);
+          interior = shadeRoomAtlas(pane, glow, isShop, h0 + vId * 0.13);
           interior = mix(body, interior, edgeFade);
         } else {
           vec3 rayDirM = normalize((vLocalPos - vCamLocal) * vScale);
@@ -1242,7 +1272,7 @@ const buildingMat = new THREE.ShaderMaterial({
           ));
           vec3 ro = vec3(pane.x, pane.y, 0.001);
           if (rd.z > 0.015) {
-            interior = shadeRoomProc(ro, rd, glow, warmAmt, nearGround);
+            interior = shadeRoomProc(ro, rd, glow, warmAmt, isShop);
           } else {
             interior = mix(vec3(0.02, 0.022, 0.03), vec3(0.12, 0.1, 0.06) * glow, 0.3);
           }
@@ -1267,6 +1297,48 @@ const buildingMat = new THREE.ShaderMaterial({
         vec3 glass = mix(interior, glassRefl, glassMix);
         glass = mix(glass, interior, glow * mix(0.55, 0.72, atlasPath) * (1.0 - fres * 0.9));
         body = glass;
+
+        // Street door: dark leaf to the pavement, shop glass only in the transom.
+        if (isDoorFrag > 0.5) {
+          float doorV = clamp(lpM.y / cellH, 0.0, 1.0);
+          float doorU = wideFace > 0.5
+            ? clamp((f.x - 0.07) / 0.86, 0.0, 1.0)
+            : clamp(f.x / 0.50, 0.0, 1.0);
+          float transom = smoothstep(0.74, 0.80, doorV);
+          float lite = step(0.28, doorU) * step(doorU, 0.72)
+                     * step(0.58, doorV) * step(doorV, 0.72);
+          vec3 doorCol = vec3(0.055, 0.052, 0.048);
+          float leftP = step(0.10, doorU) * step(doorU, 0.46)
+                      * step(0.08, doorV) * step(doorV, 0.52);
+          float rightP = step(0.54, doorU) * step(doorU, 0.90)
+                       * step(0.08, doorV) * step(doorV, 0.52);
+          doorCol = mix(doorCol, vec3(0.032, 0.030, 0.028), max(leftP, rightP));
+          float stile = smoothstep(0.02, 0.0, abs(doorU - 0.5) - 0.012);
+          doorCol = mix(doorCol, vec3(0.09, 0.082, 0.07), stile);
+          float handle = step(0.57, doorU) * step(doorU, 0.64)
+                       * step(0.36, doorV) * step(doorV, 0.44);
+          doorCol = mix(doorCol, vec3(0.62, 0.46, 0.20), handle);
+          float sill = 1.0 - smoothstep(0.0, 0.06, doorV);
+          doorCol = mix(doorCol, vec3(0.02, 0.02, 0.022), sill);
+          body = mix(doorCol, glass, max(transom, lite));
+        }
+
+        // Retail names on ground-floor glass only — soft gold / sea-glass, not stickers.
+        if (uSignOn > 0.5 && isShop > 0.5) {
+          float signBand = smoothstep(0.60, 0.68, f.y) * (1.0 - smoothstep(0.90, 0.97, f.y));
+          signBand *= smoothstep(0.10, 0.16, f.x) * (1.0 - smoothstep(0.84, 0.92, f.x));
+          signBand *= mix(1.0, smoothstep(0.76, 0.84, f.y), isDoorFrag);
+          float faceKey = step(abs(Ln.z), abs(Ln.x));
+          float signIdx = floor(hash(vec2(vId * 1.31 + faceKey * 5.0, bayIndex * 0.47 + 2.2)) * 8.0);
+          vec2 suv = vec2(
+            clamp((f.x - 0.12) / 0.76, 0.0, 1.0),
+            clamp((f.y - 0.62) / 0.30, 0.0, 1.0)
+          );
+          vec4 sgn = sampleAtlasRGBA(uSignAtlas, 4.0, 2.0, signIdx, suv);
+          float a = sgn.a * signBand * 0.88;
+          body = mix(body, sgn.rgb, a);
+          body += sgn.rgb * a * 0.18;
+        }
       }
 
       // Soft roof wash
@@ -1345,6 +1417,104 @@ async function loadHarborAtlases() {
     }
   }
 }
+
+// Ground-floor retail names. Original harbor words, soft gold / sea-glass.
+// Transparent plate so the shop interior stays visible around the letters.
+function makeHarborSignAtlas() {
+  const cols = 4;
+  const rows = 2;
+  const cw = 256;
+  const ch = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = cols * cw;
+  canvas.height = rows * ch;
+  const ctx = canvas.getContext('2d');
+  const names = ['SALT', 'BERTH', 'HULL', 'KEEL', 'NETS', 'LAMP', 'CARGO', 'DOCK'];
+  const sea = (i) => i % 3 === 1;
+  function glyph(kind, x, y, ink) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (kind === 'wave') {
+      ctx.beginPath();
+      ctx.moveTo(-16, 4);
+      ctx.bezierCurveTo(-8, -10, -2, 14, 8, 2);
+      ctx.bezierCurveTo(14, -6, 18, 8, 22, 0);
+      ctx.stroke();
+    } else if (kind === 'ring') {
+      ctx.beginPath();
+      ctx.arc(0, 0, 12, 0.4, Math.PI * 1.85);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 14, 3.2, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (kind === 'lamp') {
+      ctx.beginPath();
+      ctx.moveTo(-10, -8);
+      ctx.lineTo(10, -8);
+      ctx.lineTo(6, 6);
+      ctx.lineTo(-6, 6);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, 6);
+      ctx.lineTo(0, 14);
+      ctx.moveTo(-7, 14);
+      ctx.lineTo(7, 14);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(12, 10);
+      ctx.lineTo(-12, 10);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  const kinds = ['wave', 'ring', 'mark', 'wave', 'ring', 'lamp', 'mark', 'ring'];
+  for (let i = 0; i < names.length; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = col * cw;
+    const y = row * ch;
+    const ink = sea(i) ? 'rgba(186, 214, 220, 0.94)' : 'rgba(232, 196, 120, 0.95)';
+    const glow = sea(i) ? 'rgba(140, 186, 198, 0.55)' : 'rgba(240, 194, 75, 0.5)';
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, cw, ch);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(6, 8, 14, 0.42)';
+    ctx.fillRect(x + 18, y + 28, cw - 36, ch - 52);
+    ctx.shadowColor = glow;
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = ink;
+    ctx.font = '700 62px "Arial Black", "Noto Sans", "Liberation Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(names[i], x + cw * 0.58, y + ch * 0.52);
+    ctx.shadowBlur = 0;
+    glyph(kinds[i], x + 48, y + ch * 0.52, ink);
+    ctx.restore();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.premultiplyAlpha = false;
+  tex.needsUpdate = true;
+  buildingMat.uniforms.uSignAtlas.value = tex;
+  buildingMat.uniforms.uSignOn.value = 1.0;
+  buildingMat.needsUpdate = true;
+}
+makeHarborSignAtlas();
 
 if (facesMode) {
   const faceBase = new URL('./06-intermediate-assets/face-proto/', import.meta.url);
