@@ -965,6 +965,25 @@ shopBreakTex.wrapT = THREE.ClampToEdgeWrapping;
 shopBreakTex.colorSpace = THREE.NoColorSpace;
 shopBreakTex.needsUpdate = true;
 
+// Façade sheath placeholders. Real sheets bind in loadSheathAtlases; uSheathOn
+// stays 0 until then so a failed load keeps the night-concrete grain.
+function facadeSheathPlaceholder() {
+  const c = document.createElement('canvas');
+  c.width = 2;
+  c.height = 2;
+  const g = c.getContext('2d');
+  g.fillStyle = '#141820';
+  g.fillRect(0, 0, 2, 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+const sheathCircuitPlaceholder = facadeSheathPlaceholder();
+const sheathGrowthPlaceholder = facadeSheathPlaceholder();
+
 const buildingMat = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
@@ -989,6 +1008,9 @@ const buildingMat = new THREE.ShaderMaterial({
     uSignAtlas: { value: null },
     uSignOn: { value: 0.0 },
     uShopBreak: { value: shopBreakTex },
+    uSheathCircuit: { value: sheathCircuitPlaceholder },
+    uSheathGrowth: { value: sheathGrowthPlaceholder },
+    uSheathOn: { value: 0.0 },
   },
   vertexShader: /* glsl */`
     varying vec3 vColor;
@@ -1064,6 +1086,9 @@ const buildingMat = new THREE.ShaderMaterial({
     uniform sampler2D uSignAtlas;
     uniform float uSignOn;
     uniform sampler2D uShopBreak;
+    uniform sampler2D uSheathCircuit;
+    uniform sampler2D uSheathGrowth;
+    uniform float uSheathOn;
 
     // Ground-floor shop pane break mask. Rows: 4 faces × 16 cell slots.
     // Slot = floor(along / cellW) + 8. Face +X 0, −X 1, +Z 2, −Z 3.
@@ -1263,6 +1288,9 @@ const buildingMat = new THREE.ShaderMaterial({
 
       // Concrete façade body (Virgil 2026-09-26) — architectural grain on opaque
       // wall / pier / frameBand only. Panes keep atlas interiors unchanged.
+      // When the sheath sheets load, vertical faces replace this grain with
+      // moss over a circuit underlayer; this color remains the roof/floor
+      // fallback and the concrete tint inside opened patches.
       // Cool-gray bias on cool instances, warm-gray on warm; night Noctuary dark.
       float warmBias = smoothstep(0.35, 0.75, vColor.r);
       float coolBias = smoothstep(0.35, 0.70, vColor.b);
@@ -1394,9 +1422,61 @@ const buildingMat = new THREE.ShaderMaterial({
       ));
       frameBand *= (1.0 - inDoorCol);
       inPane *= (1.0 - inDoorCol);
-      // Dark mullion on concrete — clearer pane contrast vs textured body
-      vec3 mullionCol = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
-      vec3 body = mix(wallCol, mullionCol, frameBand * 0.94);
+      // Dual sheath on vertical concrete only (Virgil: circuit under, living cover).
+      // Samples stay outside the branch — WebGL1 derivatives need a uniform flow.
+      // Tile is façade-local metres (concUV), not world XZ.
+      // Growth alpha is mostly shut. Openings are the atlas cracks/flakes plus
+      // a few world-space worn patches, fissures, and a narrow corner peel —
+      // wide enough that the circuit actually reads at night.
+      vec2 sheathUv = concUV / 2.05 + vec2(vId * 0.37, vId * 0.21);
+      vec4 circuit = texture2D(uSheathCircuit, sheathUv);
+      vec4 growth = texture2D(uSheathGrowth, sheathUv);
+      // Atlas is already night-valued. Cap only stops a stray highlight
+      // so leaflet veins, moss tips, and shelf zones still separate.
+      vec3 moss = min(growth.rgb, vec3(0.24, 0.26, 0.20));
+      // Steep cover so a mip-blurred edge stays moss and a real opening stays open.
+      float cover = smoothstep(0.04, 0.30, growth.a);
+      // Binary openings — a soft shoulder was a bright circuit haze.
+      // Worn patches, a few per façade, large enough to show a run of traces.
+      float flake = step(0.80, fbm(concUV * 0.62 + vec2(2.2, vId * 0.09)));
+      // Fissures a few centimetres wide. Gated so they are not a barcode.
+      float seamU = abs(fract(concUV.x * 1.15 + vId * 0.13) - 0.5);
+      float seamV = abs(fract(concUV.y * 0.72 + 0.37) - 0.5);
+      float crackLine = max(step(seamU, 0.020), step(seamV, 0.016));
+      float crackGate = step(0.76, fbm(concUV * 0.48 + vec2(vId, 5.1)));
+      float edgePeek = step(edgeDistM, 0.10);
+      cover *= 1.0 - max(max(flake, crackLine * crackGate), edgePeek);
+      cover = clamp(cover, 0.0, 1.0);
+      // Board that shows inside an opening: atlas traces, plus metre-scale
+      // runs so a flake is recognizably circuitry and not bare concrete.
+      float hOn = step(0.42, hash(vec2(floor(concUV.y * 3.4), vId + 1.0)));
+      float vOn = step(0.52, hash(vec2(floor(concUV.x * 2.8), vId + 4.0)));
+      float hLine = 1.0 - smoothstep(0.03, 0.11, abs(fract(concUV.y * 3.4) - 0.5));
+      float vLine = 1.0 - smoothstep(0.03, 0.10, abs(fract(concUV.x * 2.8) - 0.5));
+      float pcb = max(hLine * hOn, vLine * vOn);
+      float viaCell = hash(floor(concUV * 3.4) + vec2(vId, 2.0));
+      float via = smoothstep(0.16, 0.02, length(fract(concUV * 3.4) - 0.5));
+      pcb = max(pcb, via * step(0.78, viaCell));
+      float amberPick = step(0.67, hash(vec2(floor(concUV.y * 3.4 + concUV.x), vId)));
+      vec3 traceCol = mix(vec3(0.09, 0.40, 0.44), vec3(0.52, 0.26, 0.07), amberPick);
+      // Atlas traces are hot in the PNG; pull them into a night glint before mix.
+      vec3 circuitNight = mix(circuit.rgb * 0.72, circuit.rgb * vec3(0.42, 0.55, 0.55), circuit.a);
+      vec3 under = mix(circuitNight, traceCol, max(pcb, circuit.a));
+      vec3 sheathCol = mix(under, moss, cover);
+      // Subtle night glint on whatever trace is actually uncovered.
+      float exposed = max(pcb, circuit.a) * (1.0 - cover);
+      sheathCol += traceCol * exposed * 0.16;
+      sheathCol = mix(sheathCol, sheathCol * vec3(0.90, 0.94, 1.03), (1.0 - ndl) * 0.22);
+      float sheathGate = step(0.5, uSheathOn) * isVert;
+      vec3 faceCol = mix(wallCol, sheathCol, sheathGate);
+      // Unsheathed mullion (roof fallback / failed atlas) stays the old dark bar.
+      vec3 mullionPlain = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
+      // Frame stays darker than the pier. The glint is re-added so a trace
+      // on the bar is not crushed back into the moss.
+      vec3 mullionSheath = mix(sheathCol, vec3(0.010, 0.014, 0.012), 0.34);
+      mullionSheath += traceCol * exposed * 0.20;
+      vec3 mullionCol = mix(mullionPlain, mullionSheath, sheathGate);
+      vec3 body = mix(faceCol, mullionCol, frameBand * 0.94);
 
       // Shared 3D room seed (building-local) — same volume from +X or +Z.
       // Keep 2D cell/f/pane for façade mullion grid only.
@@ -1796,6 +1876,42 @@ function loadStreetAtlas() {
   });
 }
 loadStreetAtlas();
+
+// Circuit underlayer + moss/kudzu/fungus cover. Vertical concrete only.
+// A failed load leaves uSheathOn at 0 (procedural night concrete).
+const sheathCache = location.protocol === 'file:' ? '' : '?v=sheath4';
+function prepSheath(tex) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  // No mips — a blurred alpha turns the circuit into a bright haze.
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.anisotropy = 1;
+  tex.needsUpdate = true;
+  return tex;
+}
+function loadSheathAtlases() {
+  const circuitUrl = new URL('facade-circuit.png' + sheathCache, atlasBase).href;
+  const growthUrl = new URL('facade-growth.png' + sheathCache, atlasBase).href;
+  window.__sheathAtlas = 'pending';
+  Promise.all([
+    atlasLoader.loadAsync(circuitUrl),
+    atlasLoader.loadAsync(growthUrl),
+  ]).then(([circuitTex, growthTex]) => {
+    if (!circuitTex.image || !growthTex.image) throw new Error('empty sheath atlas');
+    buildingMat.uniforms.uSheathCircuit.value = prepSheath(circuitTex);
+    buildingMat.uniforms.uSheathGrowth.value = prepSheath(growthTex);
+    buildingMat.uniforms.uSheathOn.value = 1.0;
+    buildingMat.needsUpdate = true;
+    window.__sheathAtlas = 'circuit-moss';
+  }).catch((err) => {
+    console.warn('Harbor façade sheath skipped — concrete grain remains', err);
+    window.__sheathAtlas = 'fallback';
+  });
+}
+loadSheathAtlases();
 
 function prepAtlas(tex) {
   tex.colorSpace = THREE.SRGBColorSpace;
