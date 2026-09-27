@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <title>Noctuary · intermediate · Harbor</title>
+<!-- water-ghostfix-20260927: drop caustics-lite scroll bands -->
 <style>
   :root {
     --font-display: "Bricolage Grotesque", system-ui, sans-serif;
@@ -1866,8 +1867,9 @@ const waterMat = new THREE.ShaderMaterial({
                 + vec3(0.95, 0.74, 0.38) * (specB * 0.4 + streakMaskB * 0.1 * fres) * attenB;
       col += spec * mix(0.2, 1.0, uReflect);
 
-      float scroll = pow(max(0.0, sin(vWorldPos.x * 5.0 + fbm(vWorldPos.xz * 1.6) * 2.0 + uTime * 0.25)), 22.0);
-      col += vec3(0.50, 0.40, 0.22) * scroll * 0.08 * uReflect * (0.4 + 0.6 * fres);
+      // Removed leftover caustics-lite scroll bands (old night-streak grid):
+      // sin(x*5) brown stripes read as ghost lines under the Gerstner basin.
+      // Keep lantern X-streaks + foam + Fresnel above.
 
       col = min(col, vec3(0.24));
 
