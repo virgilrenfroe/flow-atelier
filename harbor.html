@@ -4916,144 +4916,433 @@ for (const gd of GUY_DEFS) {
   );
 }
 
-// —— Banners: linked rigid segments + springs (cloth-like) ——
+// —— Quay pennants: tapered cloth on a halyard (not thick neon slabs) ——
+// Two short strings along the promenade. Each pennant is five thin trapezoid
+// panels on a center hinge, with a vertex ripple on the leech so the fly
+// flutters in the wind. Marks are original — Harbor, Signal house, Quay, Fenestra.
+const PENNANT_ROWS = 5;
+const PENNANT_PER_STRING = 3;
+const PENNANT_ROW_H = 0.172;
+const PENNANT_TIP_W = 0.05;
+const PENNANT_TIE = 0.055;
+const PENNANT_CABLE_Y = 2.68;
+const PENNANT_POST_H = 2.74;
+const PENNANT_MARGIN = 0.28;
+const PENNANT_GAP = 0.11;
+const PENNANT_MARKS = ['HARBOR', 'SIGNAL', 'QUAY', 'FENESTRA'];
+// East string sits where the gold slab was; west string is seaward of the
+// guy cables so the cloth clears Signal and the Rube chain.
 const BANNER_DEFS = [
   {
-    pole: [5.55, 0.04, 3.55],
-    yaw: -0.35,
-    w: 0.62, h: 0.36, segs: 3,
-    color: 0xf0c24b, emissive: 0xf0c24b, ei: 0.12,
+    a: [4.15, 0.04, 4.32],
+    b: [7.28, 0.04, 4.58],
+    marks: [0, 1, 2],
   },
   {
-    pole: [-4.15, 0.04, 4.15],
-    yaw: 0.55,
-    w: 0.55, h: 0.34, segs: 3,
-    color: 0x8a7bb8, emissive: 0x8a7bb8, ei: 0.1,
+    a: [-5.05, 0.04, 4.46],
+    b: [-1.82, 0.04, 4.74],
+    marks: [2, 3, 0],
   },
 ];
-const bannerClothMat = (def) => new THREE.MeshStandardMaterial({
-  color: def.color,
-  roughness: 0.82,
-  metalness: 0.04,
-  emissive: def.emissive,
-  emissiveIntensity: def.ei,
+
+function makePennantFallbackMap() {
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 512;
+  const g = c.getContext('2d');
+  const dyes = ['#7a3c34', '#1c1e28', '#163840', '#342846'];
+  for (let i = 0; i < 4; i++) {
+    g.fillStyle = dyes[i];
+    g.fillRect(i * 256, 0, 256, 512);
+    g.strokeStyle = 'rgba(242,235,224,0.07)';
+    g.lineWidth = 1;
+    for (let y = 0; y < 512; y += 4) {
+      g.beginPath();
+      g.moveTo(i * 256, y);
+      g.lineTo(i * 256 + 256, y);
+      g.stroke();
+    }
+    g.fillStyle = 'rgba(242,235,224,0.92)';
+    g.font = '700 40px sans-serif';
+    g.textAlign = 'center';
+    g.fillText(PENNANT_MARKS[i], i * 256 + 128, 210);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const pennantClothMat = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  map: makePennantFallbackMap(),
+  roughness: 0.9,
+  metalness: 0.03,
+  emissive: 0xfff2d4,
+  emissiveIntensity: 0.2,
   side: THREE.DoubleSide,
+  transparent: true,
+  opacity: 1,
+  alphaTest: 0.18,
+  depthWrite: true,
+});
+pennantClothMat.onBeforeCompile = (shader) => {
+  shader.uniforms.uClothTime = { value: 0 };
+  shader.uniforms.uClothGust = { value: 0.35 };
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      '#include <common>',
+      `#include <common>
+       attribute float aHang;
+       uniform float uClothTime;
+       uniform float uClothGust;`
+    )
+    .replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+       float uCell = fract(uv.x * 4.0);
+       float edge = abs(uCell - 0.5) * 2.0;
+       float flutter = aHang * aHang * (0.18 + 0.82 * edge);
+       float gust = max(uClothGust, 0.22);
+       float phase = aHang * 8.5 + uClothTime * (1.7 + gust);
+       float wave = sin(phase + edge * 2.4);
+       float wave2 = sin(aHang * 14.0 - uClothTime * 2.4 + edge * 5.0);
+       float amp = flutter * 0.055 * gust;
+       transformed.z += wave * amp;
+       transformed.x += wave2 * edge * aHang * 0.022 * gust;`
+    );
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <opaque_fragment>',
+    `#include <opaque_fragment>
+     float ndv = abs(dot(normalize(normal), normalize(vViewPosition)));
+     float thru = pow(1.0 - ndv, 1.65);
+     gl_FragColor.rgb += diffuseColor.rgb * vec3(1.06, 0.82, 0.48) * thru * 0.36;
+     gl_FragColor.a *= mix(0.76, 0.98, ndv);`
+  );
+  pennantClothMat.userData.shader = shader;
+};
+pennantClothMat.customProgramCacheKey = () => 'quay-pennant-cloth';
+
+function pennantSyncCloth(t) {
+  const sh = pennantClothMat.userData.shader;
+  if (!sh) return;
+  sh.uniforms.uClothTime.value = t;
+  const live = !physFreeze && harborWind.on;
+  const gust = live ? harborWind.gust * (0.45 + harborWind.strength * 1.35) : 0.16;
+  sh.uniforms.uClothGust.value = gust;
+}
+
+function prepPennantColor(tex) {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+function prepPennantData(tex) {
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.needsUpdate = true;
+  return tex;
+}
+window.__pennantTex = { ready: false, marks: PENNANT_MARKS.slice() };
+const pennantCache = location.protocol === 'file:' ? '' : '?v=pennant1';
+Promise.all([
+  atlasLoader.loadAsync(new URL('quay-pennant-atlas.png' + pennantCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-pennant-normal.png' + pennantCache, atlasBase).href),
+  atlasLoader.loadAsync(new URL('quay-pennant-rough.png' + pennantCache, atlasBase).href),
+]).then(([color, normal, rough]) => {
+  const map = prepPennantColor(color);
+  pennantClothMat.map = map;
+  pennantClothMat.emissiveMap = map;
+  pennantClothMat.normalMap = prepPennantData(normal);
+  pennantClothMat.roughnessMap = prepPennantData(rough);
+  pennantClothMat.needsUpdate = true;
+  window.__pennantTex.ready = true;
+}).catch((err) => {
+  console.warn('Quay pennant atlas failed — canvas cloth remains', err);
 });
 
-for (const bd of BANNER_DEFS) {
-  const [px, py, pz] = bd.pole;
-  const poleH = 2.15;
-  const poleMesh = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.035, 0.045, poleH, 8),
+const pennantRopeMat = new THREE.MeshStandardMaterial({
+  color: 0x5a4a36, roughness: 0.9, metalness: 0.04,
+});
+const pennantBrass = new THREE.MeshStandardMaterial({
+  color: 0x8a7044, roughness: 0.4, metalness: 0.72,
+});
+const pennantCordGeo = new THREE.CylinderGeometry(1, 1, 1, 5);
+const pennantGrommetGeo = new THREE.TorusGeometry(0.015, 0.0042, 6, 10);
+const pennantRig = new THREE.Group();
+pennantRig.name = 'quay-pennants';
+scene.add(pennantRig);
+
+function pennantCord(mesh, x0, y0, x1, y1, radius, mat) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-4) return null;
+  const cord = new THREE.Mesh(pennantCordGeo, mat);
+  cord.scale.set(radius, len, radius);
+  cord.position.set((x0 + x1) * 0.5, (y0 + y1) * 0.5, 0.005);
+  cord.rotation.z = Math.atan2(-dx, dy);
+  mesh.add(cord);
+  return cord;
+}
+function pennantGrommet(mesh, x, y) {
+  const g = new THREE.Mesh(pennantGrommetGeo, pennantBrass);
+  g.position.set(x, y, 0.008);
+  mesh.add(g);
+  return g;
+}
+function pennantHalyardAt(a, b, t, target) {
+  const sag = Math.sin(Math.max(0, Math.min(1, t)) * Math.PI) * 0.1;
+  target.set(
+    a[0] + (b[0] - a[0]) * t,
+    PENNANT_CABLE_Y - sag,
+    a[2] + (b[2] - a[2]) * t,
+  );
+  return target;
+}
+function pennantWidthAt(headW, t) {
+  return PENNANT_TIP_W + (headW - PENNANT_TIP_W) * (1 - t);
+}
+function makePennantPanelGeo(corners, u0, u1, vTop, vBot, hang0, hang1, leechL, leechR, zBias) {
+  const geo = new THREE.BufferGeometry();
+  const z = zBias || 0;
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    corners.TL.x, corners.TL.y, z,
+    corners.TR.x, corners.TR.y, z,
+    corners.BR.x, corners.BR.y, z,
+    corners.BL.x, corners.BL.y, z,
+  ]), 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([
+    u0, vTop, u1, vTop, u1, vBot, u0, vBot,
+  ]), 2));
+  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([
+    0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+  ]), 3));
+  geo.setAttribute('aHang', new THREE.BufferAttribute(new Float32Array([
+    hang0, hang0, hang1, hang1,
+  ]), 1));
+  geo.setAttribute('aLeech', new THREE.BufferAttribute(new Float32Array([
+    leechL, leechR, leechR, leechL,
+  ]), 1));
+  geo.setIndex([0, 3, 2, 0, 2, 1]);
+  geo.computeTangents();
+  return geo;
+}
+function pennantPin(bodyA, localA, bodyB, localB) {
+  if (physFreeze) return;
+  const hinge = new CANNON.PointToPointConstraint(bodyA, localA, bodyB, localB);
+  physWorld.addConstraint(hinge);
+  physConstraints.push(hinge);
+}
+function pennantSpring(bodyA, localA, bodyB, localB, stiffness, damping) {
+  bodyA.pointToWorldFrame(localA, springScratchA);
+  bodyB.pointToWorldFrame(localB, springScratchB);
+  const dist = springScratchA.distanceTo(springScratchB);
+  // Cannon springs divide by length — a coincident rest pose goes NaN and the cloth explodes.
+  if (!Number.isFinite(dist) || dist < 0.008) return;
+  springAdd(bodyA, bodyB, {
+    restLength: dist,
+    stiffness,
+    damping,
+    localAnchorA: localA,
+    localAnchorB: localB,
+  });
+}
+function addPennantPost(x, z) {
+  const g = new THREE.Group();
+  g.position.set(x, 0, z);
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.026, 0.04, PENNANT_POST_H, 8),
     ironMatStd
   );
-  poleMesh.position.set(px, py + poleH * 0.5, pz);
-  scene.add(poleMesh);
-  const poleBody = new CANNON.Body({
-    mass: 0, type: CANNON.Body.STATIC,
-    shape: new CANNON.Box(new CANNON.Vec3(0.04, poleH * 0.5, 0.04)),
-    position: new CANNON.Vec3(px, py + poleH * 0.5, pz),
-  });
-  physWorld.addBody(poleBody);
-
-  const armLen = bd.w + 0.08;
-  const armY = py + poleH - 0.06;
-  const cos = Math.cos(bd.yaw);
-  const sin = Math.sin(bd.yaw);
-  const armMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(armLen, 0.045, 0.045),
+  pole.position.y = 0.04 + PENNANT_POST_H * 0.5;
+  const foot = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.09, 0.035, 8),
     ironWarmStd
   );
-  armMesh.position.set(px + cos * armLen * 0.5, armY, pz + sin * armLen * 0.5);
-  armMesh.rotation.y = -bd.yaw;
-  scene.add(armMesh);
-  const armBody = new CANNON.Body({
-    mass: 0, type: CANNON.Body.STATIC,
-    shape: new CANNON.Box(new CANNON.Vec3(armLen * 0.5, 0.025, 0.025)),
-    position: new CANNON.Vec3(px + cos * armLen * 0.5, armY, pz + sin * armLen * 0.5),
+  foot.position.y = 0.04 + 0.018;
+  const finial = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), ironMatStd);
+  finial.position.y = 0.04 + PENNANT_POST_H + 0.02;
+  const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.022, 0.038), pennantBrass);
+  cleat.position.y = PENNANT_CABLE_Y - 0.02;
+  const eye = new THREE.Mesh(pennantGrommetGeo, pennantBrass);
+  eye.position.y = PENNANT_CABLE_Y;
+  eye.rotation.y = Math.PI * 0.5;
+  g.add(pole, foot, finial, cleat, eye);
+  pennantRig.add(g);
+  const body = new CANNON.Body({
+    mass: 0,
+    type: CANNON.Body.STATIC,
+    shape: new CANNON.Box(new CANNON.Vec3(0.045, PENNANT_POST_H * 0.5, 0.045)),
+    position: new CANNON.Vec3(x, 0.04 + PENNANT_POST_H * 0.5, z),
   });
-  armBody.quaternion.setFromEuler(0, -bd.yaw, 0);
-  physWorld.addBody(armBody);
+  physWorld.addBody(body);
+}
 
-  const segEntries = [];
-  const segMass = 0.09;
-  const mat = bannerClothMat(bd);
-  for (let i = 0; i < bd.segs; i++) {
-    const cy = armY - (i + 0.5) * bd.h - 0.02;
-    const cx = px + cos * (armLen * 0.55);
-    const cz = pz + sin * (armLen * 0.55);
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(bd.w, bd.h * 0.92, 0.03),
-      mat
-    );
-    if (i === 0) mesh.layers.enable(BLOOM_LAYER);
-    const body = new CANNON.Body({
-      mass: physFreeze ? 0 : segMass,
-      shape: new CANNON.Box(new CANNON.Vec3(bd.w * 0.5, bd.h * 0.46, 0.02)),
-      position: new CANNON.Vec3(cx, cy, cz),
-      linearDamping: 0.28,
-      angularDamping: 0.4,
-      allowSleep: false,
-    });
-    body.quaternion.setFromEuler(0, -bd.yaw, 0);
-    if (physFreeze) body.type = CANNON.Body.STATIC;
-    const entry = springMakeBody(mesh, body, 'bannerSeg', segMass);
-    entry.bannerIdx = physBannerSegs.length;
-    entry.segIdx = i;
-    segEntries.push(entry);
-    physBannerSegs.push(entry);
-  }
-  // Soft hang: PointToPoint keeps segments attached; Spring adds wind give
-  const armTipLocal = new CANNON.Vec3(armLen * 0.42, 0, 0);
-  const topLocalB = new CANNON.Vec3(0, bd.h * 0.45, 0);
-  if (!physFreeze) {
-    const hinge = new CANNON.PointToPointConstraint(
-      armBody, armTipLocal, segEntries[0].body, topLocalB
-    );
-    physWorld.addConstraint(hinge);
-    physConstraints.push(hinge);
-  }
-  armBody.pointToWorldFrame(armTipLocal, springScratchA);
-  segEntries[0].body.pointToWorldFrame(topLocalB, springScratchB);
-  springAdd(armBody, segEntries[0].body, {
-    restLength: Math.max(0.01, springScratchA.distanceTo(springScratchB)),
-    stiffness: 18,
-    damping: 2.0,
-    localAnchorA: armTipLocal,
-    localAnchorB: topLocalB,
-  });
-  springMakeCable(
-    (out) => {
-      armBody.pointToWorldFrame(armTipLocal, springScratchA);
-      out.set(springScratchA.x, springScratchA.y, springScratchA.z);
-    },
-    (out) => {
-      const b = segEntries[0].body;
-      out.set(b.position.x, b.position.y + bd.h * 0.4, b.position.z);
-    },
-    0x6a6470
+const pennantUp = new THREE.Vector3(0, 1, 0);
+const pennantHead = new THREE.Vector3();
+const pennantPos = new THREE.Vector3();
+const PENNANT_HINGE_GAP = 0.014;
+let pennantCount = 0;
+
+for (let si = 0; si < BANNER_DEFS.length; si++) {
+  const bd = BANNER_DEFS[si];
+  const span = Math.hypot(bd.b[0] - bd.a[0], bd.b[2] - bd.a[2]);
+  const headW = (span - PENNANT_MARGIN * 2 - PENNANT_GAP * (PENNANT_PER_STRING - 1)) / PENNANT_PER_STRING;
+  const right = new THREE.Vector3(bd.b[0] - bd.a[0], 0, bd.b[2] - bd.a[2]).normalize();
+  const forward = new THREE.Vector3().crossVectors(right, pennantUp).normalize();
+  const basisQ = new THREE.Quaternion().setFromRotationMatrix(
+    new THREE.Matrix4().makeBasis(right, pennantUp, forward)
   );
-  for (let i = 0; i < bd.segs - 1; i++) {
-    const locA = new CANNON.Vec3(0, -bd.h * 0.45, 0);
-    const locB = new CANNON.Vec3(0, bd.h * 0.45, 0);
-    if (!physFreeze) {
-      const hinge = new CANNON.PointToPointConstraint(
-        segEntries[i].body, locA, segEntries[i + 1].body, locB
-      );
-      physWorld.addConstraint(hinge);
-      physConstraints.push(hinge);
-    }
-    segEntries[i].body.pointToWorldFrame(locA, springScratchA);
-    segEntries[i + 1].body.pointToWorldFrame(locB, springScratchB);
-    springAdd(segEntries[i].body, segEntries[i + 1].body, {
-      restLength: Math.max(0.01, springScratchA.distanceTo(springScratchB)),
-      stiffness: 14,
-      damping: 1.8,
-      localAnchorA: locA,
-      localAnchorB: locB,
+  addPennantPost(bd.a[0], bd.a[2]);
+  addPennantPost(bd.b[0], bd.b[2]);
+
+  const halyardPts = [];
+  for (let s = 0; s <= 20; s++) {
+    const p = new THREE.Vector3();
+    pennantHalyardAt(bd.a, bd.b, s / 20, p);
+    halyardPts.push(p);
+  }
+  const halyard = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(halyardPts), 24, 0.01, 5, false),
+    pennantRopeMat
+  );
+  halyard.name = `quay-halyard-${si}`;
+  pennantRig.add(halyard);
+  // A small warm pool so the weave reads at night without turning the cloth into a lamp.
+  const midT = 0.5;
+  const poolPos = new THREE.Vector3();
+  pennantHalyardAt(bd.a, bd.b, midT, poolPos);
+  const pool = new THREE.PointLight(0xffc48a, 5.5, 6.5, 2);
+  pool.position.set(poolPos.x, poolPos.y - 0.35, poolPos.z + 0.55);
+  pennantRig.add(pool);
+
+  for (let pi = 0; pi < PENNANT_PER_STRING; pi++) {
+    const along = PENNANT_MARGIN + headW * 0.5 + pi * (headW + PENNANT_GAP);
+    const tCenter = along / span;
+    pennantHalyardAt(bd.a, bd.b, tCenter, pennantHead);
+    const mark = bd.marks[pi] % 4;
+    const u0 = mark / 4;
+    const u1 = (mark + 1) / 4;
+    const hitch = new CANNON.Body({
+      mass: 0,
+      type: CANNON.Body.STATIC,
+      position: new CANNON.Vec3(pennantHead.x, pennantHead.y, pennantHead.z),
     });
+    hitch.quaternion.set(basisQ.x, basisQ.y, basisQ.z, basisQ.w);
+    hitch.collisionFilterGroup = SPRING_COLLISION_GROUP;
+    hitch.collisionFilterMask = SPRING_COLLISION_MASK;
+    physWorld.addBody(hitch);
+
+    const segs = [];
+    const step = PENNANT_ROW_H + PENNANT_HINGE_GAP;
+    for (let row = 0; row < PENNANT_ROWS; row++) {
+      const t0 = row / PENNANT_ROWS;
+      const t1 = (row + 1) / PENNANT_ROWS;
+      const wTop = pennantWidthAt(headW, t0);
+      const wBot = pennantWidthAt(headW, t1);
+      // Visual panel is a hair taller than the body step so the hinge gap doesn't read as a slit.
+      const visH = PENNANT_ROW_H * 0.5 + PENNANT_HINGE_GAP * 0.65;
+      const corners = {
+        TL: { x: -wTop * 0.5, y: visH },
+        TR: { x: wTop * 0.5, y: visH },
+        BL: { x: -wBot * 0.5, y: -visH },
+        BR: { x: wBot * 0.5, y: -visH },
+      };
+      const yDrop = PENNANT_TIE + row * step + PENNANT_ROW_H * 0.5;
+      pennantPos.copy(pennantHead).addScaledVector(pennantUp, -yDrop);
+      const geo = makePennantPanelGeo(
+        corners, u0, u1, 1 - t0, 1 - t1, t0, t1, 1, 1, 0
+      );
+      const mesh = new THREE.Mesh(geo, pennantClothMat);
+      mesh.frustumCulled = false;
+      mesh.name = `quay-pennant-s${si}-p${pi}-r${row}`;
+      pennantCord(mesh, corners.TL.x, corners.TL.y, corners.BL.x, corners.BL.y, 0.0052, pennantRopeMat);
+      pennantCord(mesh, corners.TR.x, corners.TR.y, corners.BR.x, corners.BR.y, 0.0052, pennantRopeMat);
+      if (row === 0) {
+        pennantCord(mesh, corners.TL.x, corners.TL.y, corners.TR.x, corners.TR.y, 0.008, pennantRopeMat);
+      }
+      if (row === PENNANT_ROWS - 1) {
+        pennantCord(mesh, corners.BL.x, corners.BL.y, corners.BR.x, corners.BR.y, 0.0055, pennantRopeMat);
+      }
+      const segMass = 0.08;
+      const body = new CANNON.Body({
+        mass: physFreeze ? 0 : segMass,
+        shape: new CANNON.Box(new CANNON.Vec3((wTop + wBot) * 0.25, PENNANT_ROW_H * 0.5, 0.007)),
+        position: new CANNON.Vec3(pennantPos.x, pennantPos.y, pennantPos.z),
+        linearDamping: 0.3,
+        angularDamping: 0.38,
+        allowSleep: false,
+      });
+      body.quaternion.set(basisQ.x, basisQ.y, basisQ.z, basisQ.w);
+      if (physFreeze) body.type = CANNON.Body.STATIC;
+      const entry = springMakeBody(mesh, body, 'bannerSeg', segMass);
+      entry.bannerIdx = si;
+      entry.pennantIdx = pennantCount;
+      entry.segIdx = row;
+      entry.row = row;
+      entry.col = 0;
+      entry.rows = PENNANT_ROWS;
+      entry.leech = 1;
+      const halfH = PENNANT_ROW_H * 0.5;
+      entry.corners = {
+        TL: new CANNON.Vec3(-wTop * 0.5, halfH, 0),
+        TR: new CANNON.Vec3(wTop * 0.5, halfH, 0),
+        BL: new CANNON.Vec3(-wBot * 0.5, -halfH, 0),
+        BR: new CANNON.Vec3(wBot * 0.5, -halfH, 0),
+        top: new CANNON.Vec3(0, halfH, 0),
+        bot: new CANNON.Vec3(0, -halfH, 0),
+      };
+      segs.push(entry);
+      physBannerSegs.push(entry);
+
+      if (row === 0) {
+        const gL = pennantGrommet(mesh, corners.TL.x, corners.TL.y);
+        const gR = pennantGrommet(mesh, corners.TR.x, corners.TR.y);
+        const headTie = pennantHead.clone();
+        const tie = (grommet) => {
+          springMakeCable(
+            (out) => out.copy(headTie),
+            (out) => grommet.getWorldPosition(out),
+            0x6a5840
+          );
+        };
+        tie(gL);
+        tie(gR);
+        const hitchLocal = new CANNON.Vec3();
+        body.pointToWorldFrame(entry.corners.top, springScratchA);
+        hitch.pointToLocalFrame(springScratchA, hitchLocal);
+        pennantPin(hitch, hitchLocal, body, entry.corners.top);
+        pennantSpring(hitch, hitchLocal, body, entry.corners.top, 22, 2.2);
+      }
+    }
+    for (let row = 0; row < PENNANT_ROWS - 1; row++) {
+      const upper = segs[row];
+      const lower = segs[row + 1];
+      pennantPin(upper.body, upper.corners.bot, lower.body, lower.corners.top);
+      pennantSpring(upper.body, upper.corners.bot, lower.body, lower.corners.top, 14, 2.15);
+    }
+    pennantCount++;
   }
 }
+window.__harborPennants = {
+  strings: BANNER_DEFS.length,
+  pennants: pennantCount,
+  segs: physBannerSegs.length,
+  marks: PENNANT_MARKS.slice(),
+  atlas: '06-intermediate-assets/quay-pennant-atlas.png',
+};
 
 function springApplyForces() {
   if (physFreeze || !physSpringsOn) return;
@@ -5081,17 +5370,18 @@ function springWindPush(base, dx, dz) {
       harborWind.offsetScratch.set(0, 0, 0)
     );
   }
-  // Banner panels — lower segs catch more wind (cloth feel)
+  // Pennant panels — the fly catches more air. Force at the COM; a small
+  // torque lets the leech lead without kicking the hinge apart.
   for (const entry of physBannerSegs) {
     if (entry.body.type !== CANNON.Body.DYNAMIC) continue;
-    const catchF = 0.55 + entry.segIdx * 0.35;
-    const soft = base * 2.4 * catchF;
+    const catchF = 0.5 + entry.row * 0.22;
+    const soft = base * 2.05 * catchF;
     entry.body.wakeUp();
     entry.body.applyForce(
-      harborWind.forceScratch.set(dx * soft, soft * 0.03, dz * soft),
+      harborWind.forceScratch.set(dx * soft, soft * 0.015, dz * soft),
       harborWind.offsetScratch.set(0, 0, 0)
     );
-    harborWind.torqueScratch.set(-dz * soft * 0.15, 0, dx * soft * 0.15);
+    harborWind.torqueScratch.set(-dz * soft * 0.05, 0, dx * soft * 0.04);
     entry.body.applyTorque(harborWind.torqueScratch);
   }
 }
@@ -5163,6 +5453,10 @@ function springSyncMeshes() {
       entry.body.quaternion.copy(entry.spawn.quaternion);
       entry.body.velocity.set(0, 0, 0);
       entry.body.angularVelocity.set(0, 0, 0);
+    } else if (entry.kind === 'bannerSeg' && speed > 2.4) {
+      entry.body.velocity.scale(2.4 / speed, entry.body.velocity);
+      const ang = entry.body.angularVelocity.length();
+      if (ang > 2.8) entry.body.angularVelocity.scale(2.8 / ang, entry.body.angularVelocity);
     } else if (speed > 10) {
       entry.body.velocity.scale(10 / speed, entry.body.velocity);
     }
@@ -5190,7 +5484,7 @@ function springFillProbe() {
       }
     : null;
   const bannerTips = physBannerSegs
-    .filter((e) => e.segIdx === 0)
+    .filter((e) => e.segIdx === 0 && e.col === 0)
     .map((e) => ({
       x: +e.body.position.x.toFixed(3),
       y: +e.body.position.y.toFixed(3),
@@ -5203,6 +5497,7 @@ function springFillProbe() {
     bodies: physSpringBodies.length,
     cables: physCableVisuals.length,
     banners: BANNER_DEFS.length,
+    pennants: bannerTips.length,
     bannerSegs: physBannerSegs.length,
     tip: tipPos,
     bannerTips,
@@ -5939,6 +6234,7 @@ window.__springLive = {
       },
       banners: physBannerSegs.map((e) => ({
         i: e.segIdx,
+        col: e.col,
         x: e.body.position.x,
         y: e.body.position.y,
         z: e.body.position.z,
@@ -5956,8 +6252,9 @@ window.__frameQuaySprings = function (mode) {
   controls.enableRotate = true;
   controls.minDistance = 0.05;
   if (mode === 'banners') {
-    camera.position.set(8.5, 3.8, 8.2);
-    controls.target.set(5.2, 1.6, 3.6);
+    // Close on the east halyard so the pennant weave and fly read
+    camera.position.set(8.55, 2.35, 7.15);
+    controls.target.set(5.7, 1.72, 4.42);
   } else if (mode === 'wide') {
     camera.position.set(4, 6.5, 12);
     controls.target.set(-1, 1.8, 3.2);
@@ -6855,6 +7152,7 @@ function tick() {
 
   buildingMat.uniforms.uTime.value = t;
   if (typeof swayStrandBulbs === 'function') swayStrandBulbs(t);
+  if (typeof pennantSyncCloth === 'function') pennantSyncCloth(t);
   if (typeof updateTrafficSignals === 'function') updateTrafficSignals(t);
   asphaltMat.uniforms.uTime.value = t;
   quayMat.uniforms.uTime.value = t;
