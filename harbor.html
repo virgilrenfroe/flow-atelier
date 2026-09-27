@@ -1147,11 +1147,40 @@ const buildingMat = new THREE.ShaderMaterial({
       inPane *= mix(step(edgeKillM, edgeDistM), 1.0, atlasFlat);
       float edgeFade = mix(smoothstep(edgeKillM, edgeSoftM, edgeDistM), 1.0, atlasFlat);
 
-      // Frame / mullion bands — whole margin is dark mullion (not façade beige)
+      // Glazed shop entry. The bay is an opening into the lit shop, not a painted
+      // leaf stuck on the atlas. Shop glass (door + side windows) keeps the atlas;
+      // only a recessed jamb and thin stiles sit in front of it.
+      float faceLen = halfAlong * 2.0;
+      // Low shop boxes are often under 2.2 tall — they still get an entry.
+      // Door height shrinks so the header stays on the façade.
+      float doorOk = step(1.45, vScale.y) * step(1.28, faceLen) * isVert;
+      float faceIsX = step(abs(Ln.z), abs(Ln.x));
+      float doorSeed = hash(vec2(vId * 0.37 + 1.7, mix(4.1, 8.6, faceIsX)));
+      float doorW = mix(0.74, 1.48, step(2.15, faceLen));
+      float doorH = min(1.92, vScale.y - 0.32);
+      // Keep a window bay beside the entry when the façade is wide enough.
+      float maxShift = max(halfAlong - doorW * 0.5 - 0.78, 0.0);
+      float doorCenter = (doorSeed - 0.5) * 2.0 * min(maxShift, 0.36);
+      float dAx = faceAlong - doorCenter;
+      float axDoor = dAx / max(doorW, 0.2) + 0.5;
+      float inDoorX = step(0.0, axDoor) * step(axDoor, 1.0);
+      float inDoorY = step(0.045, lpM.y) * step(lpM.y, doorH);
+      float inDoor = doorOk * inDoorX * inDoorY;
+      float transomTop = min(doorH + 0.20, vScale.y - 0.08);
+      float inTransom = doorOk * step(doorH + 0.09, transomTop)
+                      * step(abs(dAx), doorW * 0.5 - 0.02)
+                      * step(doorH + 0.045, lpM.y) * step(lpM.y, transomTop);
+      float shopEntry = max(inDoor, inTransom);
+
+      // Frame / mullion bands — whole margin is dark mullion (not façade beige).
+      // The entry opening is cut out of the grid so stacked window mullions
+      // do not slice the door or sit on top of the shop interior.
       float frameBand = isVert * (1.0 - step(
         min(mullU, mullV),
         min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))
       ));
+      frameBand *= (1.0 - shopEntry);
+      inPane *= (1.0 - shopEntry);
       // Dark mullion on concrete — clearer pane contrast vs textured body
       vec3 mullionCol = mix(wallCol * 0.42, vColor * 0.08 + vec3(0.012, 0.013, 0.018), 0.55);
       vec3 body = mix(wallCol, mullionCol, frameBand * 0.94);
@@ -1266,6 +1295,75 @@ const buildingMat = new THREE.ShaderMaterial({
         vec3 glass = mix(interior, glassRefl, glassMix);
         glass = mix(glass, interior, glow * mix(0.55, 0.72, atlasPath) * (1.0 - fres * 0.9));
         body = glass;
+      }
+
+      // Through-glass entry: one shop interior across the whole bay (aspect-correct
+      // crop, no vertical smear). Stiles/kick are thin metal on the glass, not a
+      // solid door color over the furniture.
+      if (inDoor > 0.5) {
+        float ay = clamp((lpM.y - 0.045) / max(doorH - 0.045, 0.2), 0.0, 1.0);
+        float ax = clamp(axDoor, 0.0, 1.0);
+        float openingAspect = doorW / max(doorH - 0.045, 0.2);
+        vec2 atlasUV = vec2(0.5 + (ax - 0.5) * openingAspect, ay);
+        float faceShopSeed = vId * 0.17 + mix(6.4, 2.2, faceIsX);
+        float doorGlow = max(glow, 0.92);
+        if (uAtlasOn > 0.5 && uFaceMapOn < 0.5) {
+          interior = shadeRoomAtlas(atlasUV, doorGlow, 1.0, faceShopSeed);
+        } else if (uFaceMapOn > 0.5) {
+          float roomIdx = floor(hash(vec2(faceShopSeed, 3.3)) * uFaceCount);
+          interior = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, roomIdx, cropAtlasUV(atlasUV));
+          interior *= mix(0.55, 1.05, doorGlow);
+        } else {
+          interior = mix(vec3(0.05, 0.035, 0.025), vec3(0.42, 0.26, 0.12), doorGlow);
+        }
+        float edgeIn = min(min(ax, 1.0 - ax), min(ay, 1.0 - ay));
+        interior *= mix(0.42, 1.0, smoothstep(0.0, 0.055, edgeIn));
+        float centerStile = (1.0 - smoothstep(0.014, 0.034, abs(ax - 0.5))) * step(1.05, doorW);
+        float sideStile = max(
+          1.0 - smoothstep(0.0, 0.028, ax),
+          1.0 - smoothstep(0.0, 0.028, 1.0 - ax)
+        );
+        float midRail = 1.0 - smoothstep(0.006, 0.016, abs(ay - 0.58));
+        float topRail = 1.0 - smoothstep(0.0, 0.02, 1.0 - ay);
+        float botRail = 1.0 - smoothstep(0.012, 0.04, ay);
+        float muntin = max(max(centerStile, sideStile), max(midRail, max(topRail, botRail)));
+        vec3 stileCol = vec3(0.025, 0.027, 0.032);
+        vec3 glassCol = mix(interior, stileCol, clamp(muntin, 0.0, 1.0));
+        vec3 Vd = normalize(cameraPosition - vWorldPos);
+        float fresD = pow(1.0 - max(dot(N, Vd), 0.0), 2.5);
+        vec3 reflD = mix(vec3(0.16, 0.12, 0.07), vec3(0.11, 0.15, 0.26), clamp(N.y * 0.5 + 0.5, 0.0, 1.0));
+        glassCol = mix(glassCol, reflD, fresD * mix(0.42, 0.1, muntin));
+        body = glassCol;
+      }
+
+      // Illuminated transom — sign band above the header, not on the door leaf.
+      if (inTransom > 0.5) {
+        float sy = clamp((lpM.y - (doorH + 0.05)) / max(transomTop - doorH - 0.05, 0.05), 0.0, 1.0);
+        float sx = clamp(axDoor, 0.0, 1.0);
+        float stripe = smoothstep(0.34, 0.46, sy) * (1.0 - smoothstep(0.60, 0.74, sy));
+        vec3 panel = vec3(0.09, 0.055, 0.03);
+        vec3 litSign = vec3(0.95, 0.62, 0.24);
+        body = mix(panel, litSign, stripe);
+        body *= smoothstep(0.0, 0.05, min(sx, 1.0 - sx));
+        body += vec3(0.22, 0.1, 0.03) * stripe;
+      }
+
+      // Recessed jamb / header around the opening. Side windows keep their atlas.
+      float jambReach = 0.05;
+      float inJambBox = step(abs(dAx), doorW * 0.5 + jambReach) * step(0.0, lpM.y) * step(lpM.y, doorH + 0.048);
+      float jamb = doorOk * inJambBox * (1.0 - inDoor) * (1.0 - inTransom) * step(0.05, lpM.y);
+      body = mix(body, vec3(0.012, 0.013, 0.016), jamb * 0.94);
+      float sill = doorOk * step(abs(dAx), doorW * 0.5 + 0.04) * step(0.0, lpM.y) * step(lpM.y, 0.048);
+      body = mix(body, vec3(0.16, 0.15, 0.135), sill);
+
+      // Sign band on the glass beside the entry (top of those panes only).
+      float beside = step(doorW * 0.5 + 0.05, abs(dAx)) * step(abs(dAx), doorW * 0.5 + cellW * 1.05);
+      float headBand = step(0.78, f.y) * step(1.15, lpM.y) * step(lpM.y, doorH);
+      if (doorOk * beside * headBand * inPane > 0.5) {
+        float sy2 = clamp((f.y - 0.78) / 0.22, 0.0, 1.0);
+        float stripe2 = smoothstep(0.22, 0.42, sy2) * (1.0 - smoothstep(0.62, 0.86, sy2));
+        vec3 band = mix(vec3(0.11, 0.065, 0.035), vec3(0.88, 0.56, 0.2), stripe2);
+        body = mix(body, band, 0.78);
       }
 
       // Soft roof wash
@@ -1385,6 +1483,7 @@ const tmpC = new THREE.Color();
 
 // Rectilinear district massing only (Virgil 2026-09-26): unit BoxGeometry × scale.
 // No yaw / chamfer / cylinder silhouettes — planar façades so local UV + room/shop atlas stay square.
+const harborBoxes = [];
 function placeBuilding(x, z, w, h, d, color, _yawIgnored) {
   if (placed >= INSTANCE_COUNT) return false;
   // Snap tiny footprints up so pencil towers never read as curved posts
@@ -1400,6 +1499,7 @@ function placeBuilding(x, z, w, h, d, color, _yawIgnored) {
   dummy.updateMatrix();
   mesh.setMatrixAt(placed, dummy.matrix);
   mesh.setColorAt(placed, color);
+  harborBoxes.push({ x, z, w, h, d });
   placed++;
   return true;
 }
@@ -1611,6 +1711,159 @@ window.__harborBuildings = (() => {
   }
   return list;
 })();
+
+// ——— Rooftop strand lights (2–4 flat roofs, visible from the Harbor orbit) ———
+// Café bulbs on a sagging cable. Emissive bulbs + one warm pool per roof —
+// not a bulb light each — so phones stay in budget. Massing stays a box.
+function pickStrandRoofs(boxes) {
+  const cam = new THREE.Vector3(16.5, 10.5, 20.5);
+  const look = new THREE.Vector3(0, 1.6, -2.5);
+  const viewDir = look.clone().sub(cam).normalize();
+  const cands = [];
+  for (const b of boxes) {
+    if (b.h < 3.4 || b.h > 11.5) continue;
+    const longSide = Math.max(b.w, b.d);
+    const shortSide = Math.min(b.w, b.d);
+    if (longSide < 1.45 || shortSide < 0.95) continue;
+    const roof = new THREE.Vector3(b.x, b.h, b.z);
+    const toRoof = roof.clone().sub(cam).normalize();
+    const facing = toRoof.dot(viewDir);
+    if (facing < 0.72) continue;
+    const score = facing * 3 + b.z * 0.12 + Math.min(b.h, 8) * 0.05 + shortSide;
+    cands.push({ b, score });
+  }
+  cands.sort((a, c) => c.score - a.score);
+  const picked = [];
+  for (const c of cands) {
+    if (picked.every((p) => Math.hypot(p.b.x - c.b.x, p.b.z - c.b.z) > 3.4)) picked.push(c);
+    if (picked.length === 3) break;
+  }
+  return picked.map((p) => p.b);
+}
+
+const strandGroup = new THREE.Group();
+strandGroup.name = 'rooftop-strands';
+scene.add(strandGroup);
+const strandPostGeo = new THREE.CylinderGeometry(0.015, 0.018, 1, 6);
+strandPostGeo.translate(0, 0.5, 0);
+const strandPostMat = new THREE.MeshStandardMaterial({
+  color: 0x2a2e34, roughness: 0.62, metalness: 0.35,
+});
+const strandWireMat = new THREE.MeshStandardMaterial({
+  color: 0x1a1c22, roughness: 0.72, metalness: 0.25,
+});
+const strandBulbGeo = new THREE.SphereGeometry(0.032, 7, 5);
+const strandBulbMat = new THREE.MeshStandardMaterial({
+  color: 0x3a2a1c,
+  emissive: 0xffc48a,
+  emissiveIntensity: 2.8,
+  roughness: 0.32,
+  metalness: 0.04,
+});
+const STRAND_BULB_MAX = 48;
+const strandBulbs = new THREE.InstancedMesh(strandBulbGeo, strandBulbMat, STRAND_BULB_MAX);
+strandBulbs.count = 0;
+strandBulbs.frustumCulled = false;
+strandBulbs.layers.enable(BLOOM_LAYER);
+strandBulbs.name = 'rooftop-strand-bulbs';
+scene.add(strandBulbs);
+const strandBulbBase = [];
+const strandDummy = new THREE.Object3D();
+const strandRoofs = pickStrandRoofs(harborBoxes);
+
+function addStrand(a, b, sag, phase) {
+  const span = a.distanceTo(b);
+  if (span < 0.55) return;
+  const postH = 0.34;
+  for (const p of [a, b]) {
+    const post = new THREE.Mesh(strandPostGeo, strandPostMat);
+    post.scale.y = postH;
+    post.position.set(p.x, p.y, p.z);
+    strandGroup.add(post);
+  }
+  const topA = a.clone(); topA.y += postH;
+  const topB = b.clone(); topB.y += postH;
+  const pts = [];
+  const segN = 16;
+  for (let i = 0; i <= segN; i++) {
+    const t = i / segN;
+    const p = new THREE.Vector3().lerpVectors(topA, topB, t);
+    p.y -= Math.sin(t * Math.PI) * sag;
+    pts.push(p);
+  }
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), segN, 0.006, 4, false),
+    strandWireMat
+  );
+  strandGroup.add(tube);
+  const side = new THREE.Vector3().subVectors(topB, topA);
+  side.y = 0;
+  if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+  side.cross(new THREE.Vector3(0, 1, 0)).normalize();
+  const bulbs = 8;
+  for (let i = 0; i < bulbs; i++) {
+    if (strandBulbs.count >= STRAND_BULB_MAX) break;
+    const t = (i + 0.5) / bulbs;
+    const p = new THREE.Vector3().lerpVectors(topA, topB, t);
+    p.y -= Math.sin(t * Math.PI) * sag;
+    const idx = strandBulbs.count++;
+    const amp = Math.sin(t * Math.PI) * 0.02;
+    strandBulbBase.push({
+      x: p.x, y: p.y, z: p.z, phase: phase + i * 0.45, ax: side.x, az: side.z, amp,
+    });
+    strandDummy.position.copy(p);
+    strandDummy.scale.set(1, 1, 1);
+    strandDummy.rotation.set(0, 0, 0);
+    strandDummy.updateMatrix();
+    strandBulbs.setMatrixAt(idx, strandDummy.matrix);
+  }
+  const mid = new THREE.Vector3().lerpVectors(topA, topB, 0.5);
+  mid.y -= sag * 0.65;
+  const pool = new THREE.PointLight(0xffb067, 11, 5.5, 2);
+  pool.position.copy(mid);
+  strandGroup.add(pool);
+}
+
+strandRoofs.forEach((b, i) => {
+  const alongX = b.w >= b.d;
+  const cross = alongX ? b.d : b.w;
+  const offsets = cross > 1.35 && i < 2 ? [-0.22, 0.22] : [0];
+  const sag = 0.14 + (i % 3) * 0.02;
+  for (const off of offsets) {
+    let a;
+    let end;
+    if (alongX) {
+      const z = b.z + off;
+      a = new THREE.Vector3(b.x - b.w * 0.5 + 0.18, b.h, z);
+      end = new THREE.Vector3(b.x + b.w * 0.5 - 0.18, b.h, z);
+    } else {
+      const x = b.x + off;
+      a = new THREE.Vector3(x, b.h, b.z - b.d * 0.5 + 0.18);
+      end = new THREE.Vector3(x, b.h, b.z + b.d * 0.5 - 0.18);
+    }
+    addStrand(a, end, sag, i * 1.7 + off);
+  }
+});
+strandBulbs.instanceMatrix.needsUpdate = true;
+window.__harborStrands = {
+  roofs: strandRoofs.map((b) => ({ x: b.x, z: b.z, w: b.w, h: b.h, d: b.d })),
+  bulbs: strandBulbs.count,
+};
+
+function swayStrandBulbs(t) {
+  if (!strandBulbs.count) return;
+  const live = freezeMotion ? 0 : 1;
+  for (let i = 0; i < strandBulbs.count; i++) {
+    const b = strandBulbBase[i];
+    const s = Math.sin(t * 0.8 + b.phase) * b.amp * live;
+    strandDummy.position.set(b.x + b.ax * s, b.y + s * 0.35, b.z + b.az * s);
+    strandDummy.scale.set(1, 1, 1);
+    strandDummy.rotation.set(0, 0, 0);
+    strandDummy.updateMatrix();
+    strandBulbs.setMatrixAt(i, strandDummy.matrix);
+  }
+  strandBulbs.instanceMatrix.needsUpdate = true;
+}
 
 // ——— Ground / district pad (under streets; darker than asphalt) ———
 // Stop at quay/seawall — do NOT cover the outboard basin (was Plane 90×70 @ z=-4
@@ -1939,6 +2192,485 @@ scene.add(seawallWetCourse);
 const seawallCap = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W + 0.25, 0.1, 0.38), seawallCapMat);
 seawallCap.position.set(0, faceTop + 0.05, SEAWALL_Z + 0.04);
 scene.add(seawallCap);
+
+// ——— Seawall graffiti (freight band, both faces) ———
+// Original throw-ups only — bubble letters with fill, hard outline, and a 3D
+// block, layered like railroad boxcar paint. No stencils, no figures, no
+// copied crew names or railroad marks.
+const GRAF_W = 4096;
+const GRAF_H = 512;
+const grafCanvas = document.createElement('canvas');
+grafCanvas.width = GRAF_W;
+grafCanvas.height = GRAF_H;
+const grafCtx = grafCanvas.getContext('2d');
+
+function grafRng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const GLYPH_W = {
+  A: 0.84, B: 0.80, C: 0.76, D: 0.80, E: 0.72, F: 0.68, G: 0.80,
+  H: 0.80, I: 0.40, K: 0.80, L: 0.70, M: 1.00, N: 0.82, O: 0.84,
+  P: 0.74, R: 0.80, S: 0.74, T: 0.72, U: 0.80, W: 1.05,
+};
+const GLYPH = {
+  A(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.16, y + h * 0.90);
+    ctx.lineTo(x + w * 0.50, y + h * 0.10);
+    ctx.lineTo(x + w * 0.84, y + h * 0.90);
+    ctx.moveTo(x + w * 0.30, y + h * 0.58);
+    ctx.lineTo(x + w * 0.70, y + h * 0.58);
+    ctx.stroke();
+  },
+  B(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.26, y + h * 0.10);
+    ctx.lineTo(x + w * 0.26, y + h * 0.90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.42, y + h * 0.32, h * 0.20, -Math.PI * 0.55, Math.PI * 0.55);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.40, y + h * 0.68, h * 0.22, -Math.PI * 0.5, Math.PI * 0.55);
+    ctx.stroke();
+  },
+  C(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.arc(x + w * 0.54, y + h * 0.50, h * 0.36, 0.65, Math.PI * 2 - 0.65);
+    ctx.stroke();
+  },
+  D(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.26, y + h * 0.10);
+    ctx.lineTo(x + w * 0.26, y + h * 0.90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.40, y + h * 0.50, h * 0.36, -Math.PI * 0.5, Math.PI * 0.5);
+    ctx.stroke();
+  },
+  E(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.28, y + h * 0.12);
+    ctx.lineTo(x + w * 0.28, y + h * 0.88);
+    ctx.moveTo(x + w * 0.24, y + h * 0.14);
+    ctx.lineTo(x + w * 0.78, y + h * 0.14);
+    ctx.moveTo(x + w * 0.24, y + h * 0.50);
+    ctx.lineTo(x + w * 0.68, y + h * 0.50);
+    ctx.moveTo(x + w * 0.24, y + h * 0.86);
+    ctx.lineTo(x + w * 0.78, y + h * 0.86);
+    ctx.stroke();
+  },
+  F(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.30, y + h * 0.12);
+    ctx.lineTo(x + w * 0.30, y + h * 0.90);
+    ctx.moveTo(x + w * 0.26, y + h * 0.14);
+    ctx.lineTo(x + w * 0.80, y + h * 0.14);
+    ctx.moveTo(x + w * 0.26, y + h * 0.50);
+    ctx.lineTo(x + w * 0.70, y + h * 0.50);
+    ctx.stroke();
+  },
+  G(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.arc(x + w * 0.52, y + h * 0.50, h * 0.36, 0.45, Math.PI * 2 - 0.35);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.52, y + h * 0.50);
+    ctx.lineTo(x + w * 0.82, y + h * 0.50);
+    ctx.lineTo(x + w * 0.82, y + h * 0.72);
+    ctx.stroke();
+  },
+  H(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.24, y + h * 0.10);
+    ctx.lineTo(x + w * 0.24, y + h * 0.90);
+    ctx.moveTo(x + w * 0.76, y + h * 0.10);
+    ctx.lineTo(x + w * 0.76, y + h * 0.90);
+    ctx.moveTo(x + w * 0.24, y + h * 0.50);
+    ctx.lineTo(x + w * 0.76, y + h * 0.50);
+    ctx.stroke();
+  },
+  I(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.50, y + h * 0.10);
+    ctx.lineTo(x + w * 0.50, y + h * 0.90);
+    ctx.stroke();
+  },
+  K(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.28, y + h * 0.10);
+    ctx.lineTo(x + w * 0.28, y + h * 0.90);
+    ctx.moveTo(x + w * 0.78, y + h * 0.12);
+    ctx.quadraticCurveTo(x + w * 0.40, y + h * 0.42, x + w * 0.34, y + h * 0.48);
+    ctx.quadraticCurveTo(x + w * 0.46, y + h * 0.58, x + w * 0.82, y + h * 0.90);
+    ctx.stroke();
+  },
+  L(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.30, y + h * 0.10);
+    ctx.lineTo(x + w * 0.30, y + h * 0.82);
+    ctx.lineTo(x + w * 0.82, y + h * 0.82);
+    ctx.stroke();
+  },
+  M(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.12, y + h * 0.90);
+    ctx.lineTo(x + w * 0.12, y + h * 0.12);
+    ctx.lineTo(x + w * 0.50, y + h * 0.58);
+    ctx.lineTo(x + w * 0.88, y + h * 0.12);
+    ctx.lineTo(x + w * 0.88, y + h * 0.90);
+    ctx.stroke();
+  },
+  N(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.20, y + h * 0.90);
+    ctx.lineTo(x + w * 0.20, y + h * 0.12);
+    ctx.lineTo(x + w * 0.80, y + h * 0.88);
+    ctx.lineTo(x + w * 0.80, y + h * 0.10);
+    ctx.stroke();
+  },
+  O(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.50, y + h * 0.50, w * 0.32, h * 0.36, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  },
+  P(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.28, y + h * 0.10);
+    ctx.lineTo(x + w * 0.28, y + h * 0.90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.46, y + h * 0.34, h * 0.22, -Math.PI * 0.55, Math.PI * 0.6);
+    ctx.stroke();
+  },
+  R(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.26, y + h * 0.10);
+    ctx.lineTo(x + w * 0.26, y + h * 0.90);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.44, y + h * 0.32, h * 0.20, -Math.PI * 0.55, Math.PI * 0.6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.42, y + h * 0.52);
+    ctx.lineTo(x + w * 0.82, y + h * 0.90);
+    ctx.stroke();
+  },
+  S(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.78, y + h * 0.22);
+    ctx.bezierCurveTo(x + w * 0.70, y + h * 0.02, x + w * 0.18, y + h * 0.08, x + w * 0.22, y + h * 0.36);
+    ctx.bezierCurveTo(x + w * 0.26, y + h * 0.58, x + w * 0.78, y + h * 0.48, x + w * 0.74, y + h * 0.70);
+    ctx.bezierCurveTo(x + w * 0.70, y + h * 0.98, x + w * 0.16, y + h * 0.90, x + w * 0.20, y + h * 0.74);
+    ctx.stroke();
+  },
+  T(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.12, y + h * 0.16);
+    ctx.lineTo(x + w * 0.88, y + h * 0.16);
+    ctx.moveTo(x + w * 0.50, y + h * 0.14);
+    ctx.lineTo(x + w * 0.50, y + h * 0.90);
+    ctx.stroke();
+  },
+  U(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.22, y + h * 0.12);
+    ctx.lineTo(x + w * 0.22, y + h * 0.58);
+    ctx.quadraticCurveTo(x + w * 0.22, y + h * 0.92, x + w * 0.50, y + h * 0.90);
+    ctx.quadraticCurveTo(x + w * 0.78, y + h * 0.88, x + w * 0.78, y + h * 0.58);
+    ctx.lineTo(x + w * 0.78, y + h * 0.12);
+    ctx.stroke();
+  },
+  W(ctx, x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x + w * 0.10, y + h * 0.12);
+    ctx.lineTo(x + w * 0.28, y + h * 0.90);
+    ctx.lineTo(x + w * 0.50, y + h * 0.40);
+    ctx.lineTo(x + w * 0.72, y + h * 0.90);
+    ctx.lineTo(x + w * 0.90, y + h * 0.12);
+    ctx.stroke();
+  },
+};
+
+function grafMeasure(word, h) {
+  let x = 0;
+  for (let i = 0; i < word.length; i++) {
+    const gw = h * (GLYPH_W[word[i]] || 0.75);
+    x += gw;
+    if (i < word.length - 1) x -= h * 0.06;
+  }
+  return x;
+}
+
+function grafDrawWord(ctx, word, x, y, h) {
+  let cursor = x;
+  for (let i = 0; i < word.length; i++) {
+    const ch = word[i];
+    const draw = GLYPH[ch];
+    const gw = h * (GLYPH_W[ch] || 0.75);
+    if (draw) {
+      ctx.save();
+      const cx = cursor + gw * 0.5;
+      const cy = y + h * 0.5;
+      ctx.translate(cx, cy);
+      ctx.rotate(((i % 3) - 1) * 0.03);
+      ctx.translate(-cx, -cy);
+      draw(ctx, cursor, y + Math.sin(i * 1.6) * h * 0.012, gw, h);
+      ctx.restore();
+    }
+    cursor += gw - h * 0.06;
+  }
+}
+
+function grafPaintThrow(ctx, word, x, y, h, style, alpha, rot) {
+  const width = grafMeasure(word, h);
+  const pad = Math.ceil(h * 0.55);
+  const offW = Math.ceil(width + pad * 2);
+  const offH = Math.ceil(h * 1.9);
+  const base = document.createElement('canvas');
+  base.width = offW;
+  base.height = offH;
+  const fill = document.createElement('canvas');
+  fill.width = offW;
+  fill.height = offH;
+  const ox = pad * 0.7;
+  const oy = h * 0.18;
+  const fillW = h * 0.33;
+  const outlineW = fillW + h * 0.15;
+  const keyW = outlineW + h * (style.key ? 0.09 : 0.0);
+
+  function strokeLayer(g, lineW, color, dx, dy) {
+    g.save();
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    g.lineWidth = lineW;
+    g.strokeStyle = color;
+    g.translate(dx, dy);
+    grafDrawWord(g, word, ox, oy, h);
+    g.restore();
+  }
+
+  const bg = base.getContext('2d');
+  strokeLayer(bg, keyW, style.shadow, h * 0.065, h * 0.085);
+  if (style.key) strokeLayer(bg, keyW, style.key, 0, 0);
+  strokeLayer(bg, outlineW, style.outline, 0, 0);
+
+  const fg = fill.getContext('2d');
+  strokeLayer(fg, fillW, '#ffffff', 0, 0);
+  fg.save();
+  fg.globalCompositeOperation = 'source-atop';
+  const grad = fg.createLinearGradient(0, oy, 0, oy + h);
+  grad.addColorStop(0, style.top);
+  grad.addColorStop(0.45, style.mid);
+  grad.addColorStop(1, style.bot);
+  fg.fillStyle = grad;
+  fg.fillRect(0, 0, offW, offH);
+  if (style.dots) {
+    const rnd = grafRng(word.length * 17 + Math.floor(h));
+    fg.fillStyle = style.dots;
+    for (let i = 0; i < 70; i++) {
+      const px = ox + rnd() * width;
+      const py = oy + rnd() * h * 0.85;
+      fg.beginPath();
+      fg.arc(px, py, h * (0.012 + rnd() * 0.02), 0, Math.PI * 2);
+      fg.fill();
+    }
+  }
+  fg.globalAlpha = 0.42;
+  fg.strokeStyle = 'rgba(255,255,255,0.9)';
+  fg.lineWidth = fillW * 0.28;
+  fg.lineCap = 'round';
+  fg.lineJoin = 'round';
+  fg.beginPath();
+  fg.rect(0, 0, offW, oy + h * 0.42);
+  fg.clip();
+  grafDrawWord(fg, word, ox, oy, h);
+  fg.restore();
+
+  fg.strokeStyle = style.drip;
+  fg.fillStyle = style.drip;
+  fg.lineCap = 'round';
+  const rnd = grafRng(4000 + word.charCodeAt(0) * 13 + Math.floor(x));
+  const drips = style.ghost ? 2 : 4;
+  for (let i = 0; i < drips; i++) {
+    const px = ox + (0.15 + 0.7 * (i + rnd()) / drips) * width;
+    const len = h * (0.18 + rnd() * 0.42);
+    fg.globalAlpha = 0.75;
+    fg.lineWidth = h * (0.018 + rnd() * 0.02);
+    fg.beginPath();
+    fg.moveTo(px, oy + h * 0.78);
+    fg.lineTo(px + (rnd() - 0.5) * h * 0.06, oy + h * 0.78 + len);
+    fg.stroke();
+    fg.beginPath();
+    fg.arc(px, oy + h * 0.78 + len, h * 0.02, 0, Math.PI * 2);
+    fg.fill();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(x, y);
+  ctx.rotate(rot || 0);
+  ctx.drawImage(base, 0, 0);
+  ctx.drawImage(fill, 0, 0);
+  ctx.restore();
+}
+
+const GRAF_CHROME = {
+  top: '#f4f7fa', mid: '#b7c2cc', bot: '#e3eaef',
+  outline: '#14171c', key: '#f7fafc', shadow: '#0c0e12',
+  drip: '#9aa6b0',
+};
+const GRAF_TEAL = {
+  top: '#d5ebe4', mid: '#6e9e98', bot: '#c4ddd6',
+  outline: '#101416', key: '#e7f3ef', shadow: '#0c1212',
+  drip: '#5e8e88', dots: 'rgba(18, 42, 40, 0.45)',
+};
+const GRAF_OX = {
+  top: '#e7c2b8', mid: '#a85a52', bot: '#d7a096',
+  outline: '#1a1212', key: '#f3e6e2', shadow: '#120c0c',
+  drip: '#8a4540',
+};
+const GRAF_SILVER = {
+  top: '#eef2f4', mid: '#aeb6be', bot: '#d5dbe0',
+  outline: '#1a1c20', key: '#ffffff', shadow: '#101216',
+  drip: '#8b939c',
+};
+const GRAF_GHOST = {
+  top: '#d5dbe2', mid: '#9aa3ad', bot: '#c5ccd4',
+  outline: '#2a3038', key: null, shadow: '#1a1e24',
+  drip: '#8a929c', ghost: true,
+};
+
+function grafRustRow(ctx, y0, rowH, seed) {
+  const rnd = grafRng(seed);
+  for (let i = 0; i < 22; i++) {
+    const x = rnd() * GRAF_W;
+    const y = y0 + rowH * (0.35 + rnd() * 0.6);
+    const rad = 16 + rnd() * 54;
+    const g = ctx.createRadialGradient(x, y, 2, x, y, rad);
+    g.addColorStop(0, 'rgba(122, 68, 40, 0.42)');
+    g.addColorStop(1, 'rgba(122, 68, 40, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(x, y, rad * (0.7 + rnd() * 0.8), rad * 0.4, rnd() * 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function grafWearRow(ctx, y0, rowH, seed) {
+  const rnd = grafRng(seed);
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  for (let i = 0; i < 110; i++) {
+    ctx.globalAlpha = 0.18 + rnd() * 0.55;
+    const x = rnd() * GRAF_W;
+    const y = y0 + rnd() * rowH;
+    ctx.fillRect(x, y, 16 + rnd() * 160, 1 + rnd() * 2.4);
+  }
+  for (let i = 0; i < 10; i++) {
+    ctx.globalAlpha = 0.28 + rnd() * 0.4;
+    ctx.fillRect(rnd() * GRAF_W, y0 + rnd() * rowH, 24 + rnd() * 90, 6 + rnd() * 16);
+  }
+  ctx.restore();
+}
+
+function grafRow(ctx, row, pieces) {
+  const rowH = GRAF_H / 2;
+  const y0 = row * rowH;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, y0, GRAF_W, rowH);
+  ctx.clip();
+  grafRustRow(ctx, y0, rowH, 1200 + row * 77);
+  const baseY = y0 + rowH * 0.08;
+  for (const p of pieces) {
+    const h = rowH * p.h;
+    const px = p.x * GRAF_W;
+    const py = baseY + (p.y || 0) * rowH;
+    grafPaintThrow(ctx, p.word, px, py, h, p.style, p.alpha, p.rot || 0);
+  }
+  grafWearRow(ctx, y0, rowH, 4400 + row * 19);
+  ctx.restore();
+}
+
+// Water face — long horizontal band, chrome and muted fills, ghosts underneath.
+grafRow(grafCtx, 0, [
+  { word: 'SLIP', x: 0.02, h: 0.46, y: 0.16, style: GRAF_GHOST, alpha: 0.34, rot: -0.04 },
+  { word: 'KEEL', x: 0.08, h: 0.62, y: 0.06, style: GRAF_CHROME, alpha: 0.96, rot: -0.02 },
+  { word: 'SPAR', x: 0.28, h: 0.40, y: 0.22, style: GRAF_GHOST, alpha: 0.30, rot: 0.05 },
+  { word: 'BRINE', x: 0.30, h: 0.60, y: 0.08, style: GRAF_TEAL, alpha: 0.95, rot: 0.015 },
+  { word: 'CASK', x: 0.50, h: 0.38, y: 0.26, style: GRAF_GHOST, alpha: 0.28, rot: -0.03 },
+  { word: 'HULL', x: 0.52, h: 0.62, y: 0.05, style: GRAF_OX, alpha: 0.96, rot: -0.01 },
+  { word: 'MOOR', x: 0.72, h: 0.58, y: 0.10, style: GRAF_SILVER, alpha: 0.94, rot: 0.02 },
+  { word: 'REEF', x: 0.86, h: 0.42, y: 0.20, style: GRAF_GHOST, alpha: 0.36, rot: 0.04 },
+]);
+// Promenade face — same freight language, different original tags.
+grafRow(grafCtx, 1, [
+  { word: 'WAKE', x: 0.03, h: 0.60, y: 0.08, style: GRAF_CHROME, alpha: 0.96, rot: 0.02 },
+  { word: 'SALT', x: 0.20, h: 0.40, y: 0.24, style: GRAF_GHOST, alpha: 0.32, rot: -0.04 },
+  { word: 'BERTH', x: 0.22, h: 0.58, y: 0.06, style: GRAF_OX, alpha: 0.95, rot: -0.015 },
+  { word: 'CORD', x: 0.46, h: 0.36, y: 0.28, style: GRAF_GHOST, alpha: 0.30, rot: 0.03 },
+  { word: 'REEF', x: 0.48, h: 0.60, y: 0.07, style: GRAF_TEAL, alpha: 0.95, rot: 0.01 },
+  { word: 'BILGE', x: 0.68, h: 0.56, y: 0.10, style: GRAF_SILVER, alpha: 0.94, rot: -0.02 },
+  { word: 'KEEL', x: 0.86, h: 0.40, y: 0.22, style: GRAF_GHOST, alpha: 0.33, rot: 0.04 },
+]);
+
+const grafTex = new THREE.CanvasTexture(grafCanvas);
+grafTex.colorSpace = THREE.SRGBColorSpace;
+grafTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+grafTex.wrapS = THREE.ClampToEdgeWrapping;
+grafTex.wrapT = THREE.ClampToEdgeWrapping;
+grafTex.needsUpdate = true;
+const grafMat = new THREE.MeshStandardMaterial({
+  map: grafTex,
+  transparent: true,
+  alphaTest: 0.05,
+  roughness: 0.48,
+  metalness: 0.16,
+  emissive: new THREE.Color(0xd5dde4),
+  emissiveMap: grafTex,
+  emissiveIntensity: 0.22,
+  depthWrite: false,
+  polygonOffset: true,
+  polygonOffsetFactor: -2,
+  polygonOffsetUnits: -2,
+});
+
+function grafBandMesh(row, y, z, rotY) {
+  const rowAspect = (GRAF_H * 0.5) / GRAF_W;
+  const width = 19.6;
+  const height = width * rowAspect;
+  const geo = new THREE.PlaneGeometry(width, height);
+  const uv = geo.attributes.uv;
+  const vBase = row === 0 ? 0.5 : 0.0;
+  for (let i = 0; i < uv.count; i++) {
+    // Flip U so throw-ups read left-to-right from each face.
+    uv.setXY(i, 1 - uv.getX(i), vBase + uv.getY(i) * 0.5);
+  }
+  uv.needsUpdate = true;
+  const mesh = new THREE.Mesh(geo, grafMat);
+  mesh.position.set(0, y, z);
+  mesh.rotation.y = rotY;
+  mesh.renderOrder = 2;
+  mesh.name = row === 0 ? 'seawall-graffiti-water' : 'seawall-graffiti-promenade';
+  return mesh;
+}
+
+const seawallGraffiti = new THREE.Group();
+seawallGraffiti.name = 'seawall-graffiti';
+const grafMidY = (faceBottom + faceTop) * 0.5 + 0.04;
+seawallGraffiti.add(grafBandMesh(0, grafMidY, SEAWALL_Z + 0.11 + 0.02, 0));
+seawallGraffiti.add(grafBandMesh(1, grafMidY, SEAWALL_Z - 0.11 - 0.02, Math.PI));
+scene.add(seawallGraffiti);
+window.__harborGraffiti = seawallGraffiti;
+window.__grafCanvas = grafCanvas;
 
 // Debug probe (harbor water/seawall layout)
 window.__harborWater = water;
@@ -5005,6 +5737,7 @@ function tick() {
   const pulse = freezeMotion ? 0.72 : 0.55 + 0.45 * Math.sin(t * 2.1);
 
   buildingMat.uniforms.uTime.value = t;
+  if (typeof swayStrandBulbs === 'function') swayStrandBulbs(t);
   asphaltMat.uniforms.uTime.value = t;
   quayMat.uniforms.uTime.value = t;
   waterMat.uniforms.uTime.value = t;
