@@ -799,6 +799,20 @@ const INSTANCE_COUNT = 128;
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
 boxGeo.translate(0, 0.5, 0);
 
+// Break mask for ground-floor shop glass. 128 instances × (4 faces × 16 slots).
+const SHOP_BREAK_H = 64;
+const shopBreakData = new Uint8Array(INSTANCE_COUNT * SHOP_BREAK_H * 4);
+const shopBreakTex = new THREE.DataTexture(
+  shopBreakData, INSTANCE_COUNT, SHOP_BREAK_H, THREE.RGBAFormat, THREE.UnsignedByteType
+);
+shopBreakTex.flipY = false;
+shopBreakTex.magFilter = THREE.NearestFilter;
+shopBreakTex.minFilter = THREE.NearestFilter;
+shopBreakTex.wrapS = THREE.ClampToEdgeWrapping;
+shopBreakTex.wrapT = THREE.ClampToEdgeWrapping;
+shopBreakTex.colorSpace = THREE.NoColorSpace;
+shopBreakTex.needsUpdate = true;
+
 const buildingMat = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
@@ -822,6 +836,7 @@ const buildingMat = new THREE.ShaderMaterial({
     uFaceRows: { value: 2.0 },
     uSignAtlas: { value: null },
     uSignOn: { value: 0.0 },
+    uShopBreak: { value: shopBreakTex },
   },
   vertexShader: /* glsl */`
     varying vec3 vColor;
@@ -896,6 +911,21 @@ const buildingMat = new THREE.ShaderMaterial({
     uniform float uFaceRows;
     uniform sampler2D uSignAtlas;
     uniform float uSignOn;
+    uniform sampler2D uShopBreak;
+
+    // Ground-floor shop pane break mask. Rows: 4 faces × 16 cell slots.
+    // Slot = floor(along / cellW) + 8. Face +X 0, −X 1, +Z 2, −Z 3.
+    float shopPaneBroken(float along, float cell, vec3 nLocal, float id) {
+      float ax = step(abs(nLocal.z), abs(nLocal.x));
+      float face = mix(
+        mix(3.0, 2.0, step(0.0, nLocal.z)),
+        mix(1.0, 0.0, step(0.0, nLocal.x)),
+        ax
+      );
+      float slot = clamp(floor(along / cell + 8.0), 0.0, 15.0);
+      vec2 buv = vec2((id + 0.5) / 128.0, (face * 16.0 + slot + 0.5) / 64.0);
+      return step(0.5, texture2D(uShopBreak, buv).r);
+    }
     ${NOISE_GLSL}
 
     // Sample atlas cell (cols×rows). huv in [0,1]. Flip V for image space.
@@ -1163,11 +1193,10 @@ const buildingMat = new THREE.ShaderMaterial({
       float edgeFade = mix(smoothstep(edgeKillM, edgeSoftM, edgeDistM), 1.0, atlasFlat);
 
       // Glazed shop entry: one ground-floor bay on the façade column grid.
-      // Edges sit on mullion lines (or the corner pier when a cell is clipped
-      // by the massing). Height matches the shop row beside it, so the floor
-      // slab is the head above the opening — nothing slices the glass.
-      // The atlas is the same exposure as those panes. Frame is a thin recessed
-      // jamb / stile and a sill. No header bar, no mid-rail, no opaque leaf.
+      // Edges sit on mullion lines (or the corner pier when a cell is clipped).
+      // Height is a single storey — sill 0.10, head 0.70, under the next floor
+      // at cellH 0.76 — and does not grow with the massing. The head is that
+      // floor slab, not a gold bar. No mid-rail, no opaque leaf. Thin jambs.
       float faceLen = halfAlong * 2.0;
       float faceIsX = step(abs(Ln.z), abs(Ln.x));
       float doorSeed = hash(vec2(vId * 0.37 + 1.7, mix(4.1, 8.6, faceIsX)));
@@ -1185,8 +1214,9 @@ const buildingMat = new THREE.ShaderMaterial({
       float midBay = floor(midAlong / cellW);
       float doorL = mix(max(midBay * cellW, innerL), bay * cellW, useFull);
       float doorR = mix(min((midBay + 1.0) * cellW, innerR), (bay + 1.0) * cellW, useFull);
-      float doorBot = 0.12;
-      float doorTop = min(cellH * (1.0 - mullV), vScale.y - 0.12);
+      float doorBot = 0.10;
+      // Hard cap under the next floor (cellH == 0.76). Never grow with the box.
+      float doorTop = min(cellH - 0.06, 0.70);
       float jambW = 0.022;
       float glassL = doorL + jambW;
       float glassR = doorR - jambW;
@@ -1343,22 +1373,32 @@ const buildingMat = new THREE.ShaderMaterial({
         }
       }
 
-      // Shop bay glass — same atlas path and glow as the panes beside it.
-      // Cell UV (not a stretched full-bleed crop) so a fridge divider stays
-      // picture content instead of a bar across a tall lightbox.
+      // Shop bay glass — same glow as the panes beside it. Vertical sample
+      // stays in the lower case so a fridge rail in the plate center is not
+      // a bar across the entry. Exposure is unchanged.
       if (inGlass > 0.5) {
         float bayLeft = mix(midBay, bay, useFull) * cellW;
         vec2 doorCell = vec2((faceAlong - bayLeft) / cellW, lpM.y / cellH);
         vec2 doorUV = (doorCell - vec2(mullU, mullV)) / (vec2(1.0) - 2.0 * vec2(mullU, mullV));
         doorUV = clamp(doorUV, 0.0, 1.0);
+        vec2 doorHuv = vec2(
+          0.5 + (doorUV.x - 0.5) * 0.78,
+          mix(0.05, 0.38, doorUV.y)
+        );
         if (uFaceMapOn > 0.5) {
           float doorRoom = floor(h0 * uFaceCount);
-          vec3 doorFace = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, doorRoom, cropAtlasUV(doorUV));
+          vec3 doorFace = sampleAtlas(uFaceBack, uFaceCols, uFaceRows, doorRoom, doorHuv);
           vec3 doorDark = doorFace * 0.07 + vec3(0.008, 0.01, 0.015);
           vec3 doorLit = doorFace * mix(0.5, 1.0, glow);
           interior = mix(doorDark, doorLit, mix(0.12, 1.0, glow));
         } else if (uAtlasOn > 0.5) {
-          interior = shadeRoomAtlas(doorUV, glow, 1.0, h0 + vId * 0.13);
+          float plateSeed = h0 + vId * 0.13;
+          float plateIdx = floor(hash(vec2(plateSeed * 1.7, plateSeed * 0.31)) * 16.0);
+          vec3 plate = sampleAtlas(uShopAtlas, 4.0, 4.0, plateIdx, doorHuv);
+          plate *= 1.0 - 0.10 * pow(max(abs(doorHuv.x - 0.5) * 2.0, abs(doorHuv.y - 0.2) * 2.2), 2.0);
+          vec3 plateDark = plate * 0.10 + vec3(0.01, 0.012, 0.018);
+          vec3 plateLit = plate * mix(0.65, 1.15, glow);
+          interior = mix(plateDark, plateLit, mix(0.18, 1.0, glow));
         } else {
           interior = mix(vec3(0.02, 0.022, 0.03), vec3(0.42, 0.28, 0.12), glow);
         }
@@ -1376,6 +1416,12 @@ const buildingMat = new THREE.ShaderMaterial({
         vec3 doorGlass = mix(interior, doorRefl, doorMix);
         doorGlass = mix(doorGlass, interior, glow * mix(0.55, 0.72, doorAtlas) * (1.0 - doorFres * 0.9));
         body = doorGlass;
+      }
+
+      // Broken shop glass is an empty bay. Apartment floors never sample the mask.
+      float shopHit = isShop * shopPaneBroken(faceAlong, cellW, Ln, vId);
+      if (shopHit * max(inPane, inGlass) > 0.5) {
+        body = vec3(0.012, 0.014, 0.018);
       }
 
       // Thin recessed jamb / stile on the column line, sill under the glass.
@@ -3093,6 +3139,29 @@ grafTex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 grafTex.wrapS = THREE.ClampToEdgeWrapping;
 grafTex.wrapT = THREE.ClampToEdgeWrapping;
 grafTex.needsUpdate = true;
+// Photographic freight atlas is the seawall paint. The canvas throw-ups stay
+// as the stand-in until the PNG arrives, then the photo plate takes the map.
+const grafAtlasUrl = new URL('freight-graf-atlas.png' + atlasCache, atlasBase).href;
+window.__grafAtlasUrl = grafAtlasUrl;
+new THREE.TextureLoader().load(grafAtlasUrl, (tex) => {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.needsUpdate = true;
+  grafMat.map = tex;
+  grafMat.emissiveMap = tex;
+  grafMat.emissive.set(0xffffff);
+  // Night quay: the photo has to carry itself the way a lit atlas pane does.
+  grafMat.emissiveIntensity = 0.82;
+  grafMat.needsUpdate = true;
+  window.__grafAtlas = 'freight-photo';
+}, undefined, () => {
+  window.__grafAtlas = 'canvas-fallback';
+});
 const grafMat = new THREE.MeshStandardMaterial({
   map: grafTex,
   transparent: true,
@@ -3765,6 +3834,7 @@ function physReset() {
     physSync(entry);
   }
   physSelected = null;
+  if (typeof shopGlassReset === 'function') shopGlassReset();
   if (typeof physHooks.onReset === 'function') physHooks.onReset();
   if (typeof rubeReset === 'function') rubeReset();
 }
@@ -4020,6 +4090,7 @@ function physBlast() {
       new CANNON.Vec3(0, 0.12, 0)
     );
   }
+  shopGlassBlast(origin, R);
   if (propsHint && !showHud) {
     propsHint.textContent = 'Blast · basin shove';
     propsHint.classList.add('on');
@@ -4164,6 +4235,223 @@ function windApplyForces(t) {
 
 }
 
+// ——— Breakable ground-floor shop glass ———
+// Tossed crates, a grabbed shove, and the basin blast punch shop panes.
+// Shards join physCrates so the existing grab / toss path can pick them up.
+// Apartment rows are never masked. R clears the mask and the shards.
+const SHOP_GLASS_Y0 = 0.10;
+const SHOP_GLASS_Y1 = 0.70;
+const shopShards = [];
+
+function shopMarkBroken(id, face, slot) {
+  if (id < 0 || id >= INSTANCE_COUNT || face < 0 || face > 3 || slot < 0 || slot > 15) return false;
+  const i = ((face * 16 + slot) * INSTANCE_COUNT + id) * 4;
+  if (shopBreakData[i] > 200) return false;
+  shopBreakData[i] = shopBreakData[i + 1] = shopBreakData[i + 2] = shopBreakData[i + 3] = 255;
+  shopBreakTex.needsUpdate = true;
+  return true;
+}
+
+function shopSpawnShards(x, y, z, nx, ny, nz) {
+  const palette = [0xb8c4d8, 0x9aa8c0, 0xd5dde8, 0xf0c24b, 0x8a9bb0];
+  for (let i = 0; i < 5; i++) {
+    const s = 0.045 + Math.random() * 0.06;
+    const sy = s * (0.55 + Math.random() * 0.5);
+    const sz = s * (0.7 + Math.random() * 0.45);
+    const mass = 0.12 + Math.random() * 0.16;
+    const color = palette[i % palette.length];
+    const mat = new THREE.MeshStandardMaterial({
+      color, roughness: 0.28 + Math.random() * 0.35, metalness: 0.08,
+      transparent: true, opacity: 0.88,
+      emissive: color, emissiveIntensity: 0.08,
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, sy, sz), mat);
+    if (i % 2 === 0) mesh.layers.enable(BLOOM_LAYER);
+    const body = new CANNON.Body({
+      mass: physFreeze ? 0 : mass,
+      material: physCrateMat,
+      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5)),
+      position: new CANNON.Vec3(
+        x + nx * 0.05 + (Math.random() - 0.5) * 0.12,
+        y + (Math.random() - 0.5) * 0.12,
+        z + nz * 0.05 + (Math.random() - 0.5) * 0.12
+      ),
+      linearDamping: 0.14,
+      angularDamping: 0.2,
+      allowSleep: true,
+    });
+    if (!physFreeze) {
+      body.velocity.set(
+        nx * (1.1 + Math.random() * 1.6) + (Math.random() - 0.5) * 1.4,
+        ny + 0.8 + Math.random() * 1.6,
+        nz * (1.1 + Math.random() * 1.6) + (Math.random() - 0.5) * 1.4
+      );
+      body.angularVelocity.set(
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8,
+        (Math.random() - 0.5) * 8
+      );
+    }
+    const entry = physAdd(mesh, body, 'crate', mass);
+    entry.shard = true;
+    entry.shopGlass = true;
+    entry.halfExtents = new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5);
+    entry.volume = s * sy * sz;
+    entry.density = mass / Math.max(entry.volume, 1e-4);
+    entry.densityLabel = 'light';
+    entry.floatable = true;
+    physCrates.push(entry);
+    shopShards.push(entry);
+  }
+}
+
+function shopGlassReset() {
+  if (physGrab && physGrab.entry && physGrab.entry.shopGlass) {
+    physGrab = null;
+    window.__physGrabbed = null;
+    if (typeof walkMode !== 'undefined' && typeof tourMode !== 'undefined' && !walkMode && !tourMode && controls) {
+      controls.enabled = true;
+    }
+  }
+  if (physSelected && physSelected.shopGlass) physSelected = null;
+  for (const entry of shopShards) {
+    physWorld.removeBody(entry.body);
+    scene.remove(entry.mesh);
+    const pi = physEntries.indexOf(entry);
+    if (pi >= 0) physEntries.splice(pi, 1);
+    const ci = physCrates.indexOf(entry);
+    if (ci >= 0) physCrates.splice(ci, 1);
+    if (entry.mesh.geometry) entry.mesh.geometry.dispose();
+    if (entry.mesh.material && entry.mesh.material.dispose) entry.mesh.material.dispose();
+  }
+  shopShards.length = 0;
+  shopBreakData.fill(0);
+  shopBreakTex.needsUpdate = true;
+}
+
+function shopGlassScan() {
+  for (const entry of physCrates) {
+    if (!entry || entry.shopGlass || entry.shard || !(entry.mass > 0) || !entry.body) continue;
+    if (entry.body.type !== CANNON.Body.DYNAMIC) continue;
+    const p = entry.body.position;
+    const v = entry.body.velocity;
+    const held = physGrab && physGrab.entry === entry;
+    const speed = Math.hypot(v.x, v.y, v.z);
+    const prev = entry._shopPrev;
+    if (!prev || speed < (held ? 1.15 : 2.05)) {
+      if (!entry._shopPrev) entry._shopPrev = new CANNON.Vec3();
+      entry._shopPrev.copy(p);
+      continue;
+    }
+    const he = entry.halfExtents || { x: 0.25, y: 0.25, z: 0.25 };
+    let best = null;
+    for (let i = 0; i < harborBoxes.length; i++) {
+      const b = harborBoxes[i];
+      if (Math.abs(p.x - b.x) > b.w * 0.5 + 2.2) continue;
+      if (Math.abs(p.z - b.z) > b.d * 0.5 + 2.2) continue;
+      const faces = [
+        { face: 0, outward: 1, p0: prev.x, p1: p.x, plane: b.x + b.w * 0.5, a0: prev.z - b.z, a1: p.z - b.z, limit: b.d * 0.5, vel: v.x, reach: he.x, nx: 1, nz: 0 },
+        { face: 1, outward: -1, p0: prev.x, p1: p.x, plane: b.x - b.w * 0.5, a0: prev.z - b.z, a1: p.z - b.z, limit: b.d * 0.5, vel: v.x, reach: he.x, nx: -1, nz: 0 },
+        { face: 2, outward: 1, p0: prev.z, p1: p.z, plane: b.z + b.d * 0.5, a0: prev.x - b.x, a1: p.x - b.x, limit: b.w * 0.5, vel: v.z, reach: he.z, nx: 0, nz: 1 },
+        { face: 3, outward: -1, p0: prev.z, p1: p.z, plane: b.z - b.d * 0.5, a0: prev.x - b.x, a1: p.x - b.x, limit: b.w * 0.5, vel: v.z, reach: he.z, nx: 0, nz: -1 },
+      ];
+      for (const f of faces) {
+        const d0 = (f.p0 - f.plane) * f.outward;
+        const d1 = (f.p1 - f.plane) * f.outward;
+        if (!(d0 > -0.02 && d1 < f.reach + 0.1 && d0 > d1 - 1e-4)) continue;
+        if (f.vel * f.outward > -0.2) continue;
+        const denom = d0 - d1;
+        const t = Math.abs(denom) < 1e-4 ? 0 : d0 / denom;
+        const tc = Math.min(1, Math.max(0, t));
+        const along = f.a0 + (f.a1 - f.a0) * tc;
+        const hy = prev.y + (p.y - prev.y) * tc;
+        if (Math.abs(along) > f.limit - 0.05) continue;
+        if (hy < SHOP_GLASS_Y0 - he.y || hy > SHOP_GLASS_Y1 + 0.02) continue;
+        const slot = Math.floor(along / 0.76) + 8;
+        if (slot < 0 || slot > 15) continue;
+        const dist = Math.abs(d1);
+        if (!best || dist < best.dist) {
+          best = { id: i, face: f.face, slot, dist, hy, along, nx: f.nx, nz: f.nz, b };
+        }
+      }
+    }
+    if (best && shopMarkBroken(best.id, best.face, best.slot)) {
+      const hy = Math.min(SHOP_GLASS_Y1 - 0.04, Math.max(SHOP_GLASS_Y0 + 0.05, best.hy));
+      const x = best.nx !== 0 ? best.b.x + best.nx * (best.b.w * 0.5 + 0.06) : best.b.x + best.along;
+      const z = best.nz !== 0 ? best.b.z + best.nz * (best.b.d * 0.5 + 0.06) : best.b.z + best.along;
+      shopSpawnShards(x, hy, z, best.nx, 0.2, best.nz);
+      if (best.nx !== 0) entry.body.velocity.x = best.nx * Math.max(0.35, Math.abs(v.x) * 0.22);
+      else entry.body.velocity.z = best.nz * Math.max(0.35, Math.abs(v.z) * 0.22);
+    }
+    entry._shopPrev.copy(p);
+  }
+}
+
+function shopGlassBlast(origin, radius) {
+  const R = Math.min(radius || 4, 4.2);
+  for (let i = 0; i < harborBoxes.length; i++) {
+    const b = harborBoxes[i];
+    const faces = [
+      { face: 0, x: b.x + b.w * 0.5, z: b.z, nx: 1, nz: 0, along: origin.z - b.z, limit: b.d * 0.5 },
+      { face: 1, x: b.x - b.w * 0.5, z: b.z, nx: -1, nz: 0, along: origin.z - b.z, limit: b.d * 0.5 },
+      { face: 2, x: b.x, z: b.z + b.d * 0.5, nx: 0, nz: 1, along: origin.x - b.x, limit: b.w * 0.5 },
+      { face: 3, x: b.x, z: b.z - b.d * 0.5, nx: 0, nz: -1, along: origin.x - b.x, limit: b.w * 0.5 },
+    ];
+    for (const f of faces) {
+      const dx = f.x - origin.x;
+      const dz = f.z - origin.z;
+      if (Math.hypot(dx, (origin.y || 0.4) - 0.4, dz) > R) continue;
+      if (dx * f.nx + dz * f.nz > 0.35) continue;
+      const along = Math.max(-f.limit + 0.06, Math.min(f.limit - 0.06, f.along));
+      const slot = Math.floor(along / 0.76) + 8;
+      if (!shopMarkBroken(i, f.face, slot)) continue;
+      const x = f.nx !== 0 ? f.x + f.nx * 0.06 : b.x + along;
+      const z = f.nz !== 0 ? f.z + f.nz * 0.06 : b.z + along;
+      shopSpawnShards(x, 0.42, z, f.nx, 0.55, f.nz);
+    }
+  }
+}
+
+window.__shopGlass = {
+  broken() {
+    let n = 0;
+    for (let i = 0; i < shopBreakData.length; i += 4) if (shopBreakData[i] > 200) n++;
+    return n;
+  },
+  shards: () => shopShards.length,
+  reset: shopGlassReset,
+  strike(id, face, slot, x, y, z, nx, nz) {
+    if (shopMarkBroken(id, face, slot)) shopSpawnShards(x, y, z, nx || 0, 0.4, nz || 0);
+    return { broken: window.__shopGlass.broken(), shards: shopShards.length };
+  },
+  // Swept crate vs one façade face. Used to confirm impact without a HUD control.
+  cross(boxIdx, face) {
+    const entry = physCrates.find((e) => e && !e.shard && !e.shopGlass && e.mass > 0 && e.body);
+    const b = harborBoxes[boxIdx];
+    if (!entry || !b) return { ok: false };
+    const f = face | 0;
+    const he = entry.halfExtents || { x: 0.25, y: 0.25, z: 0.25 };
+    const y = 0.42;
+    let nx = 0, nz = 0, ox = b.x, oz = b.z;
+    if (f === 0) { nx = 1; ox = b.x + b.w * 0.5; }
+    else if (f === 1) { nx = -1; ox = b.x - b.w * 0.5; }
+    else if (f === 2) { nz = 1; oz = b.z + b.d * 0.5; }
+    else { nz = -1; oz = b.z - b.d * 0.5; }
+    const out = 0.35 + (nx ? he.x : he.z);
+    entry._shopPrev = new CANNON.Vec3(ox + nx * out, y, oz + nz * out);
+    entry.body.position.set(ox - nx * 0.08, y, oz - nz * 0.08);
+    entry.body.velocity.set(-nx * 4.5, 0.1, -nz * 4.5);
+    entry.body.wakeUp();
+    shopGlassScan();
+    return {
+      ok: true,
+      broken: window.__shopGlass.broken(),
+      shards: shopShards.length,
+      shard: shopShards[0] ? { shard: true, shopGlass: true, inCrates: physCrates.includes(shopShards[0]) } : null,
+    };
+  },
+};
+
 function physStep() {
   if (physFreeze) {
     for (const entry of physEntries) {
@@ -4179,6 +4467,7 @@ function physStep() {
   if (typeof physHooks.beforeStep === 'function') physHooks.beforeStep();
   physWorld.fixedStep();
   for (const entry of physEntries) physSync(entry);
+  shopGlassScan();
   if (typeof physHooks.afterStep === 'function') physHooks.afterStep();
   if (typeof rubeTick === 'function') rubeTick();
   if ((physStep._n = (physStep._n || 0) + 1) % 5 === 0) refreshHarborPhysicsProbe();
@@ -5680,10 +5969,22 @@ window.__frameQuaySprings = function (mode) {
     // Tighter on ground-floor shop band
     camera.position.set(4.8, 1.55, 6.4);
     controls.target.set(0.6, 1.35, -0.8);
+  } else if (mode === 'entry') {
+    // Eye height on the ground-floor bay. Door head is 0.70, next floor at 0.76.
+    camera.position.set(3.4, 0.78, 5.2);
+    controls.target.set(0.5, 0.42, -0.4);
+  } else if (mode === 'bay') {
+    // Head-on ground floor of the seeded block at x 1.17 (building 10, +Z face).
+    camera.position.set(1.17, 0.62, 3.15);
+    controls.target.set(1.17, 0.42, 0.69);
   } else if (mode === 'seawall') {
     // Water-side proof: basin outboard of seawall, quay dry
     camera.position.set(11.5, 4.2, 14.5);
     controls.target.set(0.5, 0.4, 5.6);
+  } else if (mode === 'graf') {
+    // Promenade side of the freight band, eye height, dry quay.
+    camera.position.set(0.6, 0.95, 3.15);
+    controls.target.set(0.4, 0.42, 5.29);
   } else if (mode === 'windows') {
     // Rectilinear façade + atlas panes head-on
     camera.position.set(5.4, 2.1, 6.8);
