@@ -699,6 +699,9 @@ curbs.frustumCulled = false;
 
 const dummyR = new THREE.Object3D();
 let roadN = 0, swN = 0, curbN = 0;
+// World-XZ footprints for static ground. Top is the walk surface.
+// Built into cannon after physWorld exists.
+const pavementCols = [];
 
 function addRoad(cx, cz, len, width, rotY) {
   if (roadN >= ROAD_MAX) return;
@@ -708,6 +711,14 @@ function addRoad(cx, cz, len, width, rotY) {
   dummyR.scale.set(len, width, 1);
   dummyR.updateMatrix();
   roads.setMatrixAt(roadN++, dummyR.matrix);
+  const alongX = Math.abs(rotY) < 0.8;
+  pavementCols.push({
+    x: cx,
+    z: cz,
+    hx: (alongX ? len : width) * 0.5 + 0.04,
+    hz: (alongX ? width : len) * 0.5 + 0.04,
+    top: 0.015,
+  });
 }
 
 function addSidewalk(cx, cz, sx, sz) {
@@ -717,6 +728,14 @@ function addSidewalk(cx, cz, sx, sz) {
   dummyR.scale.set(sx, 0.055, sz);
   dummyR.updateMatrix();
   sidewalks.setMatrixAt(swN++, dummyR.matrix);
+  // Box is centered on y=0.03, so the tread is half the thickness up.
+  pavementCols.push({
+    x: cx,
+    z: cz,
+    hx: sx * 0.5 + 0.03,
+    hz: sz * 0.5 + 0.03,
+    top: 0.03 + 0.055 * 0.5,
+  });
 }
 
 function addCurb(cx, cz, sx, sz) {
@@ -3546,14 +3565,69 @@ function physAdd(mesh, body, kind, mass) {
   return entry;
 }
 
-// Static quay collision slab (matches hero quay deck band)
+// Static quay collision slab (matches hero quay deck band).
+// Thick downward so a fast crate cannot step through the promenade.
+// Top stays at the deck (y=0.04). Plate latch still keys off this body.
+const QUAY_TOP_Y = 0.04;
+const PAVEMENT_HALF_Y = 1.05;
 const quayDeckBody = new CANNON.Body({
   mass: 0,
+  type: CANNON.Body.STATIC,
   material: physGroundMat,
-  shape: new CANNON.Box(new CANNON.Vec3(11, 0.08, 3.2)),
-  position: new CANNON.Vec3(0, -0.04, 2.6),
+  shape: new CANNON.Box(new CANNON.Vec3(11, PAVEMENT_HALF_Y, 3.2)),
+  position: new CANNON.Vec3(0, QUAY_TOP_Y - PAVEMENT_HALF_Y, 2.6),
 });
 physWorld.addBody(quayDeckBody);
+
+// Streets, sidewalks, and lot pads. Pieces that sit on the quay slab are
+// clipped out so a crate on the promenade still rests on quayDeckBody.
+const QUAY_COL_X = 11;
+const QUAY_COL_Z0 = 2.6 - 3.2;
+const QUAY_COL_Z1 = 2.6 + 3.2;
+function pavementOutsideQuay(p) {
+  const x0 = p.x - p.hx;
+  const x1 = p.x + p.hx;
+  const z0 = p.z - p.hz;
+  const z1 = p.z + p.hz;
+  const qx0 = -QUAY_COL_X;
+  const qx1 = QUAY_COL_X;
+  const ox0 = Math.max(x0, qx0);
+  const ox1 = Math.min(x1, qx1);
+  const oz0 = Math.max(z0, QUAY_COL_Z0);
+  const oz1 = Math.min(z1, QUAY_COL_Z1);
+  if (!(ox0 < ox1 - 1e-4 && oz0 < oz1 - 1e-4)) return [p];
+  const out = [];
+  const push = (ax0, ax1, az0, az1) => {
+    if (ax1 - ax0 < 0.04 || az1 - az0 < 0.04) return;
+    out.push({
+      x: (ax0 + ax1) * 0.5,
+      z: (az0 + az1) * 0.5,
+      hx: (ax1 - ax0) * 0.5,
+      hz: (az1 - az0) * 0.5,
+      top: p.top,
+    });
+  };
+  if (x0 < qx0) push(x0, qx0, z0, z1);
+  if (x1 > qx1) push(qx1, x1, z0, z1);
+  const mx0 = Math.max(x0, qx0);
+  const mx1 = Math.min(x1, qx1);
+  if (z0 < QUAY_COL_Z0) push(mx0, mx1, z0, QUAY_COL_Z0);
+  if (z1 > QUAY_COL_Z1) push(mx0, mx1, QUAY_COL_Z1, z1);
+  return out;
+}
+let pavementBodies = 0;
+for (const footprint of pavementCols) {
+  for (const p of pavementOutsideQuay(footprint)) {
+    physWorld.addBody(new CANNON.Body({
+      mass: 0,
+      type: CANNON.Body.STATIC,
+      material: physGroundMat,
+      shape: new CANNON.Box(new CANNON.Vec3(p.hx, PAVEMENT_HALF_Y, p.hz)),
+      position: new CANNON.Vec3(p.x, p.top - PAVEMENT_HALF_Y, p.z),
+    }));
+    pavementBodies++;
+  }
+}
 
 // Soft seawall curb (low) — slows sliding but toss clears into basin for buoyancy
 const seawallLip = new CANNON.Body({
@@ -4618,7 +4692,7 @@ function refreshHarborPhysicsProbe() {
       ? physLanterns.map(() => 'PointToPoint')
       : [],
     constraintOn: physConstraintOn,
-    staticGround: 6, // quay + curb + basin floor + 3 walls
+    staticGround: 6 + pavementBodies, // quay + curb + basin + 3 walls + streets
     wind: windProbe,
     cratePos: physCrates.map((c) => ({
       x: +c.body.position.x.toFixed(3),
