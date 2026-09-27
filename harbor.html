@@ -4066,39 +4066,23 @@ window.__harborIron = {
 };
 const ironCache = location.protocol === 'file:' ? '' : '?v=iron1';
 const ironWearMats = [signalIron, signalVisorMat, ironMatStd, ironWarmStd, strandPostMat];
+// Dedicated sheets replace Studio's street-atlas row-2 crop on props only.
+// The seed still runs; applyDedicatedPropWear puts these maps back on top.
+const dedicatedPropWear = { iron: null, crate: null };
 Promise.all([
   atlasLoader.loadAsync(new URL('quay-iron-atlas.png' + ironCache, atlasBase).href),
   atlasLoader.loadAsync(new URL('quay-iron-normal.png' + ironCache, atlasBase).href),
   atlasLoader.loadAsync(new URL('quay-iron-rough.png' + ironCache, atlasBase).href),
 ]).then(([color, normal, rough]) => {
-  const map = prepIronColor(color);
-  const nmap = prepIronData(normal);
-  const rmap = prepIronData(rough);
-  for (let i = 0; i < ironWearMats.length; i++) {
-    const mat = ironWearMats[i];
-    mat.map = map;
-    mat.normalMap = nmap;
-    mat.normalScale.set(0.4, 0.4);
-    mat.roughnessMap = rmap;
-    mat.roughness = 1;
-    mat.metalness = 0.32;
-    mat.color.set(0xffffff);
-    mat.emissive.set(0xfff1dc);
-    mat.emissiveMap = map;
-    mat.emissiveIntensity = 0.07;
-    mat.needsUpdate = true;
-  }
-  // Warm bollards keep a little of the old family without flattening the photo.
-  ironWarmStd.color.set(0xe4d4c4);
-  furnMat.uniforms.uIron.value = map;
-  furnMat.uniforms.uIronOn.value = 1;
-  quayPostMat.uniforms.uIron.value = map;
-  quayPostMat.uniforms.uIronOn.value = 1;
-  window.__harborIron.ready = true;
-  window.__harborIron.map = `${color.image.width}x${color.image.height}`;
-  if (stillMode) tick();
+  dedicatedPropWear.iron = {
+    map: prepIronColor(color),
+    normal: prepIronData(normal),
+    rough: prepIronData(rough),
+    size: `${color.image.width}x${color.image.height}`,
+  };
+  applyDedicatedPropWear();
 }).catch((err) => {
-  console.warn('Quay iron atlas failed — flat iron remains', err);
+  console.warn('Quay iron atlas failed — street-atlas iron crop remains', err);
 });
 
 // Fixed bollards (static) — collision posts crates can bounce off
@@ -4439,22 +4423,74 @@ Promise.all([
   atlasLoader.loadAsync(new URL('quay-crate-normal.png' + crateCache, atlasBase).href),
   atlasLoader.loadAsync(new URL('quay-crate-rough.png' + crateCache, atlasBase).href),
 ]).then(([color, normal, rough]) => {
-  const map = prepCrateColor(color);
-  crateWearMat.map = map;
-  crateWearMat.emissiveMap = map;
-  crateWearMat.normalMap = prepCrateData(normal);
-  crateWearMat.normalScale.set(0.65, 0.65);
-  crateWearMat.roughnessMap = prepCrateData(rough);
-  // Roughness map is absolute (G). Three multiplies by the scalar.
-  crateWearMat.roughness = 1;
-  crateWearMat.needsUpdate = true;
-  window.__harborCrates.ready = true;
-  window.__harborCrates.map = `${color.image.width}x${color.image.height}`;
-  // ?still=1 stops the loop before the PNG returns. One more frame shows the photo.
-  if (stillMode) tick();
+  dedicatedPropWear.crate = {
+    map: prepCrateColor(color),
+    normal: prepCrateData(normal),
+    rough: prepCrateData(rough),
+    size: `${color.image.width}x${color.image.height}`,
+  };
+  applyDedicatedPropWear();
 }).catch((err) => {
   console.warn('Quay crate atlas failed — canvas wear remains', err);
 });
+
+// Isolated prop path. Studio's applyStreetPropWear still crops street-atlas.png
+// row 2 (iron col 0, crate col 1) onto these materials. When that seed lands
+// after the dedicated sheets, put the richer maps back. Asphalt, sidewalk,
+// and curb stay on loadStreetAtlas / streetPack.
+function applyDedicatedPropWear() {
+  const iron = dedicatedPropWear.iron;
+  if (iron) {
+    for (let i = 0; i < ironWearMats.length; i++) {
+      const mat = ironWearMats[i];
+      mat.map = iron.map;
+      mat.normalMap = iron.normal;
+      mat.normalScale.set(0.4, 0.4);
+      mat.roughnessMap = iron.rough;
+      mat.roughness = 1;
+      mat.metalness = 0.32;
+      mat.color.set(0xffffff);
+      mat.emissive.set(0xfff1dc);
+      mat.emissiveMap = iron.map;
+      mat.emissiveIntensity = 0.07;
+      mat.needsUpdate = true;
+    }
+    ironWarmStd.color.set(0xe4d4c4);
+    furnMat.uniforms.uIron.value = iron.map;
+    furnMat.uniforms.uIronOn.value = 1;
+    quayPostMat.uniforms.uIron.value = iron.map;
+    quayPostMat.uniforms.uIronOn.value = 1;
+    window.__harborIron.ready = true;
+    window.__harborIron.map = iron.size;
+    window.__harborIron.live = signalIron.map && signalIron.map.image
+      ? `${signalIron.map.image.width}x${signalIron.map.image.height}`
+      : '';
+    window.__harborIron.extends = 'street-atlas row2 col0';
+  }
+  const crate = dedicatedPropWear.crate;
+  if (crate) {
+    crateWearMat.map = crate.map;
+    crateWearMat.emissiveMap = crate.map;
+    crateWearMat.normalMap = crate.normal;
+    crateWearMat.normalScale.set(0.65, 0.65);
+    crateWearMat.roughnessMap = crate.rough;
+    // Roughness map is absolute (G). Three multiplies by the scalar.
+    crateWearMat.roughness = 1;
+    crateWearMat.needsUpdate = true;
+    window.__harborCrates.ready = true;
+    window.__harborCrates.map = crate.size;
+    window.__harborCrates.live = crateWearMat.map && crateWearMat.map.image
+      ? `${crateWearMat.map.image.width}x${crateWearMat.map.image.height}`
+      : '';
+    window.__harborCrates.extends = 'street-atlas row2 col1';
+  }
+  if (stillMode && (iron || crate)) tick();
+}
+const streetPropWearSeed = applyStreetPropWear;
+applyStreetPropWear = function (packed) {
+  streetPropWearSeed(packed);
+  applyDedicatedPropWear();
+};
 
 const HARBOR_CRATE_DEFS = [
   // mid — cream column 0, rides mid-high
