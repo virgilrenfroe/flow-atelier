@@ -3195,6 +3195,7 @@ function physBeginGrab(e) {
   physDragPlane.constant = -worldHit.y;
   physGrab = { entry, localOffset, planeY: worldHit.y };
   physSelected = entry;
+  window.__physGrabbed = { kind: entry.kind, shard: !!entry.shard, mass: entry.mass };
   entry.body.wakeUp();
   entry.body.angularVelocity.scale(0.4, entry.body.angularVelocity);
   return true;
@@ -3230,6 +3231,7 @@ function physEndGrab() {
     );
   }
   physGrab = null;
+  window.__physGrabbed = null;
   if (!walkMode && !tourMode) controls.enabled = true;
 }
 
@@ -4620,19 +4622,22 @@ function rubeShatter() {
       emissive: palette[i % palette.length],
       emissiveIntensity: 0.08,
     });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, s * (0.6 + Math.random()), s), mat);
+    const sy = s * (0.65 + Math.random() * 0.55);
+    const sz = s * (0.75 + Math.random() * 0.45);
+    const mass = 0.16 + Math.random() * 0.22;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, sy, sz), mat);
     if (i % 3 === 0) mesh.layers.enable(BLOOM_LAYER);
     const body = new CANNON.Body({
-      mass: physFreeze ? 0 : 0.08 + Math.random() * 0.12,
+      mass: physFreeze ? 0 : mass,
       material: physCrateMat,
-      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, s * 0.4, s * 0.5)),
+      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5)),
       position: new CANNON.Vec3(
         origin.x + (Math.random() - 0.5) * 0.2,
         origin.y + (Math.random() - 0.3) * 0.2,
         origin.z + (Math.random() - 0.5) * 0.2
       ),
-      linearDamping: 0.12,
-      angularDamping: 0.16,
+      linearDamping: 0.14,
+      angularDamping: 0.2,
       allowSleep: true,
     });
     if (!physFreeze) {
@@ -4647,20 +4652,36 @@ function rubeShatter() {
         (Math.random() - 0.5) * 8
       );
     }
-    physWorld.addBody(body);
-    scene.add(mesh);
-    mesh.position.copy(body.position);
-    rubeDebris.push({ mesh, body });
+    // Same entry as a quay crate: physEntry + physCrates so raycast grab/toss hits it.
+    const entry = physAdd(mesh, body, 'crate', mass);
+    entry.shard = true;
+    entry.halfExtents = new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5);
+    entry.volume = s * sy * sz;
+    entry.density = mass / Math.max(entry.volume, 1e-4);
+    entry.densityLabel = 'light';
+    entry.floatable = true;
+    physCrates.push(entry);
+    rubeDebris.push(entry);
   }
   rubeHint('Shatter · fenestra debris');
 }
 
 function rubeClearDebris() {
-  for (const d of rubeDebris) {
-    physWorld.removeBody(d.body);
-    scene.remove(d.mesh);
-    if (d.mesh.geometry) d.mesh.geometry.dispose();
-    if (d.mesh.material) d.mesh.material.dispose();
+  if (physGrab && physGrab.entry && physGrab.entry.shard) {
+    physGrab = null;
+    window.__physGrabbed = null;
+    if (!walkMode && !tourMode) controls.enabled = true;
+  }
+  if (physSelected && physSelected.shard) physSelected = null;
+  for (const entry of rubeDebris) {
+    physWorld.removeBody(entry.body);
+    scene.remove(entry.mesh);
+    const pi = physEntries.indexOf(entry);
+    if (pi >= 0) physEntries.splice(pi, 1);
+    const ci = physCrates.indexOf(entry);
+    if (ci >= 0) physCrates.splice(ci, 1);
+    if (entry.mesh.geometry) entry.mesh.geometry.dispose();
+    if (entry.mesh.material && entry.mesh.material.dispose) entry.mesh.material.dispose();
   }
   rubeDebris.length = 0;
 }
@@ -4789,10 +4810,18 @@ function rubeFillProbe() {
     chain: 'crate → plate → lantern → Signal/gate → shatter',
   };
   window.__rube = probe;
+  window.__rubeShatter = rubeShatter;
   window.__shatter = {
     done: rubeState.shatterDone,
     debris: rubeDebris.length,
     vesselVisible: rubeVesselMesh.visible,
+    pickable: rubeDebris.filter((d) => d.kind === 'crate' && d.mass > 0 && d.mesh && d.mesh.userData.physEntry).length,
+    shards: rubeDebris.map((d) => ({
+      x: +d.body.position.x.toFixed(3),
+      y: +d.body.position.y.toFixed(3),
+      z: +d.body.position.z.toFixed(3),
+      mass: d.mass,
+    })),
   };
   if (window.__harborPhysics) {
     window.__harborPhysics.rube = probe;
