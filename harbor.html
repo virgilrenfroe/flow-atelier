@@ -1287,6 +1287,9 @@ const buildingMat = new THREE.ShaderMaterial({
 
       // Concrete façade body (Virgil 2026-09-26) — architectural grain on opaque
       // wall / pier / frameBand only. Panes keep atlas interiors unchanged.
+      // When the sheath sheets load, vertical faces replace this grain with
+      // moss over a circuit underlayer; this color remains the roof/floor
+      // fallback and the concrete tint inside opened patches.
       // Cool-gray bias on cool instances, warm-gray on warm; night Noctuary dark.
       float warmBias = smoothstep(0.35, 0.75, vColor.r);
       float coolBias = smoothstep(0.35, 0.70, vColor.b);
