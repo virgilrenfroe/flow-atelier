@@ -4794,6 +4794,7 @@ function springMakeCable(getA, getB, color) {
 }
 
 function springSyncCables() {
+  if (typeof pennantDeformCloths === 'function') pennantDeformCloths();
   for (const vis of physCableVisuals) {
     vis.getA(springThreeA);
     vis.getB(springThreeB);
@@ -4916,13 +4917,16 @@ for (const gd of GUY_DEFS) {
   );
 }
 
-// —— Quay pennants: tapered cloth on a halyard (not thick neon slabs) ——
-// Two short strings along the promenade. Each pennant is five thin trapezoid
-// panels on a center hinge, with a vertex ripple on the leech so the fly
-// flutters in the wind. Marks are original — Harbor, Signal house, Quay, Fenestra.
-const PENNANT_ROWS = 5;
+// —— Quay pennants: one tapered cloth per flag on a halyard ——
+// Two short strings along the promenade. Each flag is a single subdivided
+// trapezoid (no strip seams, no stepped leech). A short spring chain skins
+// the sheet so the fly can bend; the hoist hem, grommets, and halyard stay
+// thin hardware. Marks are original — Harbor, Signal house, Quay, Fenestra.
 const PENNANT_PER_STRING = 3;
-const PENNANT_ROW_H = 0.172;
+const PENNANT_NODES = 8;
+const PENNANT_SUB_X = 7;
+const PENNANT_SUB_Y = 16;
+const PENNANT_CLOTH_LEN = 0.92;
 const PENNANT_TIP_W = 0.05;
 const PENNANT_TIE = 0.055;
 const PENNANT_CABLE_Y = 2.68;
@@ -5002,14 +5006,15 @@ pennantClothMat.onBeforeCompile = (shader) => {
       `#include <begin_vertex>
        float uCell = fract(uv.x * 4.0);
        float edge = abs(uCell - 0.5) * 2.0;
-       float flutter = aHang * aHang * (0.18 + 0.82 * edge);
+       // Fly and leech lead; the hoist stays quiet. Displacement is along the
+       // cloth normal so a world-space sheet still ripples out of plane.
+       float flutter = aHang * aHang * (0.28 + 0.72 * edge);
        float gust = max(uClothGust, 0.22);
-       float phase = aHang * 8.5 + uClothTime * (1.7 + gust);
-       float wave = sin(phase + edge * 2.4);
-       float wave2 = sin(aHang * 14.0 - uClothTime * 2.4 + edge * 5.0);
-       float amp = flutter * 0.055 * gust;
-       transformed.z += wave * amp;
-       transformed.x += wave2 * edge * aHang * 0.022 * gust;`
+       float phase = aHang * 7.5 + uClothTime * (1.55 + gust);
+       float wave = sin(phase + edge * 2.2);
+       float wave2 = sin(aHang * 13.0 - uClothTime * 2.35 + edge * 4.0);
+       float amp = flutter * 0.062 * gust;
+       transformed += normalize(normal) * (wave * 0.82 + wave2 * 0.28) * amp;`
     );
   shader.fragmentShader = shader.fragmentShader.replace(
     '#include <opaque_fragment>',
@@ -5021,7 +5026,7 @@ pennantClothMat.onBeforeCompile = (shader) => {
   );
   pennantClothMat.userData.shader = shader;
 };
-pennantClothMat.customProgramCacheKey = () => 'quay-pennant-cloth';
+pennantClothMat.customProgramCacheKey = () => 'quay-pennant-cloth-v2';
 
 function pennantSyncCloth(t) {
   const sh = pennantClothMat.userData.shader;
@@ -5084,18 +5089,6 @@ const pennantRig = new THREE.Group();
 pennantRig.name = 'quay-pennants';
 scene.add(pennantRig);
 
-function pennantCord(mesh, x0, y0, x1, y1, radius, mat) {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const len = Math.hypot(dx, dy);
-  if (len < 1e-4) return null;
-  const cord = new THREE.Mesh(pennantCordGeo, mat);
-  cord.scale.set(radius, len, radius);
-  cord.position.set((x0 + x1) * 0.5, (y0 + y1) * 0.5, 0.005);
-  cord.rotation.z = Math.atan2(-dx, dy);
-  mesh.add(cord);
-  return cord;
-}
 function pennantGrommet(mesh, x, y) {
   const g = new THREE.Mesh(pennantGrommetGeo, pennantBrass);
   g.position.set(x, y, 0.008);
@@ -5114,30 +5107,67 @@ function pennantHalyardAt(a, b, t, target) {
 function pennantWidthAt(headW, t) {
   return PENNANT_TIP_W + (headW - PENNANT_TIP_W) * (1 - t);
 }
-function makePennantPanelGeo(corners, u0, u1, vTop, vBot, hang0, hang1, leechL, leechR, zBias) {
+function makePennantClothGeo(headW, u0, u1) {
+  const sx = PENNANT_SUB_X;
+  const sy = PENNANT_SUB_Y;
+  const vx = sx + 1;
+  const vy = sy + 1;
+  const positions = new Float32Array(vx * vy * 3);
+  const uvs = new Float32Array(vx * vy * 2);
+  const hang = new Float32Array(vx * vy);
+  const indices = [];
+  const uInset = 0.5 / 2048;
+  const vInset = 0.5 / 1024;
+  const uu0 = u0 + uInset;
+  const uu1 = u1 - uInset;
+  for (let r = 0; r < vy; r++) {
+    const t = r / sy;
+    const w = pennantWidthAt(headW, t);
+    const v = (1 - vInset) + (vInset - (1 - vInset)) * t;
+    for (let c = 0; c < vx; c++) {
+      const s = c / sx;
+      const i = r * vx + c;
+      positions[i * 3] = (s - 0.5) * w;
+      positions[i * 3 + 1] = -PENNANT_TIE - t * PENNANT_CLOTH_LEN;
+      positions[i * 3 + 2] = 0;
+      uvs[i * 2] = uu0 + (uu1 - uu0) * s;
+      uvs[i * 2 + 1] = v;
+      hang[i] = t;
+    }
+  }
+  for (let r = 0; r < sy; r++) {
+    for (let c = 0; c < sx; c++) {
+      const i = r * vx + c;
+      indices.push(i, i + vx, i + 1, i + 1, i + vx, i + vx + 1);
+    }
+  }
   const geo = new THREE.BufferGeometry();
-  const z = zBias || 0;
-  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
-    corners.TL.x, corners.TL.y, z,
-    corners.TR.x, corners.TR.y, z,
-    corners.BR.x, corners.BR.y, z,
-    corners.BL.x, corners.BL.y, z,
-  ]), 3));
-  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([
-    u0, vTop, u1, vTop, u1, vBot, u0, vBot,
-  ]), 2));
-  geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([
-    0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
-  ]), 3));
-  geo.setAttribute('aHang', new THREE.BufferAttribute(new Float32Array([
-    hang0, hang0, hang1, hang1,
-  ]), 1));
-  geo.setAttribute('aLeech', new THREE.BufferAttribute(new Float32Array([
-    leechL, leechR, leechR, leechL,
-  ]), 1));
-  geo.setIndex([0, 3, 2, 0, 2, 1]);
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  geo.setAttribute('aHang', new THREE.BufferAttribute(hang, 1));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
   geo.computeTangents();
   return geo;
+}
+function pennantCatmull(out, p0, p1, p2, p3, f) {
+  const f2 = f * f;
+  const f3 = f2 * f;
+  out.set(
+    0.5 * ((2 * p1.x) + (-p0.x + p2.x) * f + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * f2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * f3),
+    0.5 * ((2 * p1.y) + (-p0.y + p2.y) * f + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * f2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * f3),
+    0.5 * ((2 * p1.z) + (-p0.z + p2.z) * f + (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * f2 + (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * f3),
+  );
+  return out;
+}
+function pennantCatmullTan(out, p0, p1, p2, p3, f) {
+  const f2 = f * f;
+  out.set(
+    0.5 * ((-p0.x + p2.x) + 2 * (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * f + 3 * (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * f2),
+    0.5 * ((-p0.y + p2.y) + 2 * (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * f + 3 * (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * f2),
+    0.5 * ((-p0.z + p2.z) + 2 * (2 * p0.z - 5 * p1.z + 4 * p2.z - p3.z) * f + 3 * (-p0.z + 3 * p1.z - 3 * p2.z + p3.z) * f2),
+  );
+  return out;
 }
 function pennantPin(bodyA, localA, bodyB, localB) {
   if (physFreeze) return;
@@ -5191,10 +5221,113 @@ function addPennantPost(x, z) {
 }
 
 const pennantUp = new THREE.Vector3(0, 1, 0);
+const pennantZ = new THREE.Vector3(0, 0, 1);
 const pennantHead = new THREE.Vector3();
-const pennantPos = new THREE.Vector3();
-const PENNANT_HINGE_GAP = 0.014;
+const pennantN = new THREE.Vector3();
+const pennantAcross = new THREE.Vector3();
+const pennantDown = new THREE.Vector3();
+const pennantCenter = new THREE.Vector3();
+const pennantCloths = [];
 let pennantCount = 0;
+
+function pennantPlaceRod(mesh, ax, ay, az, bx, by, bz, radius) {
+  pennantCenter.set(ax + bx, ay + by, az + bz).multiplyScalar(0.5);
+  pennantDown.set(bx - ax, by - ay, bz - az);
+  const len = Math.max(pennantDown.length(), 0.001);
+  mesh.position.copy(pennantCenter);
+  mesh.scale.set(radius, len, radius);
+  if (pennantDown.lengthSq() < 1e-8) pennantDown.copy(pennantUp);
+  else pennantDown.multiplyScalar(1 / len);
+  mesh.quaternion.setFromUnitVectors(pennantUp, pennantDown);
+}
+
+function pennantDeformCloths() {
+  const sx = PENNANT_SUB_X;
+  const sy = PENNANT_SUB_Y;
+  const vx = sx + 1;
+  for (let ci = 0; ci < pennantCloths.length; ci++) {
+    const cloth = pennantCloths[ci];
+    const nodes = cloth.nodes;
+    const n = nodes.length;
+    const pts = cloth.pts;
+    for (let i = 0; i < n; i++) {
+      const bp = nodes[i].body.position;
+      pts[i].set(bp.x, bp.y, bp.z);
+    }
+    const pos = cloth.positions;
+    let topAcrossX = cloth.right.x;
+    let topAcrossY = cloth.right.y;
+    let topAcrossZ = cloth.right.z;
+    let topDownX = 0;
+    let topDownY = -1;
+    let topDownZ = 0;
+    for (let r = 0; r <= sy; r++) {
+      const t = r / sy;
+      const u = t * (n - 1);
+      let i0 = Math.floor(u);
+      if (i0 >= n - 1) i0 = n - 2;
+      const f = Math.min(1, Math.max(0, u - i0));
+      const ia = i0 > 0 ? i0 - 1 : i0;
+      const ib = i0;
+      const ic = i0 + 1;
+      const id = i0 + 2 < n ? i0 + 2 : ic;
+      pennantCatmull(pennantCenter, pts[ia], pts[ib], pts[ic], pts[id], f);
+      pennantCatmullTan(pennantDown, pts[ia], pts[ib], pts[ic], pts[id], f);
+      if (pennantDown.lengthSq() < 1e-8) pennantDown.subVectors(pts[ic], pts[ib]);
+      if (pennantDown.lengthSq() < 1e-8) pennantDown.set(0, -1, 0);
+      else pennantDown.normalize();
+      pennantAcross.crossVectors(cloth.forward, pennantDown);
+      if (pennantAcross.lengthSq() < 1e-6) pennantAcross.copy(cloth.right);
+      else pennantAcross.normalize();
+      if (pennantAcross.dot(cloth.right) < 0) pennantAcross.negate();
+      if (r === 0) {
+        topAcrossX = pennantAcross.x;
+        topAcrossY = pennantAcross.y;
+        topAcrossZ = pennantAcross.z;
+        topDownX = pennantDown.x;
+        topDownY = pennantDown.y;
+        topDownZ = pennantDown.z;
+      }
+      const w = pennantWidthAt(cloth.headW, t);
+      for (let c = 0; c <= sx; c++) {
+        const span = (c / sx - 0.5) * w;
+        const idx = (r * vx + c) * 3;
+        pos[idx] = pennantCenter.x + pennantAcross.x * span;
+        pos[idx + 1] = pennantCenter.y + pennantAcross.y * span;
+        pos[idx + 2] = pennantCenter.z + pennantAcross.z * span;
+      }
+    }
+    const attr = cloth.geo.attributes.position;
+    attr.needsUpdate = true;
+    cloth.geo.computeVertexNormals();
+    cloth.geo.computeTangents();
+
+    const ax = pos[0];
+    const ay = pos[1];
+    const az = pos[2];
+    const rgt = sx * 3;
+    const bx = pos[rgt];
+    const by = pos[rgt + 1];
+    const bz = pos[rgt + 2];
+    pennantAcross.set(topAcrossX, topAcrossY, topAcrossZ);
+    pennantDown.set(topDownX, topDownY, topDownZ);
+    pennantN.crossVectors(pennantAcross, pennantDown);
+    if (pennantN.dot(cloth.forward) < 0) pennantN.negate();
+    if (pennantN.lengthSq() < 1e-6) pennantN.copy(cloth.forward);
+    else pennantN.normalize();
+    const lift = 0.01;
+    pennantPlaceRod(
+      cloth.hem,
+      ax + pennantN.x * lift, ay + pennantN.y * lift, az + pennantN.z * lift,
+      bx + pennantN.x * lift, by + pennantN.y * lift, bz + pennantN.z * lift,
+      0.0062
+    );
+    cloth.gL.position.set(ax, ay, az).addScaledVector(pennantN, 0.012);
+    cloth.gR.position.set(bx, by, bz).addScaledVector(pennantN, 0.012);
+    cloth.gL.quaternion.setFromUnitVectors(pennantZ, pennantN);
+    cloth.gR.quaternion.copy(cloth.gL.quaternion);
+  }
+}
 
 for (let si = 0; si < BANNER_DEFS.length; si++) {
   const bd = BANNER_DEFS[si];
@@ -5245,101 +5378,107 @@ for (let si = 0; si < BANNER_DEFS.length; si++) {
     hitch.collisionFilterMask = SPRING_COLLISION_MASK;
     physWorld.addBody(hitch);
 
-    const segs = [];
-    const step = PENNANT_ROW_H + PENNANT_HINGE_GAP;
-    for (let row = 0; row < PENNANT_ROWS; row++) {
-      const t0 = row / PENNANT_ROWS;
-      const t1 = (row + 1) / PENNANT_ROWS;
-      const wTop = pennantWidthAt(headW, t0);
-      const wBot = pennantWidthAt(headW, t1);
-      // Visual panel is a hair taller than the body step so the hinge gap doesn't read as a slit.
-      const visH = PENNANT_ROW_H * 0.5 + PENNANT_HINGE_GAP * 0.65;
-      const corners = {
-        TL: { x: -wTop * 0.5, y: visH },
-        TR: { x: wTop * 0.5, y: visH },
-        BL: { x: -wBot * 0.5, y: -visH },
-        BR: { x: wBot * 0.5, y: -visH },
-      };
-      const yDrop = PENNANT_TIE + row * step + PENNANT_ROW_H * 0.5;
-      pennantPos.copy(pennantHead).addScaledVector(pennantUp, -yDrop);
-      const geo = makePennantPanelGeo(
-        corners, u0, u1, 1 - t0, 1 - t1, t0, t1, 1, 1, 0
+    const geo = makePennantClothGeo(headW, u0, u1);
+    const mesh = new THREE.Mesh(geo, pennantClothMat);
+    mesh.frustumCulled = false;
+    mesh.name = `quay-pennant-s${si}-p${pi}`;
+    pennantRig.add(mesh);
+    const hem = new THREE.Mesh(pennantCordGeo, pennantRopeMat);
+    hem.name = `quay-pennant-hem-s${si}-p${pi}`;
+    hem.frustumCulled = false;
+    pennantRig.add(hem);
+    const gL = pennantGrommet(pennantRig, pennantHead.x, pennantHead.y);
+    const gR = pennantGrommet(pennantRig, pennantHead.x, pennantHead.y);
+    gL.frustumCulled = false;
+    gR.frustumCulled = false;
+    const headTie = pennantHead.clone();
+    const tie = (grommet) => {
+      springMakeCable(
+        (out) => out.copy(headTie),
+        (out) => grommet.getWorldPosition(out),
+        0x6a5840
       );
-      const mesh = new THREE.Mesh(geo, pennantClothMat);
-      mesh.frustumCulled = false;
-      mesh.name = `quay-pennant-s${si}-p${pi}-r${row}`;
-      pennantCord(mesh, corners.TL.x, corners.TL.y, corners.BL.x, corners.BL.y, 0.0052, pennantRopeMat);
-      pennantCord(mesh, corners.TR.x, corners.TR.y, corners.BR.x, corners.BR.y, 0.0052, pennantRopeMat);
-      if (row === 0) {
-        pennantCord(mesh, corners.TL.x, corners.TL.y, corners.TR.x, corners.TR.y, 0.008, pennantRopeMat);
-      }
-      if (row === PENNANT_ROWS - 1) {
-        pennantCord(mesh, corners.BL.x, corners.BL.y, corners.BR.x, corners.BR.y, 0.0055, pennantRopeMat);
-      }
-      const segMass = 0.08;
+    };
+    tie(gL);
+    tie(gR);
+
+    const nodes = [];
+    const pts = [];
+    for (let row = 0; row < PENNANT_NODES; row++) {
+      const t = row / (PENNANT_NODES - 1);
+      const yDrop = PENNANT_TIE + t * PENNANT_CLOTH_LEN;
+      const wx = pennantHead.x - pennantUp.x * yDrop;
+      const wy = pennantHead.y - pennantUp.y * yDrop;
+      const wz = pennantHead.z - pennantUp.z * yDrop;
+      const segMass = 0.068 - t * 0.028;
       const body = new CANNON.Body({
         mass: physFreeze ? 0 : segMass,
-        shape: new CANNON.Box(new CANNON.Vec3((wTop + wBot) * 0.25, PENNANT_ROW_H * 0.5, 0.007)),
-        position: new CANNON.Vec3(pennantPos.x, pennantPos.y, pennantPos.z),
-        linearDamping: 0.3,
-        angularDamping: 0.38,
+        shape: new CANNON.Sphere(0.03),
+        position: new CANNON.Vec3(wx, wy, wz),
+        linearDamping: 0.38 - t * 0.2,
+        angularDamping: 0.45,
         allowSleep: false,
       });
       body.quaternion.set(basisQ.x, basisQ.y, basisQ.z, basisQ.w);
       if (physFreeze) body.type = CANNON.Body.STATIC;
-      const entry = springMakeBody(mesh, body, 'bannerSeg', segMass);
+      const entry = springMakeBody(null, body, 'bannerSeg', segMass);
       entry.bannerIdx = si;
       entry.pennantIdx = pennantCount;
       entry.segIdx = row;
       entry.row = row;
       entry.col = 0;
-      entry.rows = PENNANT_ROWS;
-      entry.leech = 1;
-      const halfH = PENNANT_ROW_H * 0.5;
-      entry.corners = {
-        TL: new CANNON.Vec3(-wTop * 0.5, halfH, 0),
-        TR: new CANNON.Vec3(wTop * 0.5, halfH, 0),
-        BL: new CANNON.Vec3(-wBot * 0.5, -halfH, 0),
-        BR: new CANNON.Vec3(wBot * 0.5, -halfH, 0),
-        top: new CANNON.Vec3(0, halfH, 0),
-        bot: new CANNON.Vec3(0, -halfH, 0),
-      };
-      segs.push(entry);
+      entry.rows = PENNANT_NODES;
+      entry.leech = t;
+      nodes.push(entry);
+      pts.push(new THREE.Vector3(wx, wy, wz));
       physBannerSegs.push(entry);
-
-      if (row === 0) {
-        const gL = pennantGrommet(mesh, corners.TL.x, corners.TL.y);
-        const gR = pennantGrommet(mesh, corners.TR.x, corners.TR.y);
-        const headTie = pennantHead.clone();
-        const tie = (grommet) => {
-          springMakeCable(
-            (out) => out.copy(headTie),
-            (out) => grommet.getWorldPosition(out),
-            0x6a5840
-          );
-        };
-        tie(gL);
-        tie(gR);
-        const hitchLocal = new CANNON.Vec3();
-        body.pointToWorldFrame(entry.corners.top, springScratchA);
-        hitch.pointToLocalFrame(springScratchA, hitchLocal);
-        pennantPin(hitch, hitchLocal, body, entry.corners.top);
-        pennantSpring(hitch, hitchLocal, body, entry.corners.top, 22, 2.2);
-      }
     }
-    for (let row = 0; row < PENNANT_ROWS - 1; row++) {
-      const upper = segs[row];
-      const lower = segs[row + 1];
-      pennantPin(upper.body, upper.corners.bot, lower.body, lower.corners.top);
-      pennantSpring(upper.body, upper.corners.bot, lower.body, lower.corners.top, 14, 2.15);
+    const origin = new CANNON.Vec3(0, 0, 0);
+    const hitchLocal = new CANNON.Vec3();
+    nodes[0].body.pointToWorldFrame(origin, springScratchA);
+    hitch.pointToLocalFrame(springScratchA, hitchLocal);
+    pennantPin(hitch, hitchLocal, nodes[0].body, origin);
+    pennantSpring(hitch, hitchLocal, nodes[0].body, origin, 24, 2.3);
+    for (let row = 0; row < PENNANT_NODES - 1; row++) {
+      const t = (row + 1) / (PENNANT_NODES - 1);
+      const a = new CANNON.Vec3(0, 0, 0);
+      const b = new CANNON.Vec3(0, 0, 0);
+      pennantPin(nodes[row].body, a, nodes[row + 1].body, b);
+      pennantSpring(nodes[row].body, a, nodes[row + 1].body, b, 20 - t * 12, 2.15 - t * 0.45);
     }
+    // Skip links resist a hard fold but stay loose at the fly.
+    for (let row = 0; row < PENNANT_NODES - 2; row++) {
+      const t = (row + 1) / (PENNANT_NODES - 1);
+      pennantSpring(
+        nodes[row].body, new CANNON.Vec3(0, 0, 0),
+        nodes[row + 2].body, new CANNON.Vec3(0, 0, 0),
+        11 - t * 7.5, 1.55
+      );
+    }
+    pennantCloths.push({
+      mesh,
+      geo,
+      positions: geo.attributes.position.array,
+      nodes,
+      pts,
+      hem,
+      gL,
+      gR,
+      headW,
+      right,
+      forward,
+    });
     pennantCount++;
   }
 }
+pennantDeformCloths();
 window.__harborPennants = {
   strings: BANNER_DEFS.length,
   pennants: pennantCount,
   segs: physBannerSegs.length,
+  panelsPerPennant: 1,
+  subdiv: [PENNANT_SUB_X, PENNANT_SUB_Y],
+  nodes: PENNANT_NODES,
   marks: PENNANT_MARKS.slice(),
   atlas: '06-intermediate-assets/quay-pennant-atlas.png',
 };
@@ -5370,19 +5509,20 @@ function springWindPush(base, dx, dz) {
       harborWind.offsetScratch.set(0, 0, 0)
     );
   }
-  // Pennant panels — the fly catches more air. Force at the COM; a small
-  // torque lets the leech lead without kicking the hinge apart.
+  // Pennant chain — the fly catches more air. The sheet is one mesh skinned
+  // to these nodes, so the extra force bends the cloth instead of a stack of panels.
   for (const entry of physBannerSegs) {
     if (entry.body.type !== CANNON.Body.DYNAMIC) continue;
-    const catchF = 0.5 + entry.row * 0.22;
-    const soft = base * 2.05 * catchF;
+    const rows = Math.max(1, entry.rows - 1);
+    const tFly = entry.row / rows;
+    // Quadratic so the fly streams and the hoist stays on the halyard.
+    const catchF = 0.2 + tFly * tFly * 1.75;
+    const soft = base * 1.42 * catchF;
     entry.body.wakeUp();
     entry.body.applyForce(
       harborWind.forceScratch.set(dx * soft, soft * 0.015, dz * soft),
       harborWind.offsetScratch.set(0, 0, 0)
     );
-    harborWind.torqueScratch.set(-dz * soft * 0.05, 0, dx * soft * 0.04);
-    entry.body.applyTorque(harborWind.torqueScratch);
   }
 }
 
