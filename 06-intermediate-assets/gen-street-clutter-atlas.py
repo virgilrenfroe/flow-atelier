@@ -243,27 +243,39 @@ def cell_throat(rng):
 
 
 def cell_can(rng):
-    """Galvanized bin wall. Vertical beads, hoops, bottom grime. QUAY is a stencil, not the form."""
+    """Dull zinc bin wall. Beads and hoops stay. Rust, salt, and dirt cover the whole wrap, heavier at the foot."""
     y, x = np.mgrid[0:N, 0:N]
-    n = fbm(N, rng, 4, 14)
-    arr = rgb((0.68, 0.70, 0.72), (n - 0.5) * 0.05)
+    n = fbm(N, rng, 5, 8)
+    grit = fbm(N, rng, 4, 14)
+    # Night grade multiplies this. Stay under ~0.32 or the beads read as new galvanize.
+    arr = rgb((0.24, 0.24, 0.22), (n - 0.5) * 0.08)
     period = N / 16.0
     phase = (x % period) / period
     groove = phase < 0.16
-    arr[groove] *= 0.32
+    arr[groove] *= 0.62
     bead = (phase >= 0.16) & (phase < 0.30)
-    arr[bead] = np.minimum(1.0, arr[bead] * 1.08 + 0.10)
+    arr[bead] = np.minimum(0.34, arr[bead] + 0.035)
     for yc, thick in ((0.07, 0.028), (0.20, 0.016), (0.80, 0.018), (0.93, 0.032)):
         band = np.abs(y / N - yc) < thick
-        arr[band] = arr[band] * 0.55 + np.array((0.28, 0.29, 0.31)) * 0.45
-    grime = np.clip((y / N - 0.70) / 0.30, 0, 1)
-    arr *= (1.0 - grime[..., None] * 0.62)
-    arr[:, :, 0] += grime * 0.08
-    dent = np.exp(-(((x - N * 0.38) / 36.0) ** 2 + ((y - N * 0.48) / 22.0) ** 2))
-    arr *= (1.0 - dent[:, :, None] * 0.28)
-    arr = stain(arr, rng, (0.32, 0.20, 0.10), 2, 0.18)
-    img = to_image(np.clip(arr + grain(N, rng, 0.02)[:, :, None], 0, 1))
-    img = draw_mark(img, "QUAY", (N * 0.30, N * 0.36), 46, (36, 40, 44, 220), wear=0.18)
+        arr[band] = arr[band] * 0.22 + np.array((0.22, 0.13, 0.08)) * 0.78
+    grime = 0.22 + 0.55 * np.clip((y / N - 0.15) / 0.85, 0, 1)
+    arr *= (1.0 - grime[..., None] * 0.45)
+    rust_n = fbm(N, rng, 5, 5)
+    low = np.clip(y / N, 0, 1)
+    rust = (rust_n > 0.52) | ((np.abs(np.sin(x * 0.07 + rust_n * 4.0)) > 0.78) & (rust_n > 0.35))
+    m = np.where(rust, 0.55 + 0.35 * low, 0.12 * low)
+    rust_col = (0.34, 0.15, 0.07)
+    for i, c in enumerate(rust_col):
+        arr[:, :, i] = arr[:, :, i] * (1.0 - m) + c * m
+    salt = grit > 0.70
+    arr[salt] = arr[salt] * 0.55 + np.array((0.40, 0.38, 0.33)) * 0.45
+    arr = stain(arr, rng, (0.12, 0.10, 0.08), 6, 0.48)
+    arr = stain(arr, rng, (0.32, 0.14, 0.06), 4, 0.40)
+    dent = np.exp(-(((x - N * 0.38) / 42.0) ** 2 + ((y - N * 0.42) / 36.0) ** 2))
+    arr *= (1.0 - dent[:, :, None] * 0.32)
+    arr = scratches(arr, rng, 22, 0.18)
+    img = to_image(np.clip(arr + grain(N, rng, 0.025)[:, :, None], 0, 1))
+    img = draw_mark(img, "QUAY", (N * 0.28, N * 0.22), 40, (28, 24, 20, 170), wear=0.42)
     return img
 
 
@@ -283,21 +295,27 @@ def cell_dumpster(rng):
 
 
 def cell_lid(rng):
-    """Spun metal lid: concentric rings, dark lip, a bar handle."""
+    """Spun lid, dulled. Dirt sits in the rings; rust and salt sit on the lip."""
     y, x = np.mgrid[0:N, 0:N]
     cx = cy = (N - 1) / 2.0
     r = np.hypot(x - cx, y - cy)
-    n = fbm(N, rng, 3, 10)
-    arr = rgb((0.62, 0.64, 0.66), (n - 0.5) * 0.04)
+    n = fbm(N, rng, 4, 8)
+    arr = rgb((0.22, 0.22, 0.20), (n - 0.5) * 0.06)
     rings = np.sin(r * 0.42) > 0.15
-    arr[rings] *= 0.78
-    arr[r > N * 0.40] *= 0.48
-    arr[r < N * 0.07] *= 0.62
-    img = to_image(np.clip(arr, 0, 1))
+    arr[rings] *= 0.62
+    arr[r > N * 0.40] *= 0.55
+    arr[r < N * 0.07] *= 0.7
+    rust = (n > 0.68) & (r > N * 0.28)
+    arr[rust] = arr[rust] * 0.4 + np.array((0.38, 0.17, 0.08)) * 0.6
+    salt = (n < 0.22) & (r > N * 0.16) & (r < N * 0.42)
+    arr[salt] = arr[salt] * 0.5 + np.array((0.48, 0.46, 0.40)) * 0.5
+    arr = stain(arr, rng, (0.18, 0.14, 0.10), 4, 0.36)
+    arr = scratches(arr, rng, 12, 0.12)
+    img = to_image(np.clip(arr + grain(N, rng, 0.03)[:, :, None], 0, 1))
     draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((N * 0.30, N * 0.455, N * 0.70, N * 0.545), radius=10, fill=(78, 82, 86, 255))
-    draw.ellipse((N * 0.26, N * 0.42, N * 0.36, N * 0.58), fill=(36, 38, 42, 255))
-    draw.ellipse((N * 0.64, N * 0.42, N * 0.74, N * 0.58), fill=(36, 38, 42, 255))
+    draw.rounded_rectangle((N * 0.30, N * 0.455, N * 0.70, N * 0.545), radius=10, fill=(48, 42, 36, 255))
+    draw.ellipse((N * 0.26, N * 0.42, N * 0.36, N * 0.58), fill=(28, 24, 20, 255))
+    draw.ellipse((N * 0.64, N * 0.42, N * 0.74, N * 0.58), fill=(28, 24, 20, 255))
     return img
 
 
@@ -470,28 +488,38 @@ def cell_weeds(rng):
 
 
 def cell_hydrant(rng):
-    """Hard cast-iron red. Chips are edges, not a soft noise wash. SIGNAL sits on the collar band."""
+    """Faded quay red. Chips open onto iron; rust and salt do the rest. Collar is tarnished brass."""
     y, x = np.mgrid[0:N, 0:N]
-    n = fbm(N, rng, 4, 7)
-    arr = np.zeros((N, N, 3), np.float32)
-    arr[:] = (0.82, 0.10, 0.07)
-    chip = n < 0.20
-    arr[chip] = (0.15, 0.14, 0.13)
-    scratch = (np.abs(np.sin(x * 0.07 + y * 0.004)) > 0.992)
-    arr[scratch] = (0.18, 0.16, 0.14)
-    spec = np.exp(-((x / N - 0.30) ** 2) / 0.008)
-    arr += spec[:, :, None] * np.array((0.28, 0.06, 0.03))
+    n = fbm(N, rng, 5, 6)
+    grit = fbm(N, rng, 4, 11)
+    # Faded, chalky, and broken on the upper barrel too. The night grade lifts facing surfaces.
+    arr = rgb((0.28, 0.11, 0.08), (n - 0.5) * 0.05)
+    chalk = grit > 0.48
+    arr[chalk] = arr[chalk] * 0.62 + np.array((0.26, 0.18, 0.13)) * 0.38
+    chip = n < 0.38
+    arr[chip] = (0.12, 0.11, 0.10)
+    rust_n = fbm(N, rng, 4, 5)
+    rust = (rust_n > 0.48) | (chip & (rust_n > 0.30))
+    arr[rust] = arr[rust] * 0.28 + np.array((0.30, 0.13, 0.06)) * 0.72
+    streak = np.abs(np.sin(x * 0.07 + n * 2.4)) > 0.90
+    arr[streak] = arr[streak] * 0.55 + np.array((0.36, 0.32, 0.26)) * 0.45
+    scratch = (np.abs(np.sin(x * 0.08 + y * 0.012)) > 0.988)
+    arr[scratch] = (0.15, 0.12, 0.10)
     band = (y > N * 0.40) & (y < N * 0.57)
-    arr[band] = (0.86, 0.70, 0.30)
-    arr[band & chip] = (0.20, 0.16, 0.11)
+    arr[band] = (0.24, 0.17, 0.09)
+    patina = band & (grit > 0.64)
+    arr[patina] = (0.20, 0.24, 0.14)
+    arr[band & chip] = (0.15, 0.12, 0.09)
     edge = (np.abs(y - N * 0.40) < 4) | (np.abs(y - N * 0.57) < 4)
-    arr[edge] *= 0.35
-    # bolt heads under the collar
+    arr[edge] *= 0.42
     bolts = (np.abs(y - N * 0.68) < N * 0.018) & (((x / 64).astype(int) % 2) == 0) & (x > 40) & (x < N - 40)
     bolts &= ((x % 64) < 16)
-    arr[bolts] = (0.72, 0.70, 0.64)
-    img = to_image(np.clip(arr, 0, 1))
-    img = draw_mark(img, "SIGNAL", (N * 0.14, N * 0.43), 44, (48, 30, 8, 245), wear=0.06)
+    arr[bolts] = (0.28, 0.24, 0.18)
+    arr[bolts & (rust_n > 0.6)] = (0.32, 0.16, 0.08)
+    arr = stain(arr, rng, (0.14, 0.11, 0.08), 4, 0.30)
+    arr = scratches(arr, rng, 16, 0.16)
+    img = to_image(np.clip(arr + grain(N, rng, 0.028)[:, :, None], 0, 1))
+    img = draw_mark(img, "SIGNAL", (N * 0.14, N * 0.43), 42, (36, 24, 12, 210), wear=0.34)
     return img
 
 

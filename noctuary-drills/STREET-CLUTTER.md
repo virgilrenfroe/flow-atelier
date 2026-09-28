@@ -47,7 +47,9 @@ The hero cluster is the north walk of the center block (block column 2, quay row
 
 The ambiguous shape in the first stills was the tree-pit trunk. It was a timber cylinder on the bench-wood cell, topped with flat weed cards, so it read as a stake or a broken bench end between the can and the bench. That pole and crown are gone. The pit is only the well.
 
-Cans are a tapered galvanized bin: bead-and-hoop metal on the can cell, a rolled rim, an overhanging lid (spun-metal cell), a low dome, a bail, and two side lugs. Hydrant paint is a hard red with chips, a brass collar, bolt heads, and a small SIGNAL stencil — the silhouette is the barrel and the iron caps, not the sticker. Bags elsewhere are a tied sack. The hero cluster no longer parks a bag against the can.
+Cans are a tapered galvanized bin: bead-and-hoop metal on the can cell, a rolled rim, an overhanging lid (spun-metal cell), a low dome, a bail, and two side lugs. Hydrant paint keeps the barrel, iron caps, tarnished collar, bolt heads, and a small SIGNAL stencil — the silhouette is the hydrant, not the sticker. Bags elsewhere are a tied sack. The hero cluster no longer parks a bag against the can.
+
+The can, lid, and hydrant cells are night-quay wear, the same family as the street sheet and the freight graffiti: dull zinc, faded red, rust bloom, chips through to iron, salt crust, and street dirt. Not a new bin and not factory red. Silhouettes are unchanged.
 
 Flat covers, grates, litter, and cardboard are visual. Cans, dumpsters, hydrants, benches, planters, and the tree-well curb get a static box so a crate does not ghost through them. Those bodies are not in the grab/toss list and do not join the wind or spring hooks. Quay bodies sit a centimeter above the deck so they do not fight the promenade slab.
 
