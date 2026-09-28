@@ -3924,6 +3924,7 @@ installBasinClutter({
 const harborCraft = installHarborCraft({
   scene, camera, controls, params, BLOOM_LAYER,
   ORBIT_FOV, WATER_NEAR_Z, WATER_D, WATER_AMP, WATER_Y, waterMat, freezeMotion,
+  SEAWALL_Z, faceTop, atlasBase, atlasLoader,
   basinBuoy: harborPhysics.basinBuoy,
   physFreeze: harborPhysics.physFreeze,
   physCrateMat: harborPhysics.physCrateMat,
