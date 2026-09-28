@@ -23,11 +23,11 @@ Same cell grammar as the street sheet and the freight graffiti band: one shared 
 ```
 row0  manhole | can metal | bag plastic | tree-pit soil
 row1  inlet grate | dumpster panel | litter paper | planter concrete
-row2  gutter grate | bin lid | bench timber | bench iron
-row3  inlet throat | cardboard | weeds (alpha) | hydrant paint
+row2  gutter grate | bin lid | bench timber | weeds (alpha)
+row3  inlet throat | cardboard | bench iron | hydrant paint
 ```
 
-Weeds and young-tree crowns discard on alpha. Everything else is opaque. One shader, night fog at the district density, so the props sit in the same air as the asphalt.
+Weed cards discard on alpha. Everything else is opaque. One shader, night fog at the district density, so the props sit in the same air as the asphalt.
 
 Prop-wear `quay-crate` / `quay-iron` sheets are not edited. The quay deck-plate atlas is not edited. This sheet is a new file.
 
@@ -37,13 +37,19 @@ Taste is fenestra, not a landfill. About fifty pieces on the 5×4 district:
 
 - storm-drain family: curb inlets, gutter grates, manhole covers, dark inlet throats
 - refuse: a few cans, two hinterland dumpsters, bags, flat litter, cardboard
-- hydrants at the curb
-- benches on the quay-facing walk and the east promenade
-- tree pits with a short trunk and weed crown, plus curb weeds and quay planters
+- hydrants at the curb: iron flange, red barrel, side caps, a street-facing steamer cap, bonnet, pentagon nut
+- benches on the quay-facing walk and the east promenade, with iron end frames and timber slats
+- tree pits as a concrete well (raised curb, dark soil, short weeds in the opening), plus curb weeds and quay planters with a lip
 
 The hero cluster is the north walk of the center block (block column 2, quay row), so a street-level frame can read a pit, a hydrant, a can, a bench, a grate, and a cover without touring the whole grid.
 
-Flat covers, grates, litter, and cardboard are visual. Cans, dumpsters, hydrants, benches, planters, and pit trunks get a static box so a crate does not ghost through them. Those bodies are not in the grab/toss list and do not join the wind or spring hooks. Quay bodies sit a centimeter above the deck so they do not fight the promenade slab.
+### Readability
+
+The ambiguous shape in the first stills was the tree-pit trunk. It was a timber cylinder on the bench-wood cell, topped with flat weed cards, so it read as a stake or a broken bench end between the can and the bench. That pole and crown are gone. The pit is only the well.
+
+Cans are a tapered galvanized bin: bead-and-hoop metal on the can cell, a rolled rim, an overhanging lid (spun-metal cell), a low dome, a bail, and two side lugs. Hydrant paint is a hard red with chips, a brass collar, bolt heads, and a small SIGNAL stencil — the silhouette is the barrel and the iron caps, not the sticker. Bags elsewhere are a tied sack. The hero cluster no longer parks a bag against the can.
+
+Flat covers, grates, litter, and cardboard are visual. Cans, dumpsters, hydrants, benches, planters, and the tree-well curb get a static box so a crate does not ghost through them. Those bodies are not in the grab/toss list and do not join the wind or spring hooks. Quay bodies sit a centimeter above the deck so they do not fight the promenade slab.
 
 ### Widths
 

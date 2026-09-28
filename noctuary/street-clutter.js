@@ -107,14 +107,43 @@ function geoGrate() {
   return g;
 }
 
+function ironTorus(radius, tube, y) {
+  const g = new THREE.TorusGeometry(radius, tube, 6, 16);
+  g.rotateX(Math.PI / 2);
+  g.translate(0, y, 0);
+  return stampAll(g, CELL.iron[0], CELL.iron[1]);
+}
+
 function geoCan() {
-  const body = new THREE.CylinderGeometry(0.095, 0.102, 0.32, 16);
-  body.translate(0, 0.16, 0);
-  stampCylinder(body, face("can"), face("lid"));
-  const lid = new THREE.CylinderGeometry(0.108, 0.108, 0.03, 16);
-  lid.translate(0, 0.335, 0);
+  const parts = [];
+  const body = new THREE.CylinderGeometry(0.104, 0.090, 0.27, 20);
+  body.translate(0, 0.155, 0);
+  stampCylinder(body, face("can"), face("iron"));
+  parts.push(body);
+  parts.push(ironTorus(0.092, 0.011, 0.028));
+  parts.push(ironTorus(0.108, 0.013, 0.292));
+  const lid = new THREE.CylinderGeometry(0.118, 0.118, 0.020, 20);
+  lid.translate(0, 0.318, 0);
   stampCylinder(lid, face("iron"), face("lid"));
-  return mergeGeometries([body, lid]);
+  parts.push(lid);
+  const dome = new THREE.SphereGeometry(0.095, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  dome.scale(1, 0.42, 1);
+  dome.computeVertexNormals();
+  dome.translate(0, 0.328, 0);
+  stampAll(dome, CELL.lid[0], CELL.lid[1]);
+  parts.push(dome);
+  const bail = new THREE.TorusGeometry(0.026, 0.007, 6, 12, Math.PI);
+  bail.translate(0, 0.362, 0);
+  stampAll(bail, CELL.iron[0], CELL.iron[1]);
+  parts.push(bail);
+  for (const sign of [1, -1]) {
+    const lug = new THREE.TorusGeometry(0.018, 0.006, 5, 8, Math.PI);
+    stampAll(lug, CELL.iron[0], CELL.iron[1]);
+    lug.rotateZ(sign > 0 ? -Math.PI / 2 : Math.PI / 2);
+    lug.translate(sign * 0.096, 0.17, 0);
+    parts.push(lug);
+  }
+  return mergeGeometries(parts);
 }
 
 function geoDumpster() {
@@ -136,10 +165,18 @@ function geoDumpster() {
 }
 
 function geoBag() {
-  const g = new THREE.SphereGeometry(0.085, 12, 8);
-  g.scale(1.2, 0.7, 0.95);
-  g.translate(0, 0.055, 0);
-  return stampAll(g, CELL.bag[0], CELL.bag[1]);
+  const body = new THREE.SphereGeometry(0.068, 12, 8);
+  body.scale(1.15, 0.58, 0.88);
+  body.translate(0, 0.044, 0);
+  stampAll(body, CELL.bag[0], CELL.bag[1]);
+  const neck = new THREE.SphereGeometry(0.026, 8, 6);
+  neck.scale(0.62, 1.35, 0.62);
+  neck.translate(0, 0.086, 0);
+  stampAll(neck, CELL.bag[0], CELL.bag[1]);
+  const knot = new THREE.SphereGeometry(0.011, 6, 5);
+  knot.translate(0, 0.108, 0);
+  stampAll(knot, CELL.iron[0], CELL.iron[1]);
+  return mergeGeometries([body, neck, knot]);
 }
 
 function geoLitter() {
@@ -154,35 +191,65 @@ function geoCard() {
 
 function geoHydrant() {
   const parts = [];
-  const addCyl = (r0, r1, h, y, side, cap, rotZ, tx) => {
-    const g = new THREE.CylinderGeometry(r0, r1, h, 12);
-    if (rotZ) g.rotateZ(rotZ);
-    g.translate(tx || 0, y, 0);
-    stampCylinder(g, side, cap);
-    parts.push(g);
+  const pushUpright = (geo, y, side, cap) => {
+    stampCylinder(geo, side, cap);
+    geo.translate(0, y, 0);
+    parts.push(geo);
   };
-  addCyl(0.074, 0.082, 0.045, 0.022, face("hydrant"), face("iron"));
-  addCyl(0.052, 0.060, 0.16, 0.125, face("hydrant"), face("hydrant"));
-  addCyl(0.032, 0.056, 0.07, 0.24, face("hydrant"), face("iron"));
-  addCyl(0.016, 0.016, 0.028, 0.288, face("iron"), face("iron"));
-  addCyl(0.018, 0.022, 0.07, 0.15, face("hydrant"), face("iron"), Math.PI / 2, 0.07);
-  addCyl(0.018, 0.022, 0.07, 0.15, face("hydrant"), face("iron"), Math.PI / 2, -0.07);
+  pushUpright(new THREE.CylinderGeometry(0.098, 0.098, 0.026, 12), 0.013, face("iron"), face("iron"));
+  pushUpright(new THREE.CylinderGeometry(0.058, 0.062, 0.20, 14), 0.126, face("hydrant"), face("hydrant"));
+  const collar = new THREE.TorusGeometry(0.066, 0.011, 6, 16);
+  collar.rotateX(Math.PI / 2);
+  collar.translate(0, 0.168, 0);
+  stampAll(collar, CELL.hydrant[0], CELL.hydrant[1]);
+  parts.push(collar);
+  pushUpright(new THREE.CylinderGeometry(0.030, 0.066, 0.052, 12), 0.248, face("hydrant"), face("iron"));
+  const nut = new THREE.CylinderGeometry(0.020, 0.020, 0.026, 5);
+  stampCylinder(nut, face("iron"), face("iron"));
+  nut.translate(0, 0.286, 0);
+  parts.push(nut);
+
+  const nozzle = (axis, sign, radius, length, y) => {
+    const barrel = new THREE.CylinderGeometry(radius * 0.82, radius, length, 8);
+    stampCylinder(barrel, face("hydrant"), face("hydrant"));
+    const cap = new THREE.CylinderGeometry(radius * 1.22, radius * 1.22, 0.016, 6);
+    stampCylinder(cap, face("iron"), face("iron"));
+    if (axis === "x") {
+      barrel.rotateZ(Math.PI / 2);
+      cap.rotateZ(Math.PI / 2);
+      const base = 0.060 + length * 0.5;
+      barrel.translate(sign * base, y, 0);
+      cap.translate(sign * (base + length * 0.5 + 0.008), y, 0);
+    } else {
+      barrel.rotateX(Math.PI / 2);
+      cap.rotateX(Math.PI / 2);
+      const base = 0.060 + length * 0.5;
+      barrel.translate(0, y, sign * base);
+      cap.translate(0, y, sign * (base + length * 0.5 + 0.008));
+    }
+    parts.push(barrel, cap);
+  };
+  nozzle("x", 1, 0.028, 0.046, 0.150);
+  nozzle("x", -1, 0.028, 0.046, 0.150);
+  nozzle("z", 1, 0.034, 0.044, 0.142);
   return mergeGeometries(parts);
 }
 
 function geoBench() {
   const parts = [];
-  for (const x of [-0.26, 0.26]) {
-    for (const z of [-0.06, 0.06]) {
-      parts.push(partBox(0.022, 0.155, 0.022, x, 0.078, z, IRON));
+  for (const x of [-0.27, 0.27]) {
+    for (const z of [-0.052, 0.052]) {
+      parts.push(partBox(0.030, 0.16, 0.028, x, 0.08, z, IRON));
     }
-    parts.push(partBox(0.02, 0.18, 0.018, x, 0.24, -0.078, IRON));
+    parts.push(partBox(0.030, 0.022, 0.132, x, 0.036, 0, IRON));
+    parts.push(partBox(0.028, 0.20, 0.026, x, 0.24, -0.070, IRON));
+    parts.push(partBox(0.026, 0.018, 0.118, x, 0.198, -0.012, IRON));
   }
-  for (const z of [-0.035, 0.02, 0.07]) {
-    parts.push(partBox(0.56, 0.016, 0.026, 0, 0.162, z, WOOD));
+  for (const z of [-0.038, 0.012, 0.058]) {
+    parts.push(partBox(0.58, 0.018, 0.028, 0, 0.168, z, WOOD));
   }
-  for (const y of [0.24, 0.30]) {
-    parts.push(partBox(0.54, 0.018, 0.014, 0, y, -0.078, WOOD));
+  for (const y of [0.248, 0.308]) {
+    parts.push(partBox(0.56, 0.020, 0.016, 0, y, -0.070, WOOD));
   }
   return mergeGeometries(parts);
 }
@@ -198,26 +265,26 @@ function geoWeed() {
 
 function geoPit() {
   const parts = [];
-  const s = 0.30;
-  const t = 0.028;
-  parts.push(partBox(s, 0.045, t, 0, 0.022, s * 0.5, CONC));
-  parts.push(partBox(s, 0.045, t, 0, 0.022, -s * 0.5, CONC));
-  parts.push(partBox(t, 0.045, s - t, s * 0.5, 0.022, 0, CONC));
-  parts.push(partBox(t, 0.045, s - t, -s * 0.5, 0.022, 0, CONC));
-  const soil = new THREE.PlaneGeometry(s - 0.05, s - 0.05);
+  const s = 0.32;
+  const t = 0.045;
+  const h = 0.055;
+  const outer = (s - t) * 0.5;
+  parts.push(partBox(s, h, t, 0, h * 0.5, outer, CONC));
+  parts.push(partBox(s, h, t, 0, h * 0.5, -outer, CONC));
+  parts.push(partBox(t, h, s - t * 2, outer, h * 0.5, 0, CONC));
+  parts.push(partBox(t, h, s - t * 2, -outer, h * 0.5, 0, CONC));
+  const soil = new THREE.PlaneGeometry(s - t * 2 - 0.012, s - t * 2 - 0.012);
   soil.rotateX(-Math.PI / 2);
-  soil.translate(0, 0.016, 0);
+  soil.translate(0, 0.012, 0);
   stampAll(soil, CELL.soil[0], CELL.soil[1]);
   parts.push(soil);
-  const trunk = new THREE.CylinderGeometry(0.026, 0.034, 0.70, 8);
-  trunk.translate(0, 0.37, 0);
-  stampCylinder(trunk, face("timber"), face("timber"));
-  parts.push(trunk);
   for (let i = 0; i < 3; i++) {
-    const leaf = new THREE.PlaneGeometry(0.26, 0.20);
-    leaf.translate(0, 0.74, 0);
+    const leaf = new THREE.PlaneGeometry(0.09, 0.08);
+    leaf.translate(0, 0.04, 0);
     stampAll(leaf, CELL.weeds[0], CELL.weeds[1]);
     leaf.rotateY((i * Math.PI) / 3);
+    const ang = i * 2.15;
+    leaf.translate(Math.cos(ang) * 0.028, 0.018, Math.sin(ang) * 0.028);
     parts.push(leaf);
   }
   return mergeGeometries(parts);
@@ -225,21 +292,23 @@ function geoPit() {
 
 function geoPlanter() {
   const parts = [
-    partBox(0.24, 0.15, 0.24, 0, 0.075, 0, CONC),
+    partBox(0.20, 0.12, 0.20, 0, 0.06, 0, CONC),
+    partBox(0.26, 0.028, 0.26, 0, 0.134, 0, CONC),
   ];
-  const soil = new THREE.PlaneGeometry(0.16, 0.16);
+  const soil = new THREE.PlaneGeometry(0.15, 0.15);
   soil.rotateX(-Math.PI / 2);
-  soil.translate(0, 0.142, 0);
+  soil.translate(0, 0.122, 0);
   stampAll(soil, CELL.soil[0], CELL.soil[1]);
   parts.push(soil);
-  for (const x of [-0.04, 0.045]) {
-    const w = new THREE.PlaneGeometry(0.09, 0.13);
-    w.translate(x, 0.20, 0);
-    stampAll(w, CELL.weeds[0], CELL.weeds[1]);
-    const w2 = w.clone();
-    w2.rotateY(Math.PI / 2);
-    parts.push(w, w2);
-  }
+  const clump = new THREE.PlaneGeometry(0.09, 0.10);
+  clump.translate(0, 0.05, 0);
+  stampAll(clump, CELL.weeds[0], CELL.weeds[1]);
+  clump.translate(0, 0.142, 0);
+  const b = clump.clone();
+  b.rotateY(Math.PI / 2);
+  const c = clump.clone();
+  c.rotateY(Math.PI / 5);
+  parts.push(clump, b, c);
   return mergeGeometries(parts);
 }
 

@@ -20,16 +20,16 @@ export const CLUTTER_SPEC = {
   manhole: { foot: 0.15, depth: 0.30, solid: false },
   inlet: { foot: 0.12, depth: 0.07, solid: false },
   grate: { foot: 0.16, depth: 0.12, solid: false },
-  can: { foot: 0.11, depth: 0.21, solid: true, hx: 0.105, hy: 0.18, hz: 0.105 },
+  can: { foot: 0.13, depth: 0.26, solid: true, hx: 0.125, hy: 0.22, hz: 0.125 },
   dumpster: { foot: 0.30, depth: 0.28, solid: true, hx: 0.26, hy: 0.18, hz: 0.15 },
   bag: { foot: 0.09, depth: 0.16, solid: false },
   litter: { foot: 0.05, depth: 0.08, solid: false },
   cardboard: { foot: 0.08, depth: 0.12, solid: false },
-  hydrant: { foot: 0.09, depth: 0.16, solid: true, hx: 0.08, hy: 0.16, hz: 0.08 },
+  hydrant: { foot: 0.14, depth: 0.26, solid: true, hx: 0.13, hy: 0.16, hz: 0.13 },
   bench: { foot: 0.32, depth: 0.18, solid: true, hx: 0.30, hy: 0.17, hz: 0.10 },
-  pit: { foot: 0.18, depth: 0.30, solid: true, hx: 0.05, hy: 0.42, hz: 0.05 },
+  pit: { foot: 0.18, depth: 0.32, solid: true, hx: 0.16, hy: 0.035, hz: 0.16 },
   weed: { foot: 0.06, depth: 0.10, solid: false },
-  planter: { foot: 0.14, depth: 0.22, solid: true, hx: 0.12, hy: 0.08, hz: 0.12 },
+  planter: { foot: 0.14, depth: 0.26, solid: true, hx: 0.13, hy: 0.09, hz: 0.13 },
 };
 
 const SIDE = {
@@ -268,7 +268,6 @@ export function planStreetClutter(anchors) {
   add(hero, "pit", 0.20, 0.48, heroTag);
   add(hero, "hydrant", 0.36, 0.78, heroTag);
   add(hero, "can", 0.52, 0.42, heroTag);
-  add(hero, "bag", 0.60, 0.30, heroTag);
   add(hero, "litter", 0.56, 0.62, Object.assign({ rx: -Math.PI / 2, yawSpin: 0.4 }, heroTag));
   add(hero, "litter", 0.64, 0.55, Object.assign({ rx: -Math.PI / 2, yawSpin: 1.7 }, heroTag));
   add(hero, "cardboard", 0.70, 0.36, Object.assign({ rx: -1.15, lean: true }, heroTag));
