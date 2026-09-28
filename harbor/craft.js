@@ -965,6 +965,13 @@ export function installHarborCraft(deps) {
     );
     box.position.set(0, deckY + h * 0.5 + 0.012, z);
     group.add(box);
+    const dash = new THREE.Mesh(
+      harborStampBoat(new THREE.BoxGeometry(w * 0.96, 0.016, d * 0.62), 2, 1),
+      harborBoatRole(spec.kind, 'console', spec.gel),
+    );
+    dash.position.set(0, deckY + h * 0.78, z + d * 0.08);
+    dash.rotation.x = -0.62;
+    group.add(dash);
     const wheel = new THREE.Mesh(
       harborStampBoat(new THREE.TorusGeometry(0.052, 0.005, 8, 18), 1, 2),
       harborBoatRole(spec.kind, 'metal'),
@@ -1222,17 +1229,62 @@ export function installHarborCraft(deps) {
     group.add(g);
   }
 
+  function harborCabinShell(spec, cabW, cabH, cabL) {
+    const hw = cabW * 0.5;
+    const hl = cabL * 0.5;
+    const inset = cabW * 0.07;
+    const rake = Math.min(0.18, cabL * 0.14);
+    const bot = [
+      [-hw, 0, hl],
+      [hw, 0, hl],
+      [hw, 0, -hl],
+      [-hw, 0, -hl],
+    ];
+    const top = [
+      [-hw + inset, cabH, hl - rake],
+      [hw - inset, cabH, hl - rake],
+      [hw - inset, cabH, -hl + 0.02],
+      [-hw + inset, cabH, -hl + 0.02],
+    ];
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    const push = (p, lu, lv) => {
+      positions.push(p[0], p[1], p[2]);
+      const at = harborCellUV(2, 1, lu, lv);
+      uvs.push(at[0], at[1]);
+      return positions.length / 3 - 1;
+    };
+    const quad = (a, b, c, d) => {
+      const ia = push(a, 0.02, 0.02);
+      const ib = push(b, 0.98, 0.02);
+      const ic = push(c, 0.98, 0.98);
+      const id = push(d, 0.02, 0.98);
+      indices.push(ia, ib, ic, ia, ic, id);
+    };
+    quad(bot[0], bot[1], top[1], top[0]);
+    quad(bot[1], bot[2], top[2], top[1]);
+    quad(bot[2], bot[3], top[3], top[2]);
+    quad(bot[3], bot[0], top[0], top[3]);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(harborOrientShell(positions, indices));
+    return harborFinishGeo(geo);
+  }
+
   function harborFitCabin(group, spec, hull, deckY) {
     const cabL = spec.length * 0.42;
     const cabW = spec.beam * 0.72;
     const cabH = Math.min(0.55, Math.max(0.44, spec.length * 0.155));
     const cz = spec.length * 0.04;
+    const rake = Math.min(0.18, cabL * 0.14);
     group.add(harborGunwaleTrim(spec, hull.sheerS, hull.sheerP));
     const cab = new THREE.Mesh(
-      harborStampBoat(new THREE.BoxGeometry(cabW, cabH, cabL), 2, 1),
+      harborCabinShell(spec, cabW, cabH, cabL),
       harborBoatRole(spec.kind, 'console', spec.gel),
     );
-    cab.position.set(0, deckY + cabH * 0.5, cz);
+    cab.position.set(0, deckY, cz);
     group.add(cab);
     const roof = new THREE.Mesh(
       harborStampBoat(new THREE.BoxGeometry(cabW + 0.06, 0.018, cabL + 0.14), 3, 1),
@@ -1241,7 +1293,7 @@ export function installHarborCraft(deps) {
     roof.position.set(0, deckY + cabH + 0.016, cz - 0.04);
     group.add(roof);
     const wy = deckY + cabH * 0.62;
-    harborPane(group, spec, 0, wy, cz + cabL * 0.5 + 0.012, -0.42, 0, cabW * 0.82, cabH * 0.42);
+    harborPane(group, spec, 0, wy, cz + cabL * 0.5 - rake * 0.45, -0.55, 0, cabW * 0.72, cabH * 0.38);
     harborPane(group, spec, cabW * 0.5 + 0.006, wy, cz, 0, Math.PI / 2, cabL * 0.46, cabH * 0.32);
     harborPane(group, spec, -cabW * 0.5 - 0.006, wy, cz, 0, -Math.PI / 2, cabL * 0.46, cabH * 0.32);
     const brow = new THREE.Mesh(
@@ -1889,10 +1941,10 @@ export function installHarborCraft(deps) {
       camera.position.set(11.0, 1.85, 6.15);
       controls.target.set(8.55, 0.32, 7.55);
     } else if (mode === 'scale') {
-      // West berths and the quay crates in one side view, same distance class.
-      camera.fov = 56;
-      camera.position.set(-12.4, 3.15, 6.15);
-      controls.target.set(0.4, 0.28, 6.15);
+      // From the basin: west tender and RIB in profile, quay crates behind them.
+      camera.fov = 50;
+      camera.position.set(-9.0, 2.05, 13.4);
+      controls.target.set(-5.6, 0.28, 6.3);
     } else if (mode === 'skiff-top' || mode === 'tender-top') top('fenestra-tender', 4.6);
     else if (mode === 'launch-top' || mode === 'cabin-top') top('quay-cabin', 6.4);
     else if (mode === 'dory-top' || mode === 'rib-top') top('quay-rib', 5.2);
