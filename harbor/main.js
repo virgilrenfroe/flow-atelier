@@ -9,6 +9,8 @@ import { createPerfMonitor, resolveFboTier } from './perf.js';
 import { createHarborLoad } from './load.js';
 import { installSwapGpu } from './swap-gpu.js';
 import { installCitizen } from './citizen.js';
+import { mountSignalVolume } from '../noctuary/a03-signal-volume.js';
+import { mountSignalHolo } from '../noctuary/i0x-signal-holo.js';
 
 const harborLoad = createHarborLoad();
 
@@ -3906,6 +3908,45 @@ const harborPost = createHarborPost({
 live.renderFrame = harborPost.renderFrame;
 perfMonitor = createPerfMonitor({ renderer, tier: perfTier, post: harborPost });
 
+// Hologram sheath + façade plate. Own meshes; beacon, moss atlas, and A03 stay put.
+const holoParam = params.get('holo');
+const signalHolo = mountSignalHolo({
+  parent: signalGroup,
+  enabled: holoParam !== '0' && holoParam !== 'off',
+});
+window.__signalHolo = signalHolo;
+{
+  const holoEl = document.getElementById('holo-state');
+  if (holoEl) holoEl.textContent = signalHolo.enabled ? 'sheath' : 'off';
+}
+
+// ——— A03 · Signal volume air ———
+// Raymarched umber shafts on the beacon. Separate pass: does not rewrite
+// sheath, asphalt, quay, water, lanterns, pennants, or the ember Points.
+// ?volume=0|off hard off · ?volumeDebug=1 · ?volumeQuality=low|med|high
+// Tiers stay on the volume module until A05 calls setQuality / applyPerfTier.
+const volumeParam = params.get('volume');
+const volumeDebugParam = params.get('volumeDebug');
+const signalVolume = mountSignalVolume({
+  camera,
+  composers: [harborPost.finalComposer, harborPost.stillComposer],
+  enabled: volumeParam !== '0' && volumeParam !== 'off',
+  hardOff: volumeParam === '0' || volumeParam === 'off',
+  debug: volumeParam === 'mask' || volumeDebugParam === '1' || volumeDebugParam === 'on',
+  quality: params.get('volumeQuality'),
+  center: new THREE.Vector3(signalGroup.position.x, 3.72, signalGroup.position.z),
+  lamp: new THREE.Vector3(signalGroup.position.x, 4.15, signalGroup.position.z),
+  half: new THREE.Vector3(0.58, 2.5, 0.5),
+});
+window.__harborVolume = signalVolume;
+{
+  const airEl = document.getElementById('air-state');
+  if (airEl) airEl.textContent = signalVolume.enabled ? `Signal · ${signalVolume.quality}` : 'off';
+}
+harborPost.onResize(() => {
+  if (signalVolume) signalVolume.syncDepth();
+});
+
 
 
 const clock = new THREE.Clock();
@@ -3993,6 +4034,8 @@ function updateDebugHud(fps) {
     `hitDist  ${dbgHitDist}  inst ${dbgInst}\n` +
     `room~    ${dbgRoomHint}\n` +
     `face~    ${dbgFaceHint}\n` +
+    `volume   ${signalVolume && signalVolume.enabled ? signalVolume.quality + ' · ' + signalVolume.steps + 'st · spark ' + signalVolume.sparks : 'off'}\n` +
+    `holo     ${signalHolo && signalHolo.enabled ? 'hologram' : 'off'}\n` +
     `keys     V walk · T tour · ?debug=1`;
 }
 
@@ -4030,6 +4073,8 @@ function tick() {
   waterMat.uniforms.uLampB.value.set(4.8, 1.55, 3.85);
   quayMat.uniforms.uPointer.value.copy(pointerSmooth);
   harborPost.mistMat.uniforms.uTime.value = t;
+  if (signalVolume) signalVolume.update(t, pulse, typeof harborWind !== 'undefined' ? harborWind : null);
+  if (signalHolo) signalHolo.update(t, pulse, freezeMotion ? 0 : 1);
   lanternTime.value = t;
   lanternPulse.value = freezeMotion ? 0.35 : 1.0;
   for (let li = 0; li < lanternPointLights.length; li++) {
@@ -4106,6 +4151,19 @@ function tick() {
   }
 
   if (!stillMode) requestAnimationFrame(tick);
+}
+
+if (params.get('shot') === 'signal') {
+  camera.position.set(-3.4, 2.55, 8.1);
+  controls.target.set(-6.5, 3.55, 3.2);
+  controls.update();
+}
+if (params.get('shot') === 'holo') {
+  // Above the look point so maxPolarAngle does not flatten the frame.
+  // Sheath full height, plate to camera-right, beacon tip still in view.
+  camera.position.set(-1.7, 4.05, 9.1);
+  controls.target.set(-5.9, 2.05, 3.0);
+  controls.update();
 }
 
 if (stillMode) {

@@ -270,11 +270,13 @@ function applyPostTargets() {
   bloomPass.setSize(bw, bh);
   mistMat.uniforms.uPixelRatio.value = renderer.getPixelRatio();
 }
+const resizeHooks = [];
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
   applyPostTargets();
+  for (let i = 0; i < resizeHooks.length; i++) resizeHooks[i]();
 });
 if (tier.bloomScale !== 1) applyPostTargets();
 
@@ -342,5 +344,9 @@ function pingPong(t, pulse) {
     };
   }
 
-  return { renderFrame, pingPong, mistMat, targetInfo, disposePost, onModeSwap };
+  return {
+    renderFrame, pingPong, mistMat, targetInfo, disposePost, onModeSwap,
+    finalComposer, stillComposer,
+    onResize(fn) { resizeHooks.push(fn); },
+  };
 }
