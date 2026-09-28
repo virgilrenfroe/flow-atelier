@@ -6,7 +6,8 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { onScope, trackDisposable } from './dispose.js';
 
-// Mist ping-pong FBO + selective bloom. Sim stays 64²; bloom RT follows the perf tier.
+// Mist ping-pong FBO + selective bloom.
+// Sim resolution and bloom RT follow the perf tier. Exhibit stays 64² / bloom scale 1.
 export function createHarborPost(deps) {
   const {
     renderer, scene, camera, freezeMotion, bloomLayer, NOISE_GLSL,

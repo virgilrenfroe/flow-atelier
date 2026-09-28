@@ -1,6 +1,11 @@
-// Desktop exhibit defaults match the pre-split Harbor frame:
-// pixel ratio cap 2, full-resolution bloom, sim FBO locked at 64² (mist parity).
-// ?perf=mid|lean opts into smaller bloom targets. Sim resolution stays 64.
+// Desktop exhibit matches the pre-split Harbor frame and is the default
+// (?perf= omitted, or ?perf=exhibit|high|desktop):
+//   pixel-ratio cap 2, bloom scale 1, mist sim 64².
+//   Draw / triangle budgets 560 / 250k — the district mesh does not shrink.
+// ?perf=mid  (also medium|balanced): cap 1.5, bloom 0.50, sim 48².
+// ?perf=lean (also low|1):           cap 1,   bloom 0.35, sim 32².
+// Mist particle count stays 1200. Sim size only coarsens the flow field.
+// Water, buoyancy, and collision do not read the mist FBO. Exhibit sim stays 64².
 
 import { emitDispose, installPagehide } from './dispose.js';
 
@@ -16,16 +21,16 @@ export const FBO_TIERS = {
   mid: {
     id: 'mid',
     pixelRatioCap: 1.5,
-    bloomScale: 0.75,
-    sim: 64,
+    bloomScale: 0.5,
+    sim: 48,
     maxCalls: 560,
     maxTris: 250000,
   },
   lean: {
     id: 'lean',
     pixelRatioCap: 1,
-    bloomScale: 0.5,
-    sim: 64,
+    bloomScale: 0.35,
+    sim: 32,
     maxCalls: 560,
     maxTris: 250000,
   },
