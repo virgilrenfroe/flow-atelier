@@ -79,12 +79,12 @@ vec2 hitBox(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax) {
 }
 
 float columnMask(vec3 q) {
-  float mast = exp(-dot(q.xz, q.xz) * 0.38);
-  vec2 off = q.xz - vec2(0.62, -0.28);
-  float wisp = exp(-dot(off, off) * 0.95);
-  float yLo = smoothstep(-3.05, -1.35, q.y);
-  float yHi = smoothstep(3.35, 1.45, q.y);
-  return (mast * 0.92 + wisp * 0.48) * yLo * yHi;
+  float mast = exp(-dot(q.xz, q.xz) * 0.85);
+  vec2 off = q.xz - vec2(0.38, -0.16);
+  float wisp = exp(-dot(off, off) * 2.4);
+  float yLo = smoothstep(-2.45, -0.85, q.y);
+  float yHi = smoothstep(2.45, 0.75, q.y);
+  return (mast + wisp * 0.42) * yLo * yHi;
 }
 
 float smokeDensity(vec3 p, vec3 q) {
@@ -95,16 +95,17 @@ float smokeDensity(vec3 p, vec3 q) {
   wq.x += sin(ang) * 0.38 + uWind.x * (q.y + 1.4) * 0.55 + q.y * 0.12;
   wq.z += cos(ang * 0.8) * 0.28 + uWind.y * (q.y + 1.4) * 0.55;
 
-  float nA = fbm(wq * 0.62 + vec3(0.0, rise, 2.0));
+  float nA = fbm(wq * 0.7 + vec3(0.0, rise, 2.0));
   vec3 warped = wq + vec3(
     fbm(wq + vec3(2.2, 0.4, 0.0)),
     fbm(wq.yxz + vec3(4.1, 1.3, 0.6)),
     fbm(wq.zyx + vec3(0.7, 3.4, 1.1))
-  ) * 0.62;
-  float n = fbm(warped * 1.25);
-  float n2 = fbm(warped * 2.05 + vec3(0.0, rise * 0.4, 5.5));
-  float ribbons = smoothstep(0.46, 0.74, max(n, n2 * 0.9));
-  ribbons *= 0.42 + 0.58 * nA;
+  ) * 0.48;
+  vec3 filaments = warped * vec3(1.05, 0.58, 1.05);
+  float n = fbm(filaments);
+  float n2 = fbm(filaments * 1.7 + vec3(0.0, rise * 0.35, 5.5));
+  float ribbons = smoothstep(0.47, 0.73, n * 0.64 + n2 * 0.36);
+  ribbons *= smoothstep(0.28, 0.62, nA);
   return ribbons * columnMask(q);
 }
 
@@ -132,13 +133,13 @@ vec3 volumeShade(vec3 p, vec3 q, vec3 rd, float dens) {
   vec3 L = toL / max(ld, 1e-3);
   float atten = exp(-ld * 0.32);
   float phase = pow(max(dot(L, -rd), 0.0), 2.4);
-  float warm = smoothstep(2.3, -0.6, q.y);
-  vec3 umber = mix(vec3(0.11, 0.10, 0.15), vec3(0.34, 0.20, 0.11), warm);
-  vec3 gold = vec3(0.96, 0.74, 0.30);
-  float shaft = exp(-dot(q.xz, q.xz) * 1.85) * atten;
-  vec3 col = umber * (0.55 + 0.45 * uPulse);
-  col += gold * (phase * 1.35 + shaft * 0.85) * (0.75 + 0.25 * uPulse);
-  col += gold * moteField(p) * 3.2 * shaft;
+  float warm = smoothstep(1.8, -0.4, q.y);
+  vec3 umber = mix(vec3(0.07, 0.07, 0.11), vec3(0.22, 0.13, 0.07), warm);
+  vec3 gold = vec3(0.92, 0.68, 0.26);
+  float shaft = exp(-dot(q.xz, q.xz) * 2.6) * atten;
+  vec3 col = umber * (0.7 + 0.25 * uPulse);
+  col += gold * (phase * 1.15 + shaft * 0.8) * (0.75 + 0.25 * uPulse);
+  col += gold * moteField(p) * 1.35 * max(shaft, 0.25);
   return col * dens;
 }
 
@@ -183,7 +184,7 @@ void main() {
     float dens = smokeDensity(p, q);
     if (dens > 0.004) {
       acc += volumeShade(p, q, rd, dens) * uGain * stepLen * transmit;
-      transmit *= exp(-dens * 0.72 * stepLen);
+      transmit *= exp(-dens * 0.28 * stepLen);
     }
     t += stepLen;
   }
@@ -296,7 +297,7 @@ export function mountSignalVolume(opts) {
       uTime: { value: 0 },
       uPulse: { value: 1 },
       uWind: { value: new THREE.Vector2() },
-      uGain: { value: opts.gain != null ? opts.gain : 1.15 },
+      uGain: { value: opts.gain != null ? opts.gain : 1.85 },
       uDebug: { value: debug ? 1 : 0 },
     },
     vertexShader: VOLUME_VERT,

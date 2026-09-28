@@ -8173,9 +8173,9 @@ const signalVolume = mountSignalVolume({
   composers: [finalComposer, stillComposer],
   enabled: volumeParam !== '0' && volumeParam !== 'off',
   debug: volumeParam === 'mask',
-  center: new THREE.Vector3(signalGroup.position.x, 3.25, signalGroup.position.z),
+  center: new THREE.Vector3(signalGroup.position.x, 3.72, signalGroup.position.z),
   lamp: new THREE.Vector3(signalGroup.position.x, 4.15, signalGroup.position.z),
-  half: new THREE.Vector3(2.35, 3.55, 1.95),
+  half: new THREE.Vector3(1.15, 2.45, 0.95),
 });
 window.__harborVolume = signalVolume;
 {
@@ -8851,6 +8851,12 @@ function tick() {
   }
 
   if (!stillMode) requestAnimationFrame(tick);
+}
+
+if (params.get('shot') === 'signal') {
+  camera.position.set(-3.4, 2.55, 8.1);
+  controls.target.set(-6.5, 3.55, 3.2);
+  controls.update();
 }
 
 if (stillMode) {
