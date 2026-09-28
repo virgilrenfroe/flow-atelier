@@ -2418,10 +2418,17 @@ function mountQuayBakeBay() {
     buildingMat.uniforms.uBakeTop.value = uTop;
     window.__harborBakeBay = { i: box.i, x: box.x, z: box.z, w: box.w, d: box.d, s, half: uHalf, bot: uBot, top: uTop };
     if (wantFrame && controls) {
-      camera.position.set(box.x + 0.05, (uBot + uTop) * 0.5, box.z + box.d * 0.5 + 1.15);
-      controls.target.set(box.x, (uBot + uTop) * 0.45, box.z);
+      // Eye just above the shop opening, close enough that the bay fills the frame.
+      // still=1 stops the render loop after a handful of frames, so this has to
+      // land before the extra renderFrame below.
+      const eyeY = (uBot + uTop) * 0.5;
+      const faceZ = box.z + box.d * 0.5;
+      camera.position.set(box.x + 0.22, eyeY + 0.28, faceZ + 1.12);
+      controls.target.set(box.x, eyeY - 0.02, box.z - box.d * 0.15);
       controls.update();
     }
+    // GLB arrives after the still-mode settle frames. Paint the hole once.
+    if (typeof renderFrame === 'function') renderFrame();
   }).catch((err) => {
     console.warn('A01 bake bay skipped', err);
   });
