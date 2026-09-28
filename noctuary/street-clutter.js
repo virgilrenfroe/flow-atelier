@@ -29,8 +29,9 @@ const CELL = {
 
 const DECAL = new Set(["manhole", "grate", "litter", "cardboard"]);
 
+/** CELL entries are [row, col]. Row 0 is the top of the PNG. */
 function face(name) {
-  const [col, row] = CELL[name];
+  const [row, col] = CELL[name];
   return { col, row };
 }
 
@@ -43,10 +44,11 @@ function cellUV(col, row, u, v) {
   return [u0 + u * (su - inset * 2), v0 + v * (sv - inset * 2)];
 }
 
-function stampAll(geo, col, row) {
+function stampAll(geo, name) {
+  const cell = face(name);
   const uv = geo.attributes.uv;
   for (let i = 0; i < uv.count; i++) {
-    const p = cellUV(col, row, uv.getX(i), uv.getY(i));
+    const p = cellUV(cell.col, cell.row, uv.getX(i), uv.getY(i));
     uv.setXY(i, p[0], p[1]);
   }
   return geo;
@@ -111,7 +113,7 @@ function ironTorus(radius, tube, y) {
   const g = new THREE.TorusGeometry(radius, tube, 6, 16);
   g.rotateX(Math.PI / 2);
   g.translate(0, y, 0);
-  return stampAll(g, CELL.iron[0], CELL.iron[1]);
+  return stampAll(g, "iron");
 }
 
 function geoCan() {
@@ -130,15 +132,15 @@ function geoCan() {
   dome.scale(1, 0.42, 1);
   dome.computeVertexNormals();
   dome.translate(0, 0.328, 0);
-  stampAll(dome, CELL.lid[0], CELL.lid[1]);
+  stampAll(dome, "lid");
   parts.push(dome);
   const bail = new THREE.TorusGeometry(0.026, 0.007, 6, 12, Math.PI);
   bail.translate(0, 0.362, 0);
-  stampAll(bail, CELL.iron[0], CELL.iron[1]);
+  stampAll(bail, "iron");
   parts.push(bail);
   for (const sign of [1, -1]) {
     const lug = new THREE.TorusGeometry(0.018, 0.006, 5, 8, Math.PI);
-    stampAll(lug, CELL.iron[0], CELL.iron[1]);
+    stampAll(lug, "iron");
     lug.rotateZ(sign > 0 ? -Math.PI / 2 : Math.PI / 2);
     lug.translate(sign * 0.096, 0.17, 0);
     parts.push(lug);
@@ -168,25 +170,25 @@ function geoBag() {
   const body = new THREE.SphereGeometry(0.068, 12, 8);
   body.scale(1.15, 0.58, 0.88);
   body.translate(0, 0.044, 0);
-  stampAll(body, CELL.bag[0], CELL.bag[1]);
+  stampAll(body, "bag");
   const neck = new THREE.SphereGeometry(0.026, 8, 6);
   neck.scale(0.62, 1.35, 0.62);
   neck.translate(0, 0.086, 0);
-  stampAll(neck, CELL.bag[0], CELL.bag[1]);
+  stampAll(neck, "bag");
   const knot = new THREE.SphereGeometry(0.011, 6, 5);
   knot.translate(0, 0.108, 0);
-  stampAll(knot, CELL.iron[0], CELL.iron[1]);
+  stampAll(knot, "iron");
   return mergeGeometries([body, neck, knot]);
 }
 
 function geoLitter() {
   const g = new THREE.PlaneGeometry(0.10, 0.065);
-  return stampAll(g, CELL.litter[0], CELL.litter[1]);
+  return stampAll(g, "litter");
 }
 
 function geoCard() {
   const g = new THREE.PlaneGeometry(0.16, 0.11);
-  return stampAll(g, CELL.cardboard[0], CELL.cardboard[1]);
+  return stampAll(g, "cardboard");
 }
 
 function geoHydrant() {
@@ -201,7 +203,7 @@ function geoHydrant() {
   const collar = new THREE.TorusGeometry(0.066, 0.011, 6, 16);
   collar.rotateX(Math.PI / 2);
   collar.translate(0, 0.168, 0);
-  stampAll(collar, CELL.hydrant[0], CELL.hydrant[1]);
+  stampAll(collar, "hydrant");
   parts.push(collar);
   pushUpright(new THREE.CylinderGeometry(0.030, 0.066, 0.052, 12), 0.248, face("hydrant"), face("iron"));
   const nut = new THREE.CylinderGeometry(0.020, 0.020, 0.026, 5);
@@ -257,7 +259,7 @@ function geoBench() {
 function geoWeed() {
   const a = new THREE.PlaneGeometry(0.11, 0.16);
   a.translate(0, 0.08, 0);
-  stampAll(a, CELL.weeds[0], CELL.weeds[1]);
+  stampAll(a, "weeds");
   const b = a.clone();
   b.rotateY(Math.PI / 2);
   return mergeGeometries([a, b]);
@@ -276,12 +278,12 @@ function geoPit() {
   const soil = new THREE.PlaneGeometry(s - t * 2 - 0.012, s - t * 2 - 0.012);
   soil.rotateX(-Math.PI / 2);
   soil.translate(0, 0.012, 0);
-  stampAll(soil, CELL.soil[0], CELL.soil[1]);
+  stampAll(soil, "soil");
   parts.push(soil);
   for (let i = 0; i < 3; i++) {
     const leaf = new THREE.PlaneGeometry(0.09, 0.08);
     leaf.translate(0, 0.04, 0);
-    stampAll(leaf, CELL.weeds[0], CELL.weeds[1]);
+    stampAll(leaf, "weeds");
     leaf.rotateY((i * Math.PI) / 3);
     const ang = i * 2.15;
     leaf.translate(Math.cos(ang) * 0.028, 0.018, Math.sin(ang) * 0.028);
@@ -298,11 +300,11 @@ function geoPlanter() {
   const soil = new THREE.PlaneGeometry(0.15, 0.15);
   soil.rotateX(-Math.PI / 2);
   soil.translate(0, 0.122, 0);
-  stampAll(soil, CELL.soil[0], CELL.soil[1]);
+  stampAll(soil, "soil");
   parts.push(soil);
   const clump = new THREE.PlaneGeometry(0.09, 0.10);
   clump.translate(0, 0.05, 0);
-  stampAll(clump, CELL.weeds[0], CELL.weeds[1]);
+  stampAll(clump, "weeds");
   clump.translate(0, 0.142, 0);
   const b = clump.clone();
   b.rotateY(Math.PI / 2);
@@ -488,10 +490,37 @@ export function mountStreetClutter({ scene, world, CANNON, atlasUrl, anchors, en
       const quay = plan.items.filter((it) => it.surface === "quay");
       const c = hero.length ? centroid(hero) : centroid(plan.items);
       const y = anchors.sidewalkTop || 0.08;
-      if (mode === "detail") {
-        const bench = plan.items.find((it) => it.hero && it.kind === "bench") || { x: c.x, z: c.z };
-        camera.position.set(bench.x + 0.05, y + 0.42, bench.z + 0.95);
-        controls.target.set(bench.x, 0.16, bench.z);
+      const heroOf = (kind) => plan.items.find((it) => it.hero && it.kind === kind);
+      const stand = (it, dist, eye, side, aimY) => {
+        const yaw = it.yaw || 0;
+        const fx = Math.sin(yaw);
+        const fz = Math.cos(yaw);
+        const rx = Math.cos(yaw);
+        const rz = -Math.sin(yaw);
+        const baseY = it.y || y;
+        controls.enableDamping = false;
+        controls.minDistance = 0.08;
+        camera.position.set(it.x + fx * dist + rx * side, baseY + eye, it.z + fz * dist + rz * side);
+        controls.target.set(it.x, baseY + aimY, it.z);
+        controls.update();
+      };
+      if (mode === "can") {
+        const it = heroOf("can");
+        if (it) stand(it, 0.36, 0.22, 0.11, 0.18);
+      } else if (mode === "hydrant") {
+        const it = heroOf("hydrant");
+        if (it) stand(it, 0.34, 0.18, -0.10, 0.14);
+      } else if (mode === "detail") {
+        const can = heroOf("can");
+        const hydrant = heroOf("hydrant");
+        if (can && hydrant) {
+          stand({
+            x: (can.x + hydrant.x) * 0.5,
+            z: (can.z + hydrant.z) * 0.5,
+            y,
+            yaw: can.yaw || 0,
+          }, 0.88, 0.26, 0.0, 0.16);
+        }
       } else if (mode === "quay" && quay.length) {
         const q = centroid(quay);
         camera.position.set(q.x + 2.4, 1.15, q.z - 1.15);

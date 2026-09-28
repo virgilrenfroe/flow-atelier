@@ -51,6 +51,8 @@ Cans are a tapered galvanized bin: bead-and-hoop metal on the can cell, a rolled
 
 The can, lid, and hydrant cells are night-quay wear, the same family as the street sheet and the freight graffiti: dull zinc, faded red, rust bloom, chips through to iron, salt crust, and street dirt. Not a new bin and not factory red. Silhouettes are unchanged.
 
+Cell indices are `[row, col]` with row 0 at the top of the sheet. An earlier read treated that pair as `[col, row]`, so the can wore the inlet cell and the bench legs wore the weed cutout (green wires). They now sample can metal, lid metal, and bench iron.
+
 Flat covers, grates, litter, and cardboard are visual. Cans, dumpsters, hydrants, benches, planters, and the tree-well curb get a static box so a crate does not ghost through them. Those bodies are not in the grab/toss list and do not join the wind or spring hooks. Quay bodies sit a centimeter above the deck so they do not fight the promenade slab.
 
 ### Widths
@@ -68,13 +70,19 @@ On the wide module the open promenade in front of the lanterns is inside the new
 node noctuary/street-clutter.check.mjs
 ```
 
-`window.__streetClutter` reports `counts`, `total`, `live`, `wider`, and `atlas` (`street-clutter-packed` once the sheet binds). `window.__frameClutter('hero' | 'street' | 'quay' | 'detail')` is the exhibit camera used for the stills.
+`window.__streetClutter` reports `counts`, `total`, `live`, `wider`, and `atlas` (`street-clutter-packed` once the sheet binds). `window.__frameClutter('hero' | 'street' | 'quay' | 'detail' | 'can' | 'hydrant')` is the exhibit camera. `detail` frames the can and the hydrant together. `can` and `hydrant` are the close reads. The bench is not the close target.
 
 ## Harbor view
 
-Exhibit chrome stays off. The center block’s quay-facing walk, close enough to read the sheet:
+Exhibit chrome stays off. Close reads of the weathered can and the hydrant. The bench is outside these frames.
 
-![Hero sidewalk — can, hydrant, bench, pit, grate](street-clutter-detail.png)
+![Weathered trash can](street-clutter-can.png)
+
+![Weathered hydrant](street-clutter-hydrant.png)
+
+Both of them, still not centered on the bench:
+
+![Can and hydrant](street-clutter-detail.png)
 
 Same cluster from a step back, with the manhole in the lane:
 
