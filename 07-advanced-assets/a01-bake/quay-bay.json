@@ -18,14 +18,14 @@
   "uv1": "Lightmap",
   "bake": {
     "engine": "Cycles",
-    "samples": 96,
-    "resolution": 1024,
+    "samples": 64,
+    "resolution": 2048,
     "lightmap": "DIFFUSE direct+indirect, color pass off",
     "ao": "AO",
     "combined": "COMBINED preview only \u2014 not multiplied again in the drill",
     "normalize": {
-      "scale": 0.404182947122652,
-      "p95_in": 2.8452462138414383,
+      "scale": 0.9898019536281166,
+      "p95_in": 1.1618485857546328,
       "max_out": 2.1
     }
   }

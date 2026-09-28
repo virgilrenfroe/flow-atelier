@@ -4,7 +4,7 @@
 **Motifs:** Harbor · Quay · Signal · Fenestra  
 **Taste:** night ink `#05060a`, gold practicals `#f0c24b`, cool spill toward violet `#8a7bb8`
 
-One shop-scale room — walls, floor, counter, shelf, bollard niche, fenestra frame — with a Cycles lightmap and a separate AO map. The drill imports the GLB and lights it with those maps. Harbor punches the same model through a single ground-floor opening.
+One shop-scale room — worn plaster, stained floorboards, a counter, a filled shelf, and the bollard niche — with a Cycles lightmap and a separate AO map. The drill imports the GLB and lights it with those maps. Harbor punches the same model through a single ground-floor opening.
 
 ---
 
@@ -22,8 +22,10 @@ Portal-scene chapter, used as a method list. Nothing from that product’s marks
 
 ## What was baked
 
-- **Lightmap** — lighting only. Albedo stays on the glTF materials (MeshPhysical from the glTF, lightmap-aware). The drill sets `lightMapIntensity = π × 4.2` and ACES exposure `1.7`. The π term meets Lambert; the extra lift keeps a dark night albedo from collapsing to black while the pools stay hotter than the corners.
-- **AO** — occlusion in the bollard niche, under the counter lip, along shelf uprights, and where the crate meets the floor. Runtime `aoMap` uses the same UV as the lightmap (`TEXCOORD_1`, `texture.channel = 1`), intensity `0.72`.
+- **Lightmap** — lighting only. Albedo stays on the glTF materials (textured MeshStandard, lightmap-aware). The drill sets `lightMapIntensity = π × 4.2` and ACES exposure `1.7`. The π term meets Lambert; the extra lift keeps a dark night albedo from collapsing to black while the pools stay hotter than the corners. Lamp positions and wattages are the ones Virgil already framed.
+- **Surfaces** — floor, plaster, timber, iron, rug, cloth, and paper carry tiling albedo, roughness, and (on the shell) a normal. Seams, cup rings, pits, and floor dirt are in those maps. Albedo stays in the night range so the lightmap still leads. Roughness swings wide enough that the Harbor key light breaks into sheen on worn boards and iron, and stays matte in the dust.
+- **Contents** — the opening still frames one cell. Inside it: rug, stool, two crates, sack, boots, bucket, rope, counter clutter (mug, ledgers, tin, cloth, bowl), a stocked shelf, a framed sheet, and a coat. The bollard niche stays.
+- **AO** — occlusion in the bollard niche, under the counter lip, along shelf uprights, and where crates and the stool meet the floor. Runtime `aoMap` uses the same UV as the lightmap (`TEXCOORD_1`, `texture.channel = 1`), intensity `0.72`.
 - **Combined preview** — `quay-bay-combined.png` is the Cycles beauty (albedo × light). It is not applied in the drill, so the albedo is not multiplied twice.
 - **Practicals** — point lights in Blender make the pools. Bulb and shade meshes carry `KHR_materials_emissive_strength` so the lamps still read as sources after import.
 - **Cool spill** — an area light outside the opening, aimed into the room, plus a weak cool wash on the stoop.
@@ -54,7 +56,7 @@ Writes into `07-advanced-assets/a01-bake/`:
 - `quay-bay.blend` — the authored scene
 - `quay-bay.json` — opening size for the Harbor hook
 
-Cycles, CPU, 96 samples, 1024², margin 16. The script shoulders the lightmap so a bright practical does not stamp a white island, and applies a mild gamma on the AO so creases stay readable.
+Cycles, CPU, 64 samples, 2048², margin 8. The extra texels keep the pools sharp once the shelf and clutter add islands. The script shoulders the lightmap so a bright practical does not stamp a white island, and applies a mild gamma on the AO so creases stay readable. Opening width, sill, and head are unchanged, so the single-cell Harbor fit still lands flush to the piers.
 
 Headless Blender 4.2 `Image.save()` writes a black PNG for generated float images even when `image.pixels` is filled. The script encodes the float buffer to PNG itself (sRGB for the lightmap and the combined preview, linear for AO).
 

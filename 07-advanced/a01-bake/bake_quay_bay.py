@@ -23,11 +23,13 @@ import sys
 import zlib
 
 import bpy
+import mathutils
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(ROOT, "07-advanced-assets", "a01-bake")
 
 # Room metres. Keep in quay-bay.json — Harbor hook and the drill read it.
+# Opening numbers are the fenestra fit. Do not change them when adding clutter.
 W, D, H = 2.40, 2.10, 2.24
 T = 0.08
 OPEN_L, OPEN_R = -0.73, 0.73
@@ -35,8 +37,10 @@ SILL, HEAD = 0.42, 1.96
 NICHE_Y0, NICHE_Y1, NICHE_Z1 = 0.38, 1.22, 1.30
 NICHE_X_BACK = -1.58  # recess behind the left inner face (-W/2)
 
-SAMPLES = 96
-RES = 1024
+SAMPLES = int(os.environ.get("A01_SAMPLES", "64"))
+RES = int(os.environ.get("A01_RES", "2048"))
+TEX = 512
+PREVIEW = os.environ.get("A01_PREVIEW") == "1"
 
 
 def reset_scene():
@@ -71,17 +75,310 @@ def reset_scene():
     return scene
 
 
-def make_mat(name, color, rough=0.82, metal=0.0, emit=None, emit_strength=0.0):
+def make_mat(name, color, rough=0.82, metal=0.0, emit=None, emit_strength=0.0, specular=0.35):
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     bsdf.inputs["Base Color"].default_value = (color[0], color[1], color[2], 1.0)
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
-    bsdf.inputs["Specular IOR Level"].default_value = 0.35
+    bsdf.inputs["Specular IOR Level"].default_value = specular
     if emit is not None and emit_strength > 0:
         bsdf.inputs["Emission Color"].default_value = (emit[0], emit[1], emit[2], 1.0)
         bsdf.inputs["Emission Strength"].default_value = emit_strength
+    return mat
+
+
+def _noise(u, v, seed, tile=True):
+    """Fast Perlin. Tiled variant wraps so a 1 m repeat has no seam."""
+    if tile:
+        a = u * math.tau
+        b = v * math.tau
+        p = mathutils.Vector((
+            math.cos(a) * 1.7,
+            math.sin(a) * 1.7,
+            math.cos(b) * 1.3 + seed,
+        ))
+    else:
+        p = mathutils.Vector((u, v, seed))
+    return mathutils.noise.noise(p)
+
+
+def _fbm(u, v, seed, octaves=4, tile=True):
+    s = 0.0
+    a = 0.5
+    f = 1.0
+    w = 0.0
+    for o in range(octaves):
+        s += a * _noise(u * f, v * f, seed + o * 3.17, tile=tile)
+        w += a
+        a *= 0.5
+        f *= 2.0
+    return s / w
+
+
+def _smooth(edge0, edge1, x):
+    if edge0 == edge1:
+        return 0.0
+    t = max(0.0, min(1.0, (x - edge0) / (edge1 - edge0)))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _buf():
+    return array.array("f", [0.0]) * (TEX * TEX * 4)
+
+
+def _put(buf, x, y, r, g, b):
+    o = (y * TEX + x) * 4
+    buf[o] = r
+    buf[o + 1] = g
+    buf[o + 2] = b
+    buf[o + 3] = 1.0
+
+
+def _normals(height, strength, tile_u=True, tile_v=True):
+    buf = _buf()
+    n = TEX
+
+    def h(x, y):
+        if tile_u:
+            x %= n
+        else:
+            x = 0 if x < 0 else (n - 1 if x >= n else x)
+        if tile_v:
+            y %= n
+        else:
+            y = 0 if y < 0 else (n - 1 if y >= n else y)
+        return height[y * n + x]
+
+    for y in range(n):
+        for x in range(n):
+            dx = (h(x + 1, y) - h(x - 1, y)) * strength
+            dy = (h(x, y + 1) - h(x, y - 1)) * strength
+            nx, ny, nz = -dx, -dy, 1.0
+            inv = 1.0 / math.sqrt(nx * nx + ny * ny + nz * nz)
+            _put(buf, x, y, nx * inv * 0.5 + 0.5, ny * inv * 0.5 + 0.5, nz * inv * 0.5 + 0.5)
+    return buf
+
+
+def _image(name, buf, colorspace):
+    img = bpy.data.images.new(name, TEX, TEX, alpha=False, float_buffer=True)
+    img.colorspace_settings.name = colorspace
+    img.pixels.foreach_set(buf)
+    img.pack()
+    return img
+
+
+def _paint_floor():
+    """1 m tile. Four boards across U, grain running along V. Night-stained."""
+    alb = _buf()
+    rough = _buf()
+    height = [0.0] * (TEX * TEX)
+    for y in range(TEX):
+        v = y / TEX
+        for x in range(TEX):
+            u = x / TEX
+            plank = math.floor(u * 4.0)
+            pu = (u * 4.0) % 1.0
+            seam = _smooth(0.0, 0.035, pu) * _smooth(0.0, 0.035, 1.0 - pu)
+            n = _fbm(u * 3.0, v * 3.0, 2.2) * 0.5 + 0.5
+            # Grain lines run the length of the board (constant U).
+            grain = 0.5 + 0.5 * math.sin((u * 4.0 * 9.0 + n * 2.0) * math.tau)
+            knot = _fbm(u * 7.0, v * 5.0, 8.0) * 0.5 + 0.5
+            tint = (math.sin(plank * 2.3) * 0.5 + 0.5)
+            base = (0.09 + tint * 0.055, 0.06 + tint * 0.03, 0.038 + tint * 0.012)
+            col = [base[i] * (0.62 + 0.55 * n) * (0.82 + 0.22 * grain) for i in range(3)]
+            if knot > 0.74:
+                k = (knot - 0.74) / 0.26
+                col = [c * (1.0 - 0.5 * k) for c in col]
+            col = [c * (0.22 + 0.78 * seam) for c in col]
+            scuff = _fbm(u * 1.5, v * 14.0, 19.0, octaves=2) * 0.5 + 0.5
+            if scuff > 0.66:
+                s = (scuff - 0.66) / 0.34
+                col = [min(1.0, c + 0.035 * s) for c in col]
+            _put(alb, x, y, *col)
+            rv = 0.74 - 0.18 * (1.0 - seam)
+            rv *= 0.88 + 0.18 * (1.0 - n)
+            if scuff > 0.66:
+                rv *= 0.52
+            rv = max(0.28, min(0.96, rv))
+            _put(rough, x, y, rv, rv, rv)
+            height[y * TEX + x] = seam * 0.55 + n * 0.25 + (0.15 if scuff > 0.66 else 0.0)
+    return alb, rough, _normals(height, 6.0)
+
+
+def _paint_plaster():
+    """U tiles every metre. V is the full wall height — dirt sits at the floor."""
+    alb = _buf()
+    rough = _buf()
+    height = [0.0] * (TEX * TEX)
+    for y in range(TEX):
+        v = y / TEX
+        for x in range(TEX):
+            u = x / TEX
+            n = _fbm(u * 4.0, v * 2.4, 4.4, tile=True) * 0.5 + 0.5
+            speck = _noise(u * 40.0, v * 28.0, 1.7, tile=True) * 0.5 + 0.5
+            dirt = _smooth(0.22, 0.0, v)
+            stain = _fbm(u * 1.6, v * 0.8, 12.0, octaves=3) * 0.5 + 0.5
+            drip = _smooth(0.62, 0.82, _fbm(u * 8.0, v * 1.4, 30.0, octaves=2) * 0.5 + 0.5)
+            drip *= _smooth(0.08, 0.45, v)
+            base = (0.100, 0.106, 0.124)
+            col = [base[i] * (0.48 + 0.85 * n) for i in range(3)]
+            col = [c * (1.0 - 0.62 * dirt) for c in col]
+            col = [c * (1.0 - 0.40 * max(0.0, stain - 0.52) * 2.2) for c in col]
+            col = [c * (1.0 - 0.16 * drip) for c in col]
+            col = [min(1.0, max(0.0, c + (speck - 0.5) * 0.02)) for c in col]
+            _put(alb, x, y, *col)
+            rv = 0.84 + (n - 0.5) * 0.10 + dirt * 0.08
+            if n > 0.70:
+                rv -= 0.24 * (n - 0.70) / 0.30
+            rv = max(0.42, min(0.98, rv))
+            _put(rough, x, y, rv, rv, rv)
+            height[y * TEX + x] = n * 0.35 + dirt * 0.4 + speck * 0.05
+    return alb, rough, _normals(height, 3.5, tile_v=False)
+
+
+def _paint_timber():
+    alb = _buf()
+    rough = _buf()
+    height = [0.0] * (TEX * TEX)
+    for y in range(TEX):
+        v = y / TEX
+        for x in range(TEX):
+            u = x / TEX
+            n = _fbm(u * 2.0, v * 5.0, 6.5) * 0.5 + 0.5
+            grain = 0.5 + 0.5 * math.sin((v * 22.0 + n * 3.0) * math.tau)
+            ring = _fbm(u * 3.0, v * 3.0, 15.0, octaves=2) * 0.5 + 0.5
+            base = (0.145, 0.088, 0.048)
+            col = [base[i] * (0.75 + 0.35 * n) * (0.88 + 0.14 * grain) for i in range(3)]
+            # Cup ring, off-center, reads as a worked counter.
+            du, dv = u - 0.38, v - 0.62
+            cup = math.sqrt(du * du + dv * dv)
+            ring_m = _smooth(0.07, 0.045, abs(cup - 0.11))
+            col = [c * (1.0 - 0.35 * ring_m) for c in col]
+            if ring > 0.78:
+                col = [c * 0.8 for c in col]
+            _put(alb, x, y, *col)
+            rv = 0.58 + (1.0 - grain) * 0.12 + ring_m * 0.15
+            rv = max(0.32, min(0.9, rv))
+            _put(rough, x, y, rv, rv, rv)
+            height[y * TEX + x] = grain * 0.3 + n * 0.2 + ring_m * 0.25
+    return alb, rough, _normals(height, 4.0)
+
+
+def _paint_iron():
+    alb = _buf()
+    rough = _buf()
+    height = [0.0] * (TEX * TEX)
+    for y in range(TEX):
+        v = y / TEX
+        for x in range(TEX):
+            u = x / TEX
+            n = _fbm(u * 6.0, v * 6.0, 3.3) * 0.5 + 0.5
+            pit = _smooth(0.72, 0.88, n)
+            base = (0.16, 0.165, 0.175)
+            col = [base[i] * (0.70 + 0.35 * (1.0 - pit)) * (0.85 + 0.2 * n) for i in range(3)]
+            _put(alb, x, y, *col)
+            rv = 0.34 + pit * 0.45 + (n - 0.5) * 0.08
+            rv = max(0.22, min(0.92, rv))
+            _put(rough, x, y, rv, rv, rv)
+            height[y * TEX + x] = (1.0 - pit) * 0.45 + n * 0.15
+    return alb, rough, _normals(height, 5.0)
+
+
+def _paint_rug():
+    alb = _buf()
+    rough = _buf()
+    for y in range(TEX):
+        v = y / TEX
+        for x in range(TEX):
+            u = x / TEX
+            weave = _fbm(u * 18.0, v * 18.0, 9.1, octaves=2) * 0.5 + 0.5
+            stain = _fbm(u * 2.0, v * 2.0, 4.8) * 0.5 + 0.5
+            du, dv = u - 0.5, v - 0.5
+            center = max(0.0, 1.0 - math.sqrt(du * du + dv * dv) * 1.6)
+            base = (0.075, 0.032, 0.028)
+            border = _smooth(0.08, 0.0, min(u, v, 1.0 - u, 1.0 - v))
+            stripe = 0.75 + 0.25 * (0.5 + 0.5 * math.sin(v * 7.0 * math.tau))
+            col = [base[i] * (0.7 + 0.5 * weave) * (0.8 + 0.35 * stain) * stripe for i in range(3)]
+            col = [c * (1.0 - 0.45 * border) for c in col]
+            col = [min(1.0, c + 0.035 * center) for c in col]
+            _put(alb, x, y, *col)
+            rv = 0.92 - 0.18 * center
+            _put(rough, x, y, rv, rv, rv)
+    return alb, rough
+
+
+def _paint_cloth():
+    alb = _buf()
+    rough = _buf()
+    for y in range(TEX):
+        v = y / TEX
+        for x in range(TEX):
+            u = x / TEX
+            weave = 0.5 + 0.5 * math.sin((u * 36.0) * math.tau) * math.sin((v * 36.0) * math.tau)
+            n = _fbm(u * 3.0, v * 3.0, 21.0) * 0.5 + 0.5
+            base = (0.055, 0.052, 0.064)
+            col = [base[i] * (0.8 + 0.35 * weave) * (0.85 + 0.25 * n) for i in range(3)]
+            _put(alb, x, y, *col)
+            _put(rough, x, y, 0.86, 0.86, 0.86)
+    return alb, rough
+
+
+def _paint_paper():
+    alb = _buf()
+    rough = _buf()
+    for y in range(TEX):
+        v = y / TEX
+        for x in range(TEX):
+            u = x / TEX
+            n = _fbm(u * 8.0, v * 3.0, 17.0, octaves=3) * 0.5 + 0.5
+            fibre = _noise(u * 50.0, v * 20.0, 2.2) * 0.5 + 0.5
+            base = (0.155, 0.125, 0.085)
+            col = [base[i] * (0.82 + 0.28 * n) + (fibre - 0.5) * 0.015 for i in range(3)]
+            _put(alb, x, y, *[max(0.0, min(1.0, c)) for c in col])
+            _put(rough, x, y, 0.78, 0.78, 0.78)
+    return alb, rough
+
+
+def _scale_albedo(buf, gain):
+    out = _buf()
+    for i in range(0, len(buf), 4):
+        out[i] = buf[i] * gain
+        out[i + 1] = buf[i + 1] * gain
+        out[i + 2] = buf[i + 2] * gain
+        out[i + 3] = 1.0
+    return out
+
+
+def make_tex_mat(name, albedo, rough, normal=None, metal=0.0, specular=0.4):
+    mat = make_mat(name, (1, 1, 1), metal=metal, specular=specular)
+    nt = mat.node_tree
+    bsdf = nt.nodes.get("Principled BSDF")
+    uv = nt.nodes.new("ShaderNodeUVMap")
+    uv.uv_map = "UVMap"
+    uv.location = (-640, 0)
+
+    def tex(img, loc):
+        node = nt.nodes.new("ShaderNodeTexImage")
+        node.image = img
+        node.interpolation = "Smart"
+        node.extension = "REPEAT"
+        node.location = loc
+        nt.links.new(uv.outputs["UV"], node.inputs["Vector"])
+        return node
+
+    c = tex(albedo, (-360, 180))
+    nt.links.new(c.outputs["Color"], bsdf.inputs["Base Color"])
+    r = tex(rough, (-360, -40))
+    nt.links.new(r.outputs["Color"], bsdf.inputs["Roughness"])
+    if normal is not None:
+        n = tex(normal, (-360, -280))
+        nm = nt.nodes.new("ShaderNodeNormalMap")
+        nm.space = "TANGENT"
+        nm.location = (-80, -280)
+        nt.links.new(n.outputs["Color"], nm.inputs["Color"])
+        nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
     return mat
 
 
@@ -102,6 +399,26 @@ def add_cyl(name, loc, radius, depth, mat, verts=8):
     ob = bpy.context.active_object
     ob.name = name
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    for poly in ob.data.polygons:
+        poly.use_smooth = True
+    ob.data.materials.append(mat)
+    return ob
+
+
+def add_torus(name, loc, major, minor, mat):
+    bpy.ops.mesh.primitive_torus_add(
+        location=loc,
+        rotation=(math.radians(90), 0.0, 0.0),
+        major_radius=major,
+        minor_radius=minor,
+        major_segments=12,
+        minor_segments=6,
+    )
+    ob = bpy.context.active_object
+    ob.name = name
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    for poly in ob.data.polygons:
+        poly.use_smooth = True
     ob.data.materials.append(mat)
     return ob
 
@@ -132,20 +449,119 @@ def add_area(name, loc, rot, color, energy, size_x, size_y):
     return ob
 
 
+def furnish(timber, iron, rug, cloth, paper):
+    """Lived-in shop clutter. Stays inside the room; opening metrics are untouched."""
+    amber = make_mat("Amber", (0.16, 0.07, 0.03), rough=0.32, specular=0.55)
+    green = make_mat("GreenWare", (0.045, 0.07, 0.05), rough=0.4, specular=0.48)
+    cream = make_mat("CreamWare", (0.18, 0.16, 0.12), rough=0.5, specular=0.42)
+    top = 0.9275
+
+    add_box("Rug", (0.02, 0.78, 0.008), (0.92, 1.05, 0.012), rug)
+    add_box("BaseBack", (0.05, D - 0.025, 0.045), (W - 0.2, 0.02, 0.09), timber)
+    add_box("BaseRight", (W * 0.5 - 0.02, 1.05, 0.045), (0.02, 1.9, 0.09), timber)
+
+    # Stool in the opening view, in front of the counter.
+    add_box("StoolSeat", (-0.02, 0.92, 0.46), (0.34, 0.32, 0.04), timber)
+    for i, (x, y) in enumerate(((-0.12, 0.82), (0.08, 0.82), (-0.12, 1.02), (0.08, 1.02))):
+        add_box(f"StoolLeg{i}", (x, y, 0.22), (0.035, 0.035, 0.44), timber)
+    add_box("StoolBack", (-0.02, 1.06, 0.66), (0.32, 0.03, 0.28), timber)
+
+    add_box("FloorCrate", (-0.78, 0.55, 0.14), (0.32, 0.28, 0.28), timber)
+    add_box("FloorCrateB", (0.62, 0.42, 0.11), (0.28, 0.24, 0.22), timber)
+    add_box("Sack", (-0.48, 0.38, 0.07), (0.26, 0.20, 0.12), cloth)
+    add_box("BootA", (0.42, 0.22, 0.035), (0.08, 0.18, 0.06), timber)
+    add_box("BootB", (0.52, 0.24, 0.035), (0.08, 0.16, 0.06), timber)
+    add_cyl("Bucket", (-0.98, 1.02, 0.11), 0.09, 0.20, iron, verts=10)
+    add_torus("Rope", (-0.82, 1.05, 0.04), 0.07, 0.018, cloth)
+
+    # Counter top — clear of the practical at (0.10, 1.38, 1.00).
+    add_cyl("Mug", (-0.48, 1.52, top + 0.04), 0.038, 0.075, cream, verts=10)
+    add_box("Ledger", (-0.72, 1.78, top + 0.012), (0.20, 0.14, 0.02), paper)
+    add_box("Ledger2", (-0.70, 1.80, top + 0.03), (0.16, 0.11, 0.012), paper)
+    add_cyl("CounterTin", (0.22, 1.62, top + 0.045), 0.04, 0.08, iron, verts=8)
+    add_box("CounterCloth", (-0.18, 1.88, top + 0.012), (0.18, 0.12, 0.018), cloth)
+    add_cyl("Bowl", (0.24, 1.82, top + 0.02), 0.07, 0.035, cream, verts=10)
+
+    # Shelf: bottles, books, boxes. Board tops sit just above 0.46 / 0.96 / 1.46.
+    ceramics = (amber, green, cream, amber)
+    for i, y in enumerate((0.86, 1.04, 1.20, 1.36)):
+        add_cyl(f"Bottle{i}", (1.00, y, 0.56), 0.028, 0.15, ceramics[i], verts=8)
+    add_box("Books", (1.00, 0.90, 1.04), (0.14, 0.16, 0.10), paper)
+    add_box("BookLean", (1.00, 1.08, 1.02), (0.10, 0.14, 0.07), timber)
+    add_box("ShelfBox", (1.00, 1.28, 1.05), (0.15, 0.13, 0.12), timber)
+    add_cyl("Jar", (1.00, 1.40, 1.04), 0.045, 0.10, green, verts=8)
+    add_box("ShelfCrate", (1.00, 1.02, 1.56), (0.14, 0.16, 0.12), timber)
+    add_box("ShelfBoxHigh", (1.00, 1.28, 1.54), (0.12, 0.12, 0.10), paper)
+
+    # Back wall, in the opening's view.
+    add_box("Frame", (-0.48, D - 0.03, 1.48), (0.42, 0.02, 0.52), frame_mat())
+    add_box("FramePaper", (-0.48, D - 0.045, 1.48), (0.30, 0.012, 0.38), paper)
+    add_box("Coat", (0.28, D - 0.04, 1.05), (0.26, 0.025, 0.62), cloth)
+    add_cyl("CoatHook", (0.28, D - 0.03, 1.40), 0.015, 0.04, iron, verts=6)
+    add_box("Ledge", (-0.05, D - 0.08, 0.78), (0.55, 0.12, 0.02), timber)
+    add_cyl("LedgeTinA", (-0.18, D - 0.10, 0.84), 0.035, 0.08, iron, verts=8)
+    add_cyl("LedgeTinB", (0.05, D - 0.10, 0.86), 0.03, 0.11, amber, verts=8)
+
+
+def frame_mat():
+    # Shared dark frame. Created once.
+    existing = bpy.data.materials.get("Frame")
+    if existing:
+        return existing
+    return make_mat("Frame", (0.03, 0.032, 0.04), rough=0.55, metal=0.15, specular=0.35)
+
+
+def build_surfaces():
+    """Night-range albedo. Grit and wear live in the textures, not a brighter base."""
+    print("A01 painting surfaces", flush=True)
+    f_alb, f_rgh, f_nrm = _paint_floor()
+    p_alb, p_rgh, p_nrm = _paint_plaster()
+    t_alb, t_rgh, t_nrm = _paint_timber()
+    i_alb, i_rgh, i_nrm = _paint_iron()
+    r_alb, r_rgh = _paint_rug()
+    c_alb, c_rgh = _paint_cloth()
+    a_alb, a_rgh = _paint_paper()
+    floor = _image("FloorAlb", f_alb, "sRGB")
+    floor_r = _image("FloorRgh", f_rgh, "Non-Color")
+    floor_n = _image("FloorNrm", f_nrm, "Non-Color")
+    plaster = _image("PlasterAlb", p_alb, "sRGB")
+    plaster_r = _image("PlasterRgh", p_rgh, "Non-Color")
+    plaster_n = _image("PlasterNrm", p_nrm, "Non-Color")
+    niche_alb = _image("NicheAlb", _scale_albedo(p_alb, 0.55), "sRGB")
+    timber = _image("TimberAlb", t_alb, "sRGB")
+    timber_r = _image("TimberRgh", t_rgh, "Non-Color")
+    timber_n = _image("TimberNrm", t_nrm, "Non-Color")
+    iron_a = _image("IronAlb", i_alb, "sRGB")
+    iron_r = _image("IronRgh", i_rgh, "Non-Color")
+    iron_n = _image("IronNrm", i_nrm, "Non-Color")
+    rug_a = _image("RugAlb", r_alb, "sRGB")
+    rug_r = _image("RugRgh", r_rgh, "Non-Color")
+    cloth_a = _image("ClothAlb", c_alb, "sRGB")
+    cloth_r = _image("ClothRgh", c_rgh, "Non-Color")
+    paper_a = _image("PaperAlb", a_alb, "sRGB")
+    paper_r = _image("PaperRgh", a_rgh, "Non-Color")
+    return {
+        "floor": make_tex_mat("Floor", floor, floor_r, floor_n, specular=0.5),
+        "wall": make_tex_mat("Wall", plaster, plaster_r, plaster_n, specular=0.28),
+        "niche": make_tex_mat("Niche", niche_alb, plaster_r, plaster_n, specular=0.22),
+        "ceiling": make_tex_mat("Ceiling", plaster, plaster_r, plaster_n, specular=0.22),
+        "timber": make_tex_mat("Timber", timber, timber_r, timber_n, specular=0.46),
+        "iron": make_tex_mat("Iron", iron_a, iron_r, iron_n, metal=0.78, specular=0.5),
+        "rug": make_tex_mat("Rug", rug_a, rug_r, specular=0.18),
+        "cloth": make_tex_mat("Cloth", cloth_a, cloth_r, specular=0.2),
+        "paper": make_tex_mat("Paper", paper_a, paper_r, specular=0.22),
+        "frame": make_tex_mat("Frame", iron_a, iron_r, iron_n, metal=0.12, specular=0.32),
+    }
+
+
 def build_room():
-    # Night-ink shell, warm timber, iron bollard. Albedo stays dark so the
-    # lightmap (not a beige base color) carries the read.
-    wall = make_mat("Wall", (0.085, 0.090, 0.110), rough=0.88)
-    niche = make_mat("Niche", (0.045, 0.048, 0.062), rough=0.92)
-    floor = make_mat("Floor", (0.105, 0.078, 0.055), rough=0.72)
-    ceiling = make_mat("Ceiling", (0.055, 0.058, 0.070), rough=0.9)
-    counter = make_mat("Counter", (0.155, 0.095, 0.055), rough=0.55)
-    shelf = make_mat("Shelf", (0.090, 0.085, 0.100), rough=0.7)
-    crate = make_mat("Crate", (0.130, 0.085, 0.050), rough=0.78)
-    frame = make_mat("Frame", (0.025, 0.027, 0.034), rough=0.64, metal=0.08)
+    # Night-ink shell. Albedo stays dark so the lightmap still carries the read.
+    s = build_surfaces()
+    wall, niche, floor = s["wall"], s["niche"], s["floor"]
+    ceiling, timber, iron = s["ceiling"], s["timber"], s["iron"]
+    rug, cloth, paper, frame = s["rug"], s["cloth"], s["paper"], s["frame"]
     facade = make_mat("Facade", (0.040, 0.044, 0.055), rough=0.86)
     stoop = make_mat("Stoop", (0.035, 0.038, 0.048), rough=0.9)
-    iron = make_mat("Iron", (0.150, 0.155, 0.165), rough=0.38, metal=0.72)
     shade = make_mat(
         "LampShade",
         (0.22, 0.12, 0.05),
@@ -281,20 +697,17 @@ def build_room():
     add_box("Stoop", (0, -0.62, -0.02), (2.10, 0.95, 0.08), stoop)
 
     # Counter with a toe-kick so the overhang bakes a crease.
-    add_box("CounterBase", (-0.32, 1.66, 0.38), (1.08, 0.58, 0.76), counter)
-    add_box("CounterTop", (-0.32, 1.60, 0.90), (1.28, 0.78, 0.055), counter)
+    add_box("CounterBase", (-0.32, 1.66, 0.38), (1.08, 0.58, 0.76), timber)
+    add_box("CounterTop", (-0.32, 1.60, 0.90), (1.28, 0.78, 0.055), timber)
 
     # Shelf against the right wall.
-    add_box("ShelfBack", (1.145, 1.12, 0.95), (0.035, 0.82, 1.70), shelf)
-    add_box("ShelfUprightA", (1.02, 0.74, 0.95), (0.20, 0.035, 1.70), shelf)
-    add_box("ShelfUprightB", (1.02, 1.50, 0.95), (0.20, 0.035, 1.70), shelf)
+    add_box("ShelfBack", (1.145, 1.12, 0.95), (0.035, 0.82, 1.70), timber)
+    add_box("ShelfUprightA", (1.02, 0.74, 0.95), (0.20, 0.035, 1.70), timber)
+    add_box("ShelfUprightB", (1.02, 1.50, 0.95), (0.20, 0.035, 1.70), timber)
     for i, z in enumerate((0.46, 0.96, 1.46)):
-        add_box(f"ShelfBoard{i}", (1.02, 1.12, z), (0.22, 0.74, 0.028), shelf)
-    add_box("ShelfCrate", (1.00, 1.05, 1.56), (0.14, 0.16, 0.12), crate)
-    add_box("ShelfTin", (1.02, 1.28, 0.56), (0.10, 0.10, 0.16), iron)
+        add_box(f"ShelfBoard{i}", (1.02, 1.12, z), (0.22, 0.74, 0.028), timber)
 
-    # Floor crate near the niche — crease against the wall.
-    add_box("FloorCrate", (-0.78, 0.58, 0.15), (0.30, 0.26, 0.30), crate)
+    furnish(timber, iron, rug, cloth, paper)
 
     # Practicals. Shades sit above the point lights so the pool is not sealed in.
     add_cyl("PendantShade", (-0.40, 1.55, 1.88), 0.15, 0.045, shade, verts=12)
@@ -339,8 +752,6 @@ def join_meshes():
     bpy.ops.object.join()
     bay = bpy.context.view_layer.objects.active
     bay.name = "QuayBay"
-    for poly in bay.data.polygons:
-        poly.use_smooth = False
     return bay
 
 
@@ -359,16 +770,44 @@ def unwrap(bay):
     bpy.ops.object.mode_set(mode="EDIT")
     bpy.ops.mesh.select_all(action="SELECT")
     with bpy.context.temp_override(**ov):
-        # Angle-limit unwrap, then pack. Lightmap is a copy of this atlas.
-        bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.02)
-        bpy.ops.uv.pack_islands(margin=0.02)
+        # Unique atlas for the lightmap. Albedo UVs are rewritten after the copy.
+        bpy.ops.uv.smart_project(angle_limit=math.radians(66), island_margin=0.004)
+        bpy.ops.uv.pack_islands(margin=0.004)
     bpy.ops.object.mode_set(mode="OBJECT")
     # uv_layers.new copies the active layer. Order: UVMap = TEXCOORD_0, Lightmap = TEXCOORD_1.
     if "Lightmap" not in bay.data.uv_layers:
         bay.data.uv_layers.new(name="Lightmap")
-    bay.data.uv_layers["Lightmap"].active = True
     bay.data.uv_layers["Lightmap"].active_render = True
+    box_project_uv(bay, "UVMap")
+    bay.data.uv_layers["UVMap"].active = True
     return bay
+
+
+def box_project_uv(bay, uv_name):
+    """Metre-space UVs so tiling grit follows the surface. Plaster V is wall height."""
+    mesh = bay.data
+    uv = mesh.uv_layers[uv_name]
+    plaster_names = {"Wall", "Niche", "Ceiling"}
+    for poly in mesh.polygons:
+        mat = mesh.materials[poly.material_index] if mesh.materials else None
+        name = mat.name if mat else ""
+        n = poly.normal
+        ax, ay, az = abs(n.x), abs(n.y), abs(n.z)
+        vertical = not (az >= ax and az >= ay)
+        for li in poly.loop_indices:
+            co = mesh.vertices[mesh.loops[li].vertex_index].co
+            if az >= ax and az >= ay:
+                u, v = co.x, co.y
+            elif ay >= ax:
+                u, v = co.x, co.z
+            else:
+                u, v = co.y, co.z
+            if name == "Ceiling":
+                # Stay in the clean band of the plaster tile — no floor-dirt stripe.
+                u, v = co.x, 0.40 + (co.y / D) * 0.35
+            elif name in plaster_names and vertical:
+                v = v / H
+            uv.data[li].uv = (u, v)
 
 
 def new_image(name, colorspace):
@@ -398,7 +837,7 @@ def point_materials_at(bay, image):
 def bake(scene, bay, image, bake_type, passes=None):
     point_materials_at(bay, image)
     scene.render.bake.use_clear = True
-    scene.render.bake.margin = 16
+    scene.render.bake.margin = 8 if RES >= 1536 else 16
     scene.render.bake.margin_type = "EXTEND"
     scene.render.bake.target = "IMAGE_TEXTURES"
     if passes:
@@ -578,12 +1017,40 @@ def export_assets(scene, bay, stats):
     print(f"A01 wrote {blend}", flush=True)
 
 
+def render_previews(scene):
+    """Live-light stills so clutter and grit can be judged before the bake."""
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.resolution_x = 720
+    scene.render.resolution_y = 480
+    scene.cycles.samples = 16
+    scene.cycles.use_denoising = True
+    cam_data = bpy.data.cameras.new("Preview")
+    cam_data.lens = 32
+    cam = bpy.data.objects.new("Preview", cam_data)
+    scene.collection.objects.link(cam)
+    scene.camera = cam
+    shots = (
+        ("/tmp/a01-bay-preview.png", (0.08, -1.65, 1.12), (0.0, 1.35, 0.95)),
+        ("/tmp/a01-bay-preview-close.png", (0.12, -0.35, 1.02), (-0.05, 1.45, 0.9)),
+    )
+    for path, loc, target in shots:
+        cam.location = loc
+        direction = mathutils.Vector(target) - mathutils.Vector(loc)
+        cam.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+        scene.render.filepath = path
+        bpy.ops.render.render(write_still=True)
+        print(f"A01 preview {path}", flush=True)
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     scene = reset_scene()
     build_room()
     bay = join_meshes()
     unwrap(bay)
+    if PREVIEW:
+        render_previews(scene)
+        return
 
     light = new_image("QuayBayLight", "sRGB")
     ao = new_image("QuayBayAO", "Non-Color")
