@@ -724,6 +724,9 @@ const sidewalkMat = new THREE.ShaderMaterial({
     uFogDensity: { value: 0.018 },
     uStreetAtlas: { value: streetAtlasPlaceholder },
     uStreetOn: { value: 0 },
+    uBayClip: { value: 0 },
+    uBayMin: { value: new THREE.Vector3() },
+    uBayMax: { value: new THREE.Vector3() },
   },
   vertexShader: /* glsl */`
     varying vec2 vUv;
@@ -740,9 +743,15 @@ const sidewalkMat = new THREE.ShaderMaterial({
     varying vec3 vWorldPos;
     uniform vec3 uFogColor;
     uniform float uFogDensity;
+    uniform float uBayClip;
+    uniform vec3 uBayMin;
+    uniform vec3 uBayMax;
     ${NOISE_GLSL}
     ${STREET_CELL_GLSL}
     void main(){
+      // Lot pad shares this tread. Keep it out of the one shop interior.
+      if (uBayClip > 0.5 && vWorldPos.x > uBayMin.x && vWorldPos.x < uBayMax.x
+          && vWorldPos.z > uBayMin.z && vWorldPos.z < uBayMax.z) discard;
       vec3 col;
       if (uStreetOn < 0.5) {
         col = vec3(0.14, 0.145, 0.17);
@@ -2392,6 +2401,60 @@ function shopFenestraCell(halfAlong) {
   }
   return best;
 }
+// AtlasFloor is one glTF primitive. Its top sits on local y=0, which the
+// opening fit places under the promenade. Slide that primitive up and pull
+// its street edge out to the façade plane.
+function liftAtlasFloor(root, worldY, facadeLocalZ) {
+  root.updateMatrixWorld(true);
+  const s = root.scale.x || 1;
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.geometry) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    const geo = obj.geometry;
+    const pos = geo.getAttribute('position');
+    if (!pos) return;
+    const index = geo.getIndex();
+    const groups = geo.groups && geo.groups.length
+      ? geo.groups
+      : [{ start: 0, count: index ? index.count : pos.count, materialIndex: 0 }];
+    const ids = [];
+    for (const g of groups) {
+      const mat = mats[g.materialIndex] || mats[0];
+      if (!mat || mat.name !== 'AtlasFloor') continue;
+      const end = g.start + g.count;
+      if (index) {
+        for (let i = g.start; i < end; i++) ids.push(index.getX(i));
+      } else {
+        for (let i = g.start; i < end; i++) ids.push(i);
+      }
+    }
+    if (!ids.length) return;
+    let maxY = -1e9;
+    let maxZ = -1e9;
+    for (let k = 0; k < ids.length; k++) {
+      maxY = Math.max(maxY, pos.getY(ids[k]));
+      maxZ = Math.max(maxZ, pos.getZ(ids[k]));
+    }
+    const delta = (worldY - root.position.y) / s - maxY;
+    const lip = facadeLocalZ + 0.01;
+    for (let k = 0; k < ids.length; k++) {
+      const i = ids[k];
+      pos.setY(i, pos.getY(i) + delta);
+      if (pos.getZ(i) > maxZ - 0.025) pos.setZ(i, Math.max(pos.getZ(i), lip));
+    }
+    pos.needsUpdate = true;
+    geo.computeVertexNormals();
+    if (geo.boundingSphere) geo.computeBoundingSphere();
+    if (geo.boundingBox) geo.computeBoundingBox();
+    obj.frustumCulled = false;
+    mats.forEach((mat) => {
+      if (!mat || mat.name !== 'AtlasFloor') return;
+      mat.polygonOffset = true;
+      mat.polygonOffsetFactor = -2;
+      mat.polygonOffsetUnits = -2;
+    });
+  });
+}
 function mountQuayBakeBay() {
   const base = new URL('./07-advanced-assets/a01-bake/', import.meta.url);
   const texLoader = new THREE.TextureLoader();
@@ -2463,6 +2526,29 @@ function mountQuayBakeBay() {
     const worldX = box.x + uCenter;
     const faceZ = box.z + box.d * 0.5;
     root.position.set(worldX, holeCy - openCy * s, faceZ - 0.03);
+    // Lot pad tops out near y=0.058 and the quay slab sits at y=0.04.
+    // The baked floor is at local y=0, which lands below both and leaves
+    // outdoor concrete in the opening. Raise the atlas floor above that
+    // tread and run its lip to the façade so the interior meets the sill.
+    const floorY = 0.075;
+    liftAtlasFloor(root, floorY, (faceZ - root.position.z) / s);
+    const roomW = meta.roomW || 2.4;
+    const roomD = meta.roomD || 2.1;
+    const bayMin = new THREE.Vector3(
+      worldX - roomW * s * 0.5 - 0.02,
+      0,
+      faceZ - roomD * s - 0.06
+    );
+    const bayMax = new THREE.Vector3(
+      worldX + roomW * s * 0.5 + 0.02,
+      1,
+      faceZ - 0.012
+    );
+    for (const mat of [quayMat, sidewalkMat]) {
+      mat.uniforms.uBayClip.value = 1;
+      mat.uniforms.uBayMin.value.copy(bayMin);
+      mat.uniforms.uBayMax.value.copy(bayMax);
+    }
     scene.add(root);
     buildingMat.uniforms.uBakeBay.value = box.i;
     buildingMat.uniforms.uBakeCenter.value = uCenter;
@@ -2472,6 +2558,7 @@ function mountQuayBakeBay() {
     window.__harborBakeBay = {
       i: box.i, x: box.x, z: box.z, w: box.w, d: box.d, s,
       col: cell.col, center: uCenter, worldX, half: uHalf, bot: uBot, top: uTop,
+      floorY, faceZ,
     };
     if (wantFrame && controls) {
       // Eye on this one cell, not the massing center (that center is the pier).
@@ -3018,6 +3105,9 @@ const quayMat = new THREE.ShaderMaterial({
     uTime: { value: 0 },
     uPointer: { value: new THREE.Vector2(0, 0) },
     uAmp: { value: freezeMotion ? 0 : 0.1 },
+    uBayClip: { value: 0 },
+    uBayMin: { value: new THREE.Vector3() },
+    uBayMax: { value: new THREE.Vector3() },
   },
   vertexShader: /* glsl */`
     uniform float uTime;
@@ -3043,11 +3133,18 @@ const quayMat = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */`
     uniform float uTime;
     uniform vec2 uPointer;
+    uniform float uBayClip;
+    uniform vec3 uBayMin;
+    uniform vec3 uBayMax;
     varying vec2 vUv;
     varying vec3 vPos;
     varying vec3 vWorldPos;
     ${NOISE_GLSL}
     void main(){
+      // Promenade stops at the shop threshold. The slab otherwise runs
+      // through the façade and reads as concrete inside the bay.
+      if (uBayClip > 0.5 && vWorldPos.x > uBayMin.x && vWorldPos.x < uBayMax.x
+          && vWorldPos.z > uBayMin.z && vWorldPos.z < uBayMax.z) discard;
       vec3 stone = vec3(0.08, 0.09, 0.13);
       float grain = fbm(vUv * 18.0 + uTime * 0.05);
       stone += grain * 0.045;

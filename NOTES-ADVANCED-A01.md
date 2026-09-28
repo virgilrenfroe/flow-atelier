@@ -80,7 +80,7 @@ Headless Blender 4.2 `Image.save()` writes a black PNG for generated float image
 
 The façade grid is shop | pier | shop. `faceAlong` is metres from the massing center, and cell 0 is `[0, 0.76)`, so x = 0 is the pier between two shops, not the middle of a bay. An earlier hole used `abs(faceAlong) <= uBakeHalf` and sat across that pier, reading as a third room between two atlas stickers. The hole is now one cell's glass only (shop mullion 0.04 / 0.045, plinth at 0.12 m), and the GLB opening is scaled and shifted onto that same rect. The neighboring shop pane and the pier stay on the atlas path.
 
-The GLB interior is `shop-atlas.png` cell 6 — the same ground-floor sheet as the neighboring shop stickers (`uShopAtlas`), not a parallel plaster set. Harbor and the drill keep `lightMapIntensity` at `1.55` on materials named `Atlas*` so that photograph stays in the sticker range. The bay floor is that cell's interior foreground, not promenade concrete.
+The GLB interior is `shop-atlas.png` cell 6 — the same ground-floor sheet as the neighboring shop stickers (`uShopAtlas`), not a parallel plaster set. Harbor and the drill keep `lightMapIntensity` at `1.55` on materials named `Atlas*` so that photograph stays in the sticker range. The bay floor is that cell's interior foreground. The opening fit used to leave that floor under the lot pad and the quay slab, so promenade concrete showed through the glass. Harbor lifts `AtlasFloor` above that tread and clips the quay and sidewalk shaders to the façade, so outdoor concrete stops at the threshold.
 
 Street ground, deck plank atlas, prop wear, fleet, lamp props, water, pennants, and buoyancy/physics are untouched. If the GLB fails to load, `uBakeBay` stays `-1` and every pane stays on the atlas path.
 
