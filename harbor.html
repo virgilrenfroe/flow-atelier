@@ -302,7 +302,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
-import { createHarborGlassShards, glassQuaternion } from './noctuary/glass-shards.js';
+import { createHarborGlassShards, glassQuaternion, glassShardCount, GLASS_SHARD_DENSITY } from './noctuary/glass-shards.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -5753,8 +5753,36 @@ function shopMarkBroken(id, face, slot) {
   return true;
 }
 
-function shopSpawnShards(x, y, z, nx, ny, nz) {
-  for (let i = 0; i < 5; i++) {
+// Ground-floor shop pane, matching the façade shader (cell 0.76, shop mullions,
+// sill clearance at y=0.12, head inside the top mullion of that cell).
+const SHOP_CELL = 0.76;
+const SHOP_MULL_U = 0.04;
+const SHOP_MULL_V = 0.045;
+const SHOP_PANE_H = SHOP_CELL * (1 - SHOP_MULL_V) - 0.12;
+
+function shopBrokenGlassArea(box, face, slot) {
+  if (!box) return 0;
+  const limit = (face === 0 || face === 1) ? box.d * 0.5 : box.w * 0.5;
+  const a0 = (slot - 8) * SHOP_CELL;
+  const a1 = a0 + SHOP_CELL;
+  const overlap = Math.max(0, Math.min(a1, limit) - Math.max(a0, -limit));
+  if (overlap <= 0.02) return 0;
+  const edgeMullions = overlap >= SHOP_CELL - 0.02 ? 2 : 1;
+  const glazedW = Math.max(0, overlap - edgeMullions * SHOP_MULL_U * SHOP_CELL);
+  return glazedW * SHOP_PANE_H;
+}
+
+// Fenestra vessel: the mullioned face of the glass block, not the unfolded box.
+function vesselGlassArea(mesh) {
+  const g = mesh && mesh.geometry && mesh.geometry.parameters;
+  if (!g || !(g.width > 0) || !(g.height > 0) || !(g.depth > 0)) return 0.1;
+  return Math.max(g.width * g.height, g.width * g.depth, g.height * g.depth);
+}
+
+function shopSpawnShards(x, y, z, nx, ny, nz, area) {
+  const count = glassShardCount(area);
+  const spread = 0.07 + Math.sqrt(Math.max(count, 1)) * 0.028;
+  for (let i = 0; i < count; i++) {
     const span = 0.1 + Math.random() * 0.08;
     const mass = 0.12 + Math.random() * 0.16;
     const entry = harborSpawnGlassShard({
@@ -5762,9 +5790,9 @@ function shopSpawnShards(x, y, z, nx, ny, nz) {
       tint: i,
       mass,
       position: new CANNON.Vec3(
-        x + nx * 0.05 + (Math.random() - 0.5) * 0.12,
+        x + nx * 0.05 + (Math.random() - 0.5) * spread,
         y + (Math.random() - 0.5) * 0.08,
-        z + nz * 0.05 + (Math.random() - 0.5) * 0.12
+        z + nz * 0.05 + (Math.random() - 0.5) * spread
       ),
       quaternion: glassQuaternion(
         nx, ny, nz,
@@ -5785,6 +5813,7 @@ function shopSpawnShards(x, y, z, nx, ny, nz) {
     entry.shopGlass = true;
     shopShards.push(entry);
   }
+  return count;
 }
 
 function shopGlassReset() {
@@ -5861,7 +5890,10 @@ function shopGlassScan() {
       const hy = Math.min(SHOP_GLASS_Y1 - 0.04, Math.max(SHOP_GLASS_Y0 + 0.05, best.hy));
       const x = best.nx !== 0 ? best.b.x + best.nx * (best.b.w * 0.5 + 0.06) : best.b.x + best.along;
       const z = best.nz !== 0 ? best.b.z + best.nz * (best.b.d * 0.5 + 0.06) : best.b.z + best.along;
-      shopSpawnShards(x, hy, z, best.nx, 0.2, best.nz);
+      shopSpawnShards(
+        x, hy, z, best.nx, 0.2, best.nz,
+        shopBrokenGlassArea(best.b, best.face, best.slot)
+      );
       if (best.nx !== 0) entry.body.velocity.x = best.nx * Math.max(0.35, Math.abs(v.x) * 0.22);
       else entry.body.velocity.z = best.nz * Math.max(0.35, Math.abs(v.z) * 0.22);
     }
@@ -5889,7 +5921,10 @@ function shopGlassBlast(origin, radius) {
       if (!shopMarkBroken(i, f.face, slot)) continue;
       const x = f.nx !== 0 ? f.x + f.nx * 0.06 : b.x + along;
       const z = f.nz !== 0 ? f.z + f.nz * 0.06 : b.z + along;
-      shopSpawnShards(x, 0.42, z, f.nx, 0.55, f.nz);
+      shopSpawnShards(
+        x, 0.42, z, f.nx, 0.55, f.nz,
+        shopBrokenGlassArea(b, f.face, slot)
+      );
     }
   }
 }
@@ -5903,8 +5938,70 @@ window.__shopGlass = {
   shards: () => shopShards.length,
   reset: shopGlassReset,
   strike(id, face, slot, x, y, z, nx, nz) {
-    if (shopMarkBroken(id, face, slot)) shopSpawnShards(x, y, z, nx || 0, 0.4, nz || 0);
-    return { broken: window.__shopGlass.broken(), shards: shopShards.length };
+    const area = shopBrokenGlassArea(harborBoxes[id], face | 0, slot | 0);
+    const count = shopMarkBroken(id, face, slot)
+      ? shopSpawnShards(x, y, z, nx || 0, 0.4, nz || 0, area)
+      : 0;
+    return {
+      broken: window.__shopGlass.broken(),
+      shards: shopShards.length,
+      area: +area.toFixed(4),
+      count,
+      density: GLASS_SHARD_DENSITY,
+    };
+  },
+  // Largest fully glazed ground-floor cell, facing the quay when one exists.
+  sample() {
+    let best = null;
+    for (let i = 0; i < harborBoxes.length; i++) {
+      const b = harborBoxes[i];
+      const faces = [
+        { face: 2, nx: 0, nz: 1, x: b.x, z: b.z + b.d * 0.5, limit: b.w * 0.5 },
+        { face: 0, nx: 1, nz: 0, x: b.x + b.w * 0.5, z: b.z, limit: b.d * 0.5 },
+        { face: 1, nx: -1, nz: 0, x: b.x - b.w * 0.5, z: b.z, limit: b.d * 0.5 },
+        { face: 3, nx: 0, nz: -1, x: b.x, z: b.z - b.d * 0.5, limit: b.w * 0.5 },
+      ];
+      for (const f of faces) {
+        for (let slot = 0; slot <= 15; slot++) {
+          const a0 = (slot - 8) * SHOP_CELL;
+          const a1 = a0 + SHOP_CELL;
+          if (a0 < -f.limit + 0.01 || a1 > f.limit - 0.01) continue;
+          const area = shopBrokenGlassArea(b, f.face, slot);
+          const quay = f.nz > 0 ? 2 : 0;
+          const score = area * 10 + quay + Math.max(-2, b.z) * 0.01;
+          if (best && score <= best.score) continue;
+          const mid = (a0 + a1) * 0.5;
+          best = {
+            score,
+            id: i,
+            face: f.face,
+            slot,
+            area,
+            x: f.nx ? f.x + f.nx * 0.06 : b.x + mid,
+            y: 0.42,
+            z: f.nz ? f.z + f.nz * 0.06 : b.z + mid,
+            nx: f.nx,
+            nz: f.nz,
+          };
+        }
+      }
+    }
+    if (!best) return { ok: false };
+    const count = shopMarkBroken(best.id, best.face, best.slot)
+      ? shopSpawnShards(best.x, best.y, best.z, best.nx, 0.35, best.nz, best.area)
+      : 0;
+    return {
+      ok: true,
+      id: best.id,
+      face: best.face,
+      slot: best.slot,
+      area: +best.area.toFixed(4),
+      count,
+      density: GLASS_SHARD_DENSITY,
+      shards: shopShards.length,
+      x: +best.x.toFixed(3),
+      z: +best.z.toFixed(3),
+    };
   },
   // Swept crate vs one façade face. Used to confirm impact without a HUD control.
   cross(boxIdx, face) {
@@ -5924,11 +6021,17 @@ window.__shopGlass = {
     entry.body.position.set(ox - nx * 0.08, y, oz - nz * 0.08);
     entry.body.velocity.set(-nx * 4.5, 0.1, -nz * 4.5);
     entry.body.wakeUp();
+    const before = shopShards.length;
     shopGlassScan();
+    const slot = 8;
+    const area = shopBrokenGlassArea(b, f, slot);
     return {
       ok: true,
       broken: window.__shopGlass.broken(),
       shards: shopShards.length,
+      area: +area.toFixed(4),
+      count: shopShards.length - before,
+      density: GLASS_SHARD_DENSITY,
       shard: shopShards[0] ? {
         shard: true,
         shopGlass: true,
@@ -7220,6 +7323,7 @@ const rubeState = {
   gateOpenY: 0,
   shatterDone: false,
   shatterAt: 0,
+  shardArea: 0,
   signalPulseUntil: 0,
   hintAt: 0,
 };
@@ -7553,7 +7657,10 @@ function rubeShatter() {
   for (const ch of rubeVesselMesh.children) ch.visible = false;
 
   const origin = rubeVesselMesh.position;
-  for (let i = 0; i < 9; i++) {
+  const area = vesselGlassArea(rubeVesselMesh);
+  const count = glassShardCount(area);
+  rubeState.shardArea = area;
+  for (let i = 0; i < count; i++) {
     const span = 0.12 + Math.random() * 0.09;
     const mass = 0.16 + Math.random() * 0.22;
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(
@@ -7621,6 +7728,7 @@ function rubeReset() {
   rubeState.gateY = rubeState.gateClosedY;
   rubeState.shatterDone = false;
   rubeState.shatterAt = 0;
+  rubeState.shardArea = 0;
   rubeState.signalPulseUntil = 0;
   rubeGateBody.position.y = rubeState.gateClosedY;
   rubeGateBody.velocity.set(0, 0, 0);
@@ -7803,6 +7911,8 @@ function rubeFillProbe() {
   window.__shatter = {
     done: rubeState.shatterDone,
     debris: rubeDebris.length,
+    area: rubeState.shardArea ? +rubeState.shardArea.toFixed(4) : 0,
+    density: GLASS_SHARD_DENSITY,
     vesselVisible: rubeVesselMesh.visible,
     pickable: rubeDebris.filter((d) => d.kind === 'crate' && d.mass > 0 && d.mesh && d.mesh.userData.physEntry).length,
     facet: rubeDebris.length > 0 && rubeDebris.every((d) => d.glassFacet),

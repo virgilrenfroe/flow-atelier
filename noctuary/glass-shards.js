@@ -5,6 +5,19 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 
+// Shards per square scene-unit of broken glass. Count is
+// clamp(round(density * area), 2, 16). A full shop cell is several times
+// the fenestra vessel's pane, so it sheds more pieces.
+export const GLASS_SHARD_DENSITY = 26;
+export const GLASS_SHARD_MIN = 2;
+export const GLASS_SHARD_MAX = 16;
+
+export function glassShardCount(area) {
+  const n = Math.round(GLASS_SHARD_DENSITY * Math.max(0, area || 0));
+  if (n <= 0) return 0;
+  return Math.max(GLASS_SHARD_MIN, Math.min(GLASS_SHARD_MAX, n));
+}
+
 const TINTS = [
   0xe4eef8,
   0xd2e2f2,
