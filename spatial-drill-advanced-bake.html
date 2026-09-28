@@ -239,9 +239,9 @@ function bindMaps() {
       if (!mat) return;
       mat.lightMap = lm;
       mat.aoMap = ao;
-      const wood = mat.name === 'Floor' || mat.name === 'Timber' || mat.name === 'Rug';
-      mat.lightMapIntensity = wood ? Math.PI * 1.85 : LIGHTMAP_INTENSITY;
-      mat.aoMapIntensity = flatMode ? 0 : AO_INTENSITY;
+      const photo = mat.name.indexOf('Atlas') === 0;
+      mat.lightMapIntensity = photo ? 1.55 : LIGHTMAP_INTENSITY;
+      mat.aoMapIntensity = flatMode ? 0 : (photo ? 0.32 : AO_INTENSITY);
       mat.envMapIntensity = 0;
       mat.needsUpdate = true;
     });

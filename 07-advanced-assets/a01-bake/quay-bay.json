@@ -19,9 +19,12 @@
   "atlas": {
     "shop": "06-intermediate-assets/shop-atlas.png",
     "occupied": "06-intermediate-assets/room-atlas-occupied-32.png",
-    "floor": "shop-atlas cell 0 foreground wood planks",
-    "walls": "shop-atlas cell 0 plain plaster",
-    "timber": "same shop-atlas planks, darker"
+    "shopCell": 6,
+    "shopCellCol": 2,
+    "shopCellRow": 1,
+    "room": "shop-atlas cell 6 photographic interior, floor band cropped off the plate",
+    "floor": "shop-atlas cell 6 foreground \u2014 interior floor, not promenade concrete",
+    "walls": "shop-atlas cell 6 upper interior, softened"
   },
   "bake": {
     "engine": "Cycles",
@@ -31,9 +34,9 @@
     "ao": "AO",
     "combined": "COMBINED preview only \u2014 not multiplied again in the drill",
     "normalize": {
-      "scale": 0.9585475958914549,
-      "p95_in": 1.199731765985489,
-      "max_out": 2.1
+      "scale": 0.17845484238901768,
+      "p95_in": 6.4442073109626765,
+      "max_out": 1.881718743017641
     }
   }
 }

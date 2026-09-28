@@ -2447,11 +2447,11 @@ function mountQuayBakeBay() {
         if (!mat) return;
         mat.lightMap = lightMap;
         mat.aoMap = aoMap;
-        // Wood planks from shop-atlas are lighter than the night shell.
-        // Ease the floor and timber so the boards stay wood, not a white pool.
-        const wood = mat.name === 'Floor' || mat.name === 'Timber' || mat.name === 'Rug';
-        mat.lightMapIntensity = Math.PI * (wood ? 1.85 : 4.2);
-        mat.aoMapIntensity = 0.72;
+        // Atlas* albedo is the shop-atlas photograph (already night-graded).
+        // π×4.2 was for a near-black shell and blows that photo out to white.
+        const photo = mat.name.indexOf('Atlas') === 0;
+        mat.lightMapIntensity = photo ? 1.55 : Math.PI * 4.2;
+        mat.aoMapIntensity = photo ? 0.32 : 0.72;
         mat.envMapIntensity = 0;
       });
     });

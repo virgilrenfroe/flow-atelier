@@ -34,8 +34,23 @@ W, D, H = 2.40, 2.10, 2.24
 T = 0.08
 OPEN_L, OPEN_R = -0.73, 0.73
 SILL, HEAD = 0.42, 1.96
-NICHE_Y0, NICHE_Y1, NICHE_Z1 = 0.38, 1.22, 1.30
-NICHE_X_BACK = -1.58  # recess behind the left inner face (-W/2)
+
+# Ground-floor fenestra sheet Harbor already binds as uShopAtlas.
+# Cell 6 (row 1, col 2) is a dense photographic shop. The floor crop is that
+# same cell's foreground, so the bay stays one interior. Apartments live on
+# room-atlas-occupied-32.png (floors above 0); this bay sits on floor 0.
+SHOP_ATLAS = os.path.join(ROOT, "06-intermediate-assets", "shop-atlas.png")
+ROOM_ATLAS = os.path.join(ROOT, "06-intermediate-assets", "room-atlas-occupied-32.png")
+SHOP_COLS, SHOP_ROWS = 4, 4
+SHOP_CELL = 6
+# Cell-local, top-left origin. Plate drops the photo's own floor band.
+PLATE_RECT = (28, 18, 484, 400)
+# Foreground of the same cell — interior floor, not promenade concrete.
+FLOOR_RECT = (168, 446, 400, 508)
+# Upper interior of the same cell, softened into side walls and ceiling.
+WALL_RECT = (176, 28, 360, 150)
+FLOOR_TILE_U = 1.05
+FLOOR_TILE_V = 0.27
 
 SAMPLES = int(os.environ.get("A01_SAMPLES", "64"))
 RES = int(os.environ.get("A01_RES", "2048"))
@@ -89,339 +104,93 @@ def make_mat(name, color, rough=0.82, metal=0.0, emit=None, emit_strength=0.0, s
     return mat
 
 
-def _noise(u, v, seed, tile=True):
-    """Fast Perlin. Tiled variant wraps so a 1 m repeat has no seam."""
-    if tile:
-        a = u * math.tau
-        b = v * math.tau
-        p = mathutils.Vector((
-            math.cos(a) * 1.7,
-            math.sin(a) * 1.7,
-            math.cos(b) * 1.3 + seed,
-        ))
-    else:
-        p = mathutils.Vector((u, v, seed))
-    return mathutils.noise.noise(p)
-
-
-def _fbm(u, v, seed, octaves=4, tile=True):
-    s = 0.0
-    a = 0.5
-    f = 1.0
-    w = 0.0
-    for o in range(octaves):
-        s += a * _noise(u * f, v * f, seed + o * 3.17, tile=tile)
-        w += a
-        a *= 0.5
-        f *= 2.0
-    return s / w
-
-
-def _smooth(edge0, edge1, x):
-    if edge0 == edge1:
-        return 0.0
-    t = max(0.0, min(1.0, (x - edge0) / (edge1 - edge0)))
-    return t * t * (3.0 - 2.0 * t)
-
-
-def _buf():
-    return array.array("f", [0.0]) * (TEX * TEX * 4)
-
-
-def _put(buf, x, y, r, g, b):
-    o = (y * TEX + x) * 4
-    buf[o] = r
-    buf[o + 1] = g
-    buf[o + 2] = b
-    buf[o + 3] = 1.0
-
-
-def _normals(height, strength, tile_u=True, tile_v=True):
-    buf = _buf()
-    n = TEX
-
-    def h(x, y):
-        if tile_u:
-            x %= n
-        else:
-            x = 0 if x < 0 else (n - 1 if x >= n else x)
-        if tile_v:
-            y %= n
-        else:
-            y = 0 if y < 0 else (n - 1 if y >= n else y)
-        return height[y * n + x]
-
-    for y in range(n):
-        for x in range(n):
-            dx = (h(x + 1, y) - h(x - 1, y)) * strength
-            dy = (h(x, y + 1) - h(x, y - 1)) * strength
-            nx, ny, nz = -dx, -dy, 1.0
-            inv = 1.0 / math.sqrt(nx * nx + ny * ny + nz * nz)
-            _put(buf, x, y, nx * inv * 0.5 + 0.5, ny * inv * 0.5 + 0.5, nz * inv * 0.5 + 0.5)
-    return buf
-
-
-def _image(name, buf, colorspace):
-    img = bpy.data.images.new(name, TEX, TEX, alpha=False, float_buffer=True)
-    img.colorspace_settings.name = colorspace
-    img.pixels.foreach_set(buf)
-    img.pack()
-    return img
-
-
-# Shop atlas cell 0 (ground-floor fenestra sheet). PIL top-left coordinates.
-# Floor band is the foreground wood planks. Wall patch is the plain plaster.
-SHOP_ATLAS = os.path.join(ROOT, "06-intermediate-assets", "shop-atlas.png")
-WOOD_RECT = (180, 470, 400, 508)  # x0, y0, x1, y1 from top
-WALL_RECT = (360, 30, 490, 110)
-
-
-def _load_shop_atlas():
-    img = bpy.data.images.load(SHOP_ATLAS)
+def _atlas_pixels(path):
+    img = bpy.data.images.load(path)
     w, h = img.size
     buf = array.array("f", img.pixels[:])
     bpy.data.images.remove(img)
     return buf, w, h
 
 
-def _grab_rect(buf, w, h, rect):
-    """Copy a top-left rect out of a bottom-up Blender pixel buffer."""
-    x0, y0, x1, y1 = rect
-    rows = []
-    for py in range(y0, y1):
-        by = h - 1 - py
-        row = []
-        for x in range(x0, x1):
-            o = (by * w + x) * 4
-            row.append((buf[o], buf[o + 1], buf[o + 2]))
-        rows.append(row)
-    return rows
+def extract_atlas_image(name, path, cols, rows, index, rect=None, soften=0):
+    """Crop one atlas cell (optional rect, top-left inside the cell).
+
+    Photographic pixels stay as they are. soften averages the crop down so a
+    side wall reads as that interior's color, not a second copy of the furniture.
+    """
+    buf, sw, sh = _atlas_pixels(path)
+    cw, ch = sw // cols, sh // rows
+    col, row = index % cols, index // cols
+    ox, oy = col * cw, row * ch
+    if rect is None:
+        x0, y0, x1, y1 = 0, 0, cw, ch
+    else:
+        x0, y0, x1, y1 = rect
+    tw, th = x1 - x0, y1 - y0
+    if soften > 1:
+        out_w = out_h = soften
+    else:
+        out_w, out_h = tw, th
+    img = bpy.data.images.new(name, out_w, out_h, alpha=False, float_buffer=True)
+    img.colorspace_settings.name = "sRGB"
+    out = array.array("f", [1.0]) * (out_w * out_h * 4)
+
+    def sample(px, py):
+        px = 0 if px < 0 else (tw - 1 if px >= tw else px)
+        py = 0 if py < 0 else (th - 1 if py >= th else py)
+        src_y_top = oy + y0 + py
+        src_y = sh - 1 - src_y_top
+        src_x = ox + x0 + px
+        o = (src_y * sw + src_x) * 4
+        return buf[o], buf[o + 1], buf[o + 2]
+
+    for dy in range(out_h):
+        for dx in range(out_w):
+            if soften > 1:
+                # Wide box filter — photographic color, no readable furniture.
+                sx0 = int(dx * tw / out_w)
+                sx1 = max(sx0 + 1, int((dx + 1) * tw / out_w))
+                sy0 = int(dy * th / out_h)
+                sy1 = max(sy0 + 1, int((dy + 1) * th / out_h))
+                acc = [0.0, 0.0, 0.0]
+                n = 0
+                for py in range(sy0, sy1):
+                    for px in range(sx0, sx1):
+                        c = sample(px, py)
+                        acc[0] += c[0]
+                        acc[1] += c[1]
+                        acc[2] += c[2]
+                        n += 1
+                r, g, b = acc[0] / n, acc[1] / n, acc[2] / n
+            else:
+                r, g, b = sample(dx, dy)
+            # Top of the photo at UV v = 1.
+            dest_y = out_h - 1 - dy
+            o = (dest_y * out_w + dx) * 4
+            out[o] = r
+            out[o + 1] = g
+            out[o + 2] = b
+            out[o + 3] = 1.0
+    img.pixels.foreach_set(out)
+    img.pack()
+    return img
 
 
-def _sample_rows(rows, u, v):
-    sh = len(rows)
-    sw = len(rows[0])
-    u = u % 1.0
-    v = v % 1.0
-    x = u * (sw - 1)
-    y = v * (sh - 1)
-    x0 = int(x)
-    y0 = int(y)
-    x1 = min(sw - 1, x0 + 1)
-    y1 = min(sh - 1, y0 + 1)
-    tx = x - x0
-    ty = y - y0
-    def lerp(a, b, t):
-        return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
-    c0 = lerp(rows[y0][x0], rows[y0][x1], tx)
-    c1 = lerp(rows[y1][x0], rows[y1][x1], tx)
-    return lerp(c0, c1, ty)
-
-
-def _lum(c):
-    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
-
-
-def _grade_pixel(c, mean_lum, target, contrast, sat):
-    r, g, b = c
-    lum = _lum(c)
-    r = lum + (r - lum) * sat
-    g = lum + (g - lum) * sat
-    b = lum + (b - lum) * sat
-    # Atlas wood/plaster stays warm. Cool pixels get pulled off concrete grey.
-    if b > r:
-        r, g, b = r * 1.12, g * 1.02, b * 0.82
-    lum = max(_lum((r, g, b)), 1e-5)
-    rel = lum / max(mean_lum, 1e-5)
-    rel = 1.0 + (rel - 1.0) * contrast
-    out = max(0.025, min(0.48, target * rel))
-    scale = out / lum
-    return (r * scale, g * scale, b * scale, out)
-
-
-def _mean_lum(rows):
-    s = 0.0
-    n = 0
-    for row in rows:
-        for c in row:
-            s += _lum(c)
-            n += 1
-    return s / max(n, 1)
-
-
-def _paint_from_rows(rows, target, contrast, sat, rough_bias, rough_gain):
-    """One metre tile. V stacks the atlas patch (plank width / wall height)."""
-    alb = _buf()
-    rough = _buf()
-    height = [0.0] * (TEX * TEX)
-    mean = _mean_lum(rows)
-    for y in range(TEX):
-        v = y / TEX
-        # Soften the repeat so the patch join is not a hard cut.
-        vf = v
-        if v < 0.06:
-            t = v / 0.06
-            blend = 1.0 - t
-        elif v > 0.94:
-            t = (v - 0.94) / 0.06
-            blend = t
-        else:
-            blend = 0.0
-        for x in range(TEX):
-            u = x / TEX
-            c = _sample_rows(rows, u, vf)
-            if blend > 0.0:
-                c2 = _sample_rows(rows, u, 0.5)
-                c = (
-                    c[0] * (1.0 - blend) + c2[0] * blend,
-                    c[1] * (1.0 - blend) + c2[1] * blend,
-                    c[2] * (1.0 - blend) + c2[2] * blend,
-                )
-            r, g, b, out = _grade_pixel(c, mean, target, contrast, sat)
-            _put(alb, x, y, r, g, b)
-            # Brighter plank face is smoother; dark seams stay matte.
-            rel = out / max(target, 1e-5)
-            rv = rough_bias - rough_gain * max(0.0, min(1.0, (rel - 0.75) / 0.6))
-            rv = max(0.28, min(0.94, rv))
-            _put(rough, x, y, rv, rv, rv)
-            height[y * TEX + x] = rel
-    return alb, rough, _normals(height, 5.0)
-
-
-def _paint_floor():
-    """Shop-atlas cell 0 foreground planks. Not promenade concrete."""
-    buf, w, h = _load_shop_atlas()
-    rows = _grab_rect(buf, w, h, WOOD_RECT)
-    return _paint_from_rows(rows, target=0.20, contrast=1.45, sat=1.35, rough_bias=0.62, rough_gain=0.28)
-
-
-def _paint_plaster():
-    """Shop-atlas cell 0 plain wall. Warm interior plaster, not quay concrete."""
-    buf, w, h = _load_shop_atlas()
-    rows = _grab_rect(buf, w, h, WALL_RECT)
-    return _paint_from_rows(rows, target=0.12, contrast=2.2, sat=1.1, rough_bias=0.84, rough_gain=0.12)
-
-
-def _paint_timber():
-    """Same shop-atlas planks, a step darker, for counter, shelf, crates, stool."""
-    buf, w, h = _load_shop_atlas()
-    rows = _grab_rect(buf, w, h, WOOD_RECT)
-    return _paint_from_rows(rows, target=0.14, contrast=1.5, sat=1.4, rough_bias=0.55, rough_gain=0.22)
-
-
-def _paint_iron():
-    alb = _buf()
-    rough = _buf()
-    height = [0.0] * (TEX * TEX)
-    for y in range(TEX):
-        v = y / TEX
-        for x in range(TEX):
-            u = x / TEX
-            n = _fbm(u * 6.0, v * 6.0, 3.3) * 0.5 + 0.5
-            pit = _smooth(0.72, 0.88, n)
-            base = (0.16, 0.165, 0.175)
-            col = [base[i] * (0.70 + 0.35 * (1.0 - pit)) * (0.85 + 0.2 * n) for i in range(3)]
-            _put(alb, x, y, *col)
-            rv = 0.34 + pit * 0.45 + (n - 0.5) * 0.08
-            rv = max(0.22, min(0.92, rv))
-            _put(rough, x, y, rv, rv, rv)
-            height[y * TEX + x] = (1.0 - pit) * 0.45 + n * 0.15
-    return alb, rough, _normals(height, 5.0)
-
-
-def _paint_rug():
-    alb = _buf()
-    rough = _buf()
-    for y in range(TEX):
-        v = y / TEX
-        for x in range(TEX):
-            u = x / TEX
-            weave = _fbm(u * 18.0, v * 18.0, 9.1, octaves=2) * 0.5 + 0.5
-            stain = _fbm(u * 2.0, v * 2.0, 4.8) * 0.5 + 0.5
-            du, dv = u - 0.5, v - 0.5
-            center = max(0.0, 1.0 - math.sqrt(du * du + dv * dv) * 1.6)
-            base = (0.075, 0.032, 0.028)
-            border = _smooth(0.08, 0.0, min(u, v, 1.0 - u, 1.0 - v))
-            stripe = 0.75 + 0.25 * (0.5 + 0.5 * math.sin(v * 7.0 * math.tau))
-            col = [base[i] * (0.7 + 0.5 * weave) * (0.8 + 0.35 * stain) * stripe for i in range(3)]
-            col = [c * (1.0 - 0.45 * border) for c in col]
-            col = [min(1.0, c + 0.035 * center) for c in col]
-            _put(alb, x, y, *col)
-            rv = 0.92 - 0.18 * center
-            _put(rough, x, y, rv, rv, rv)
-    return alb, rough
-
-
-def _paint_cloth():
-    alb = _buf()
-    rough = _buf()
-    for y in range(TEX):
-        v = y / TEX
-        for x in range(TEX):
-            u = x / TEX
-            weave = 0.5 + 0.5 * math.sin((u * 36.0) * math.tau) * math.sin((v * 36.0) * math.tau)
-            n = _fbm(u * 3.0, v * 3.0, 21.0) * 0.5 + 0.5
-            base = (0.055, 0.052, 0.064)
-            col = [base[i] * (0.8 + 0.35 * weave) * (0.85 + 0.25 * n) for i in range(3)]
-            _put(alb, x, y, *col)
-            _put(rough, x, y, 0.86, 0.86, 0.86)
-    return alb, rough
-
-
-def _paint_paper():
-    alb = _buf()
-    rough = _buf()
-    for y in range(TEX):
-        v = y / TEX
-        for x in range(TEX):
-            u = x / TEX
-            n = _fbm(u * 8.0, v * 3.0, 17.0, octaves=3) * 0.5 + 0.5
-            fibre = _noise(u * 50.0, v * 20.0, 2.2) * 0.5 + 0.5
-            base = (0.155, 0.125, 0.085)
-            col = [base[i] * (0.82 + 0.28 * n) + (fibre - 0.5) * 0.015 for i in range(3)]
-            _put(alb, x, y, *[max(0.0, min(1.0, c)) for c in col])
-            _put(rough, x, y, 0.78, 0.78, 0.78)
-    return alb, rough
-
-
-def _scale_albedo(buf, gain):
-    out = _buf()
-    for i in range(0, len(buf), 4):
-        out[i] = buf[i] * gain
-        out[i + 1] = buf[i + 1] * gain
-        out[i + 2] = buf[i + 2] * gain
-        out[i + 3] = 1.0
-    return out
-
-
-def make_tex_mat(name, albedo, rough, normal=None, metal=0.0, specular=0.4):
-    mat = make_mat(name, (1, 1, 1), metal=metal, specular=specular)
+def make_photo_mat(name, image, rough=0.88, specular=0.1, extension="REPEAT"):
+    """Base color only. A generated normal fights the photograph."""
+    mat = make_mat(name, (1, 1, 1), rough=rough, specular=specular)
     nt = mat.node_tree
     bsdf = nt.nodes.get("Principled BSDF")
     uv = nt.nodes.new("ShaderNodeUVMap")
     uv.uv_map = "UVMap"
-    uv.location = (-640, 0)
-
-    def tex(img, loc):
-        node = nt.nodes.new("ShaderNodeTexImage")
-        node.image = img
-        node.interpolation = "Smart"
-        node.extension = "REPEAT"
-        node.location = loc
-        nt.links.new(uv.outputs["UV"], node.inputs["Vector"])
-        return node
-
-    c = tex(albedo, (-360, 180))
-    nt.links.new(c.outputs["Color"], bsdf.inputs["Base Color"])
-    r = tex(rough, (-360, -40))
-    nt.links.new(r.outputs["Color"], bsdf.inputs["Roughness"])
-    if normal is not None:
-        n = tex(normal, (-360, -280))
-        nm = nt.nodes.new("ShaderNodeNormalMap")
-        nm.space = "TANGENT"
-        nm.location = (-80, -280)
-        nt.links.new(n.outputs["Color"], nm.inputs["Color"])
-        nt.links.new(nm.outputs["Normal"], bsdf.inputs["Normal"])
+    uv.location = (-480, 40)
+    node = nt.nodes.new("ShaderNodeTexImage")
+    node.image = image
+    node.interpolation = "Linear"
+    node.extension = extension
+    node.location = (-220, 40)
+    nt.links.new(uv.outputs["UV"], node.inputs["Vector"])
+    nt.links.new(node.outputs["Color"], bsdf.inputs["Base Color"])
     return mat
 
 
@@ -431,37 +200,6 @@ def add_box(name, loc, dims, mat):
     ob.name = name
     ob.dimensions = dims
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    ob.data.materials.append(mat)
-    return ob
-
-
-def add_cyl(name, loc, radius, depth, mat, verts=8):
-    bpy.ops.mesh.primitive_cylinder_add(
-        vertices=verts, radius=radius, depth=depth, location=loc
-    )
-    ob = bpy.context.active_object
-    ob.name = name
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    for poly in ob.data.polygons:
-        poly.use_smooth = True
-    ob.data.materials.append(mat)
-    return ob
-
-
-def add_torus(name, loc, major, minor, mat):
-    bpy.ops.mesh.primitive_torus_add(
-        location=loc,
-        rotation=(math.radians(90), 0.0, 0.0),
-        major_radius=major,
-        minor_radius=minor,
-        major_segments=12,
-        minor_segments=6,
-    )
-    ob = bpy.context.active_object
-    ob.name = name
-    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-    for poly in ob.data.polygons:
-        poly.use_smooth = True
     ob.data.materials.append(mat)
     return ob
 
@@ -492,191 +230,50 @@ def add_area(name, loc, rot, color, energy, size_x, size_y):
     return ob
 
 
-def furnish(timber, iron, rug, cloth, paper):
-    """Lived-in shop clutter. Stays inside the room; opening metrics are untouched."""
-    amber = make_mat("Amber", (0.16, 0.07, 0.03), rough=0.32, specular=0.55)
-    green = make_mat("GreenWare", (0.045, 0.07, 0.05), rough=0.4, specular=0.48)
-    cream = make_mat("CreamWare", (0.18, 0.16, 0.12), rough=0.5, specular=0.42)
-    top = 0.9275
-
-    add_box("Rug", (0.02, 0.78, 0.008), (0.92, 1.05, 0.012), rug)
-    add_box("BaseBack", (0.05, D - 0.025, 0.045), (W - 0.2, 0.02, 0.09), timber)
-    add_box("BaseRight", (W * 0.5 - 0.02, 1.05, 0.045), (0.02, 1.9, 0.09), timber)
-
-    # Stool in the opening view, in front of the counter.
-    add_box("StoolSeat", (-0.02, 0.92, 0.46), (0.34, 0.32, 0.04), timber)
-    for i, (x, y) in enumerate(((-0.12, 0.82), (0.08, 0.82), (-0.12, 1.02), (0.08, 1.02))):
-        add_box(f"StoolLeg{i}", (x, y, 0.22), (0.035, 0.035, 0.44), timber)
-    add_box("StoolBack", (-0.02, 1.06, 0.66), (0.32, 0.03, 0.28), timber)
-
-    add_box("FloorCrate", (-0.78, 0.55, 0.14), (0.32, 0.28, 0.28), timber)
-    add_box("FloorCrateB", (0.62, 0.42, 0.11), (0.28, 0.24, 0.22), timber)
-    add_box("Sack", (-0.48, 0.38, 0.07), (0.26, 0.20, 0.12), cloth)
-    add_box("BootA", (0.42, 0.22, 0.035), (0.08, 0.18, 0.06), timber)
-    add_box("BootB", (0.52, 0.24, 0.035), (0.08, 0.16, 0.06), timber)
-    add_cyl("Bucket", (-0.98, 1.02, 0.11), 0.09, 0.20, iron, verts=10)
-    add_torus("Rope", (-0.82, 1.05, 0.04), 0.07, 0.018, cloth)
-
-    # Counter top — clear of the practical at (0.10, 1.38, 1.00).
-    add_cyl("Mug", (-0.48, 1.52, top + 0.04), 0.038, 0.075, cream, verts=10)
-    add_box("Ledger", (-0.72, 1.78, top + 0.012), (0.20, 0.14, 0.02), paper)
-    add_box("Ledger2", (-0.70, 1.80, top + 0.03), (0.16, 0.11, 0.012), paper)
-    add_cyl("CounterTin", (0.22, 1.62, top + 0.045), 0.04, 0.08, iron, verts=8)
-    add_box("CounterCloth", (-0.18, 1.88, top + 0.012), (0.18, 0.12, 0.018), cloth)
-    add_cyl("Bowl", (0.24, 1.82, top + 0.02), 0.07, 0.035, cream, verts=10)
-
-    # Shelf: bottles, books, boxes. Board tops sit just above 0.46 / 0.96 / 1.46.
-    ceramics = (amber, green, cream, amber)
-    for i, y in enumerate((0.86, 1.04, 1.20, 1.36)):
-        add_cyl(f"Bottle{i}", (1.00, y, 0.56), 0.028, 0.15, ceramics[i], verts=8)
-    add_box("Books", (1.00, 0.90, 1.04), (0.14, 0.16, 0.10), paper)
-    add_box("BookLean", (1.00, 1.08, 1.02), (0.10, 0.14, 0.07), timber)
-    add_box("ShelfBox", (1.00, 1.28, 1.05), (0.15, 0.13, 0.12), timber)
-    add_cyl("Jar", (1.00, 1.40, 1.04), 0.045, 0.10, green, verts=8)
-    add_box("ShelfCrate", (1.00, 1.02, 1.56), (0.14, 0.16, 0.12), timber)
-    add_box("ShelfBoxHigh", (1.00, 1.28, 1.54), (0.12, 0.12, 0.10), paper)
-
-    # Back wall, in the opening's view.
-    add_box("Frame", (-0.48, D - 0.03, 1.48), (0.42, 0.02, 0.52), frame_mat())
-    add_box("FramePaper", (-0.48, D - 0.045, 1.48), (0.30, 0.012, 0.38), paper)
-    add_box("Coat", (0.28, D - 0.04, 1.05), (0.26, 0.025, 0.62), cloth)
-    add_cyl("CoatHook", (0.28, D - 0.03, 1.40), 0.015, 0.04, iron, verts=6)
-    add_box("Ledge", (-0.05, D - 0.08, 0.78), (0.55, 0.12, 0.02), timber)
-    add_cyl("LedgeTinA", (-0.18, D - 0.10, 0.84), 0.035, 0.08, iron, verts=8)
-    add_cyl("LedgeTinB", (0.05, D - 0.10, 0.86), 0.03, 0.11, amber, verts=8)
-
-
-def frame_mat():
-    # Shared dark frame. Created once.
-    existing = bpy.data.materials.get("Frame")
-    if existing:
-        return existing
-    return make_mat("Frame", (0.03, 0.032, 0.04), rough=0.55, metal=0.15, specular=0.35)
-
-
 def build_surfaces():
-    """Night-range albedo. Grit and wear live in the textures, not a brighter base."""
-    print("A01 painting surfaces", flush=True)
-    f_alb, f_rgh, f_nrm = _paint_floor()
-    p_alb, p_rgh, p_nrm = _paint_plaster()
-    t_alb, t_rgh, t_nrm = _paint_timber()
-    i_alb, i_rgh, i_nrm = _paint_iron()
-    r_alb, r_rgh = _paint_rug()
-    c_alb, c_rgh = _paint_cloth()
-    a_alb, a_rgh = _paint_paper()
-    floor = _image("FloorAlb", f_alb, "sRGB")
-    floor_r = _image("FloorRgh", f_rgh, "Non-Color")
-    floor_n = _image("FloorNrm", f_nrm, "Non-Color")
-    plaster = _image("PlasterAlb", p_alb, "sRGB")
-    plaster_r = _image("PlasterRgh", p_rgh, "Non-Color")
-    plaster_n = _image("PlasterNrm", p_nrm, "Non-Color")
-    niche_alb = _image("NicheAlb", _scale_albedo(p_alb, 0.55), "sRGB")
-    timber = _image("TimberAlb", t_alb, "sRGB")
-    timber_r = _image("TimberRgh", t_rgh, "Non-Color")
-    timber_n = _image("TimberNrm", t_nrm, "Non-Color")
-    iron_a = _image("IronAlb", i_alb, "sRGB")
-    iron_r = _image("IronRgh", i_rgh, "Non-Color")
-    iron_n = _image("IronNrm", i_nrm, "Non-Color")
-    rug_a = _image("RugAlb", r_alb, "sRGB")
-    rug_r = _image("RugRgh", r_rgh, "Non-Color")
-    cloth_a = _image("ClothAlb", c_alb, "sRGB")
-    cloth_r = _image("ClothRgh", c_rgh, "Non-Color")
-    paper_a = _image("PaperAlb", a_alb, "sRGB")
-    paper_r = _image("PaperRgh", a_rgh, "Non-Color")
+    """Photographic atlas cells. No graded grit, no generated normals."""
+    print("A01 sampling shop atlas cell", SHOP_CELL, flush=True)
+    floor_img = extract_atlas_image(
+        "AtlasFloorImg", SHOP_ATLAS, SHOP_COLS, SHOP_ROWS, SHOP_CELL, FLOOR_RECT
+    )
+    wall_img = extract_atlas_image(
+        "AtlasWallImg", SHOP_ATLAS, SHOP_COLS, SHOP_ROWS, SHOP_CELL, WALL_RECT, soften=64
+    )
+    room_img = extract_atlas_image(
+        "AtlasRoomImg", SHOP_ATLAS, SHOP_COLS, SHOP_ROWS, SHOP_CELL, PLATE_RECT
+    )
     return {
-        "floor": make_tex_mat("Floor", floor, floor_r, floor_n, specular=0.5),
-        "wall": make_tex_mat("Wall", plaster, plaster_r, plaster_n, specular=0.28),
-        "niche": make_tex_mat("Niche", niche_alb, plaster_r, plaster_n, specular=0.22),
-        "ceiling": make_tex_mat("Ceiling", plaster, plaster_r, plaster_n, specular=0.22),
-        "timber": make_tex_mat("Timber", timber, timber_r, timber_n, specular=0.46),
-        "iron": make_tex_mat("Iron", iron_a, iron_r, iron_n, metal=0.78, specular=0.5),
-        "rug": make_tex_mat("Rug", rug_a, rug_r, specular=0.18),
-        "cloth": make_tex_mat("Cloth", cloth_a, cloth_r, specular=0.2),
-        "paper": make_tex_mat("Paper", paper_a, paper_r, specular=0.22),
-        "frame": make_tex_mat("Frame", iron_a, iron_r, iron_n, metal=0.12, specular=0.32),
+        "floor": make_photo_mat("AtlasFloor", floor_img, rough=0.72, specular=0.16, extension="MIRROR"),
+        "wall": make_photo_mat("AtlasWall", wall_img, rough=0.9, specular=0.08, extension="MIRROR"),
+        "room": make_photo_mat("AtlasRoom", room_img, rough=0.84, specular=0.1, extension="EXTEND"),
     }
 
 
 def build_room():
-    # Night-ink shell. Albedo stays dark so the lightmap still carries the read.
+    # The opening frames one photographic shop. Contents live in the atlas
+    # plate — not as low-poly props. Lights stay; their meshes do not.
     s = build_surfaces()
-    wall, niche, floor = s["wall"], s["niche"], s["floor"]
-    ceiling, timber, iron = s["ceiling"], s["timber"], s["iron"]
-    rug, cloth, paper, frame = s["rug"], s["cloth"], s["paper"], s["frame"]
+    floor, wall, room = s["floor"], s["wall"], s["room"]
     facade = make_mat("Facade", (0.040, 0.044, 0.055), rough=0.86)
     stoop = make_mat("Stoop", (0.035, 0.038, 0.048), rough=0.9)
-    shade = make_mat(
-        "LampShade",
-        (0.22, 0.12, 0.05),
-        rough=0.45,
-        emit=(1.0, 0.62, 0.22),
-        emit_strength=4.0,
-    )
-    bulb = make_mat(
-        "LampBulb",
-        (0.40, 0.28, 0.12),
-        rough=0.3,
-        emit=(1.0, 0.74, 0.32),
-        emit_strength=18.0,
-    )
+    frame = make_mat("Frame", (0.03, 0.032, 0.04), rough=0.55, metal=0.15, specular=0.35)
 
     # Shell ----------------------------------------------------------------
     add_box("Floor", (0, D * 0.5, -0.03), (W, D, 0.06), floor)
-    add_box("Ceiling", (0, D * 0.5, H + 0.03), (W, D, 0.06), ceiling)
+    add_box("Ceiling", (0, D * 0.5, H + 0.03), (W, D, 0.06), wall)
     add_box("BackWall", (0, D + T * 0.5, H * 0.5), (W, T, H), wall)
     add_box("RightWall", (W * 0.5 + T * 0.5, D * 0.5, H * 0.5), (T, D, H), wall)
+    add_box("LeftWall", (-W * 0.5 - T * 0.5, D * 0.5, H * 0.5), (T, D, H), wall)
 
-    # Left wall split around the bollard niche (open to the floor).
-    ny = NICHE_Y1 - NICHE_Y0
+    # Photographic interior, flush to the back wall. The crop already drops
+    # the photo's floor so this plate meets the atlas floor instead of doubling it.
+    plate_h = H - 0.01
     add_box(
-        "LeftWallFront",
-        (-W * 0.5 - T * 0.5, NICHE_Y0 * 0.5, H * 0.5),
-        (T, NICHE_Y0, H),
-        wall,
+        "RoomPlate",
+        (0.0, D - 0.04, plate_h * 0.5 + 0.004),
+        (W - 0.02, 0.012, plate_h),
+        room,
     )
-    back_len = D - NICHE_Y1
-    add_box(
-        "LeftWallBack",
-        (-W * 0.5 - T * 0.5, NICHE_Y1 + back_len * 0.5, H * 0.5),
-        (T, back_len, H),
-        wall,
-    )
-    above_h = H - NICHE_Z1
-    add_box(
-        "LeftWallAbove",
-        (-W * 0.5 - T * 0.5, NICHE_Y0 + ny * 0.5, NICHE_Z1 + above_h * 0.5),
-        (T, ny, above_h),
-        wall,
-    )
-    recess = (-W * 0.5) - NICHE_X_BACK  # positive depth
-    mid_x = (NICHE_X_BACK + (-W * 0.5)) * 0.5
-    add_box(
-        "NicheBack",
-        (NICHE_X_BACK - T * 0.5, NICHE_Y0 + ny * 0.5, NICHE_Z1 * 0.5),
-        (T, ny, NICHE_Z1),
-        niche,
-    )
-    add_box(
-        "NicheSideA",
-        (mid_x, NICHE_Y0 - T * 0.5, NICHE_Z1 * 0.5),
-        (recess, T, NICHE_Z1),
-        niche,
-    )
-    add_box(
-        "NicheSideB",
-        (mid_x, NICHE_Y1 + T * 0.5, NICHE_Z1 * 0.5),
-        (recess, T, NICHE_Z1),
-        niche,
-    )
-    add_box(
-        "NicheTop",
-        (mid_x, NICHE_Y0 + ny * 0.5, NICHE_Z1 + T * 0.5),
-        (recess, ny, T),
-        niche,
-    )
-    bollard_y = (NICHE_Y0 + NICHE_Y1) * 0.5
-    add_cyl("Bollard", (mid_x, bollard_y, 0.26), 0.080, 0.52, iron, verts=8)
-    add_cyl("BollardCap", (mid_x, bollard_y, 0.55), 0.105, 0.055, iron, verts=8)
 
     # Fenestra — dark street wall + jamb returns. Opening faces -Y (street).
     facade_y = -0.07
@@ -739,28 +336,8 @@ def build_room():
     # Stoop outside the opening — catches cool spill.
     add_box("Stoop", (0, -0.62, -0.02), (2.10, 0.95, 0.08), stoop)
 
-    # Counter with a toe-kick so the overhang bakes a crease.
-    add_box("CounterBase", (-0.32, 1.66, 0.38), (1.08, 0.58, 0.76), timber)
-    add_box("CounterTop", (-0.32, 1.60, 0.90), (1.28, 0.78, 0.055), timber)
-
-    # Shelf against the right wall.
-    add_box("ShelfBack", (1.145, 1.12, 0.95), (0.035, 0.82, 1.70), timber)
-    add_box("ShelfUprightA", (1.02, 0.74, 0.95), (0.20, 0.035, 1.70), timber)
-    add_box("ShelfUprightB", (1.02, 1.50, 0.95), (0.20, 0.035, 1.70), timber)
-    for i, z in enumerate((0.46, 0.96, 1.46)):
-        add_box(f"ShelfBoard{i}", (1.02, 1.12, z), (0.22, 0.74, 0.028), timber)
-
-    furnish(timber, iron, rug, cloth, paper)
-
-    # Practicals. Shades sit above the point lights so the pool is not sealed in.
-    add_cyl("PendantShade", (-0.40, 1.55, 1.88), 0.15, 0.045, shade, verts=12)
-    add_cyl("PendantBulb", (-0.40, 1.55, 1.78), 0.035, 0.05, bulb, verts=8)
-    add_box("SconcePlate", (0.62, D - 0.02, 1.52), (0.16, 0.03, 0.22), shade)
-    add_cyl("SconceBulb", (0.62, D - 0.06, 1.52), 0.028, 0.04, bulb, verts=8)
-    add_cyl("CounterBulb", (0.10, 1.38, 1.00), 0.03, 0.045, bulb, verts=8)
-    add_cyl("CounterShade", (0.10, 1.38, 1.06), 0.07, 0.03, shade, verts=10)
-
-    # Lights (not joined). Watts tuned for a night room: warm pools, cool spill.
+    # Lights (not joined). Watts and positions are the ones already framed.
+    # No bulb meshes — those read as greybox in front of the photograph.
     add_point("LightPendant", (-0.40, 1.55, 1.64), (1.0, 0.64, 0.24), 110, 0.10)
     add_point("LightSconce", (0.62, D - 0.22, 1.48), (1.0, 0.58, 0.22), 28, 0.06)
     add_point("LightCounter", (0.10, 1.32, 1.02), (1.0, 0.72, 0.34), 16, 0.04)
@@ -822,6 +399,7 @@ def unwrap(bay):
         bay.data.uv_layers.new(name="Lightmap")
     bay.data.uv_layers["Lightmap"].active_render = True
     box_project_uv(bay, "UVMap")
+    assign_photo_uvs(bay)
     bay.data.uv_layers["UVMap"].active = True
     return bay
 
@@ -850,6 +428,35 @@ def box_project_uv(bay, uv_name):
                 u, v = co.x, 0.40 + (co.y / D) * 0.35
             elif name in plaster_names and vertical:
                 v = v / H
+            uv.data[li].uv = (u, v)
+
+
+def assign_photo_uvs(bay):
+    """Unique photographic mapping. Runs after the lightmap UV is copied off."""
+    mesh = bay.data
+    uv = mesh.uv_layers["UVMap"]
+    for poly in mesh.polygons:
+        mat = mesh.materials[poly.material_index] if mesh.materials else None
+        name = mat.name if mat else ""
+        if not name.startswith("Atlas"):
+            continue
+        n = poly.normal
+        ax, ay, az = abs(n.x), abs(n.y), abs(n.z)
+        for li in poly.loop_indices:
+            co = mesh.vertices[mesh.loops[li].vertex_index].co
+            if name == "AtlasRoom":
+                # Full plate. v grows with height so the photo's ceiling stays up.
+                u = (co.x + W * 0.5) / W
+                v = co.z / H
+            elif name == "AtlasFloor":
+                u = (co.x + W * 0.5) / FLOOR_TILE_U
+                v = co.y / FLOOR_TILE_V
+            elif az >= ax and az >= ay:
+                u, v = (co.x + W * 0.5) / 1.8, co.y / 1.8
+            elif ay >= ax:
+                u, v = (co.x + W * 0.5) / 1.6, co.z / 1.6
+            else:
+                u, v = co.y / 1.6, co.z / 1.6
             uv.data[li].uv = (u, v)
 
 
@@ -995,6 +602,24 @@ def save_png(img, path, colorspace):
     print(f"A01 wrote {path} ({len(png)} bytes)", flush=True)
 
 
+def quantize_float_images():
+    """8-bit packed copies so quay-bay.blend does not keep 2048² float buffers."""
+    for img in list(bpy.data.images):
+        if img.size[0] < 2 or not getattr(img, "is_float", False):
+            continue
+        w, h = img.size
+        name = img.name
+        cs = img.colorspace_settings.name
+        src = array.array("f", img.pixels[:])
+        dst = bpy.data.images.new(name + "__8", w, h, alpha=True, float_buffer=False)
+        dst.colorspace_settings.name = cs
+        dst.pixels.foreach_set(src)
+        dst.pack()
+        img.user_remap(dst)
+        bpy.data.images.remove(img)
+        dst.name = name
+
+
 def strip_bake_nodes(bay):
     for slot in bay.material_slots:
         nt = slot.material.node_tree
@@ -1022,6 +647,7 @@ def export_assets(scene, bay, stats):
         export_apply=True,
     )
     print(f"A01 wrote {glb}", flush=True)
+    quantize_float_images()
 
     manifest = {
         "name": "quay-bay",
@@ -1042,11 +668,14 @@ def export_assets(scene, bay, stats):
         "uv0": "UVMap",
         "uv1": "Lightmap",
         "atlas": {
-            "shop": "06-intermediate-assets/shop-atlas.png",
-            "occupied": "06-intermediate-assets/room-atlas-occupied-32.png",
-            "floor": "shop-atlas cell 0 foreground wood planks",
-            "walls": "shop-atlas cell 0 plain plaster",
-            "timber": "same shop-atlas planks, darker",
+            "shop": os.path.relpath(SHOP_ATLAS, ROOT),
+            "occupied": os.path.relpath(ROOM_ATLAS, ROOT),
+            "shopCell": SHOP_CELL,
+            "shopCellCol": SHOP_CELL % SHOP_COLS,
+            "shopCellRow": SHOP_CELL // SHOP_COLS,
+            "room": "shop-atlas cell 6 photographic interior, floor band cropped off the plate",
+            "floor": "shop-atlas cell 6 foreground — interior floor, not promenade concrete",
+            "walls": "shop-atlas cell 6 upper interior, softened",
         },
         "bake": {
             "engine": "Cycles",
@@ -1068,7 +697,28 @@ def export_assets(scene, bay, stats):
 
 
 def render_previews(scene):
-    """Live-light stills so clutter and grit can be judged before the bake."""
+    """Live-light stills so the photographic plate can be judged before the bake."""
+    if os.environ.get("A01_ALBEDO") == "1":
+        for obj in scene.objects:
+            if obj.type == "LIGHT":
+                obj.data.energy = 0.0
+        for mat in bpy.data.materials:
+            nt = mat.node_tree
+            if not nt:
+                continue
+            bsdf = nt.nodes.get("Principled BSDF")
+            if bsdf is None:
+                continue
+            src = None
+            for link in nt.links:
+                if link.to_socket == bsdf.inputs["Base Color"]:
+                    src = link.from_socket
+                    break
+            if src is not None:
+                nt.links.new(src, bsdf.inputs["Emission Color"])
+            else:
+                bsdf.inputs["Emission Color"].default_value = bsdf.inputs["Base Color"].default_value
+            bsdf.inputs["Emission Strength"].default_value = 1.0
     scene.render.image_settings.file_format = "PNG"
     scene.render.resolution_x = 720
     scene.render.resolution_y = 480
