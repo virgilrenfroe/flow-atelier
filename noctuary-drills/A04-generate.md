@@ -30,6 +30,16 @@ node noctuary/district-massing.check.mjs
 
 `window.__harborMassing` reports instance counts, slice totals, and `corridorsClear`.
 
+## Harbor view
+
+Exhibit chrome stays off (`hud` default). `?generate=1` at the usual Harbor camera:
+
+![Harbor desktop with procedural massing](a04-harbor-massing-desktop.png)
+
+Same pass after a short orbit. Street corridors stay open between the sliced masses:
+
+![Street corridors in the generated district](a04-harbor-massing-corridors.png)
+
 ## Left alone
 
 - `quay-crate` / `quay-iron` atlas wiring and `streetPack` / prop-wear hunks
