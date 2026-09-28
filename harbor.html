@@ -8167,20 +8167,25 @@ stillComposer.addPass(new OutputPass());
 // ——— A03 · Signal volume air ———
 // Raymarched umber shafts on the beacon. Separate pass: does not rewrite
 // sheath, asphalt, quay, water, lanterns, pennants, or the ember Points.
+// ?volume=0|off hard off · ?volumeDebug=1 · ?volumeQuality=low|med|high
+// Tiers stay on the volume module until A05 calls setQuality / applyPerfTier.
 const volumeParam = params.get('volume');
+const volumeDebugParam = params.get('volumeDebug');
 const signalVolume = mountSignalVolume({
   camera,
   composers: [finalComposer, stillComposer],
   enabled: volumeParam !== '0' && volumeParam !== 'off',
-  debug: volumeParam === 'mask',
+  hardOff: volumeParam === '0' || volumeParam === 'off',
+  debug: volumeParam === 'mask' || volumeDebugParam === '1' || volumeDebugParam === 'on',
+  quality: params.get('volumeQuality'),
   center: new THREE.Vector3(signalGroup.position.x, 3.72, signalGroup.position.z),
   lamp: new THREE.Vector3(signalGroup.position.x, 4.15, signalGroup.position.z),
-  half: new THREE.Vector3(1.15, 2.45, 0.95),
+  half: new THREE.Vector3(0.58, 2.5, 0.5),
 });
 window.__harborVolume = signalVolume;
 {
   const airEl = document.getElementById('air-state');
-  if (airEl) airEl.textContent = signalVolume.enabled ? 'Signal' : 'off';
+  if (airEl) airEl.textContent = signalVolume.enabled ? `Signal · ${signalVolume.quality}` : 'off';
 }
 
 function renderFrame() {
@@ -8719,7 +8724,7 @@ function updateDebugHud(fps) {
     `hitDist  ${dbgHitDist}  inst ${dbgInst}\n` +
     `room~    ${dbgRoomHint}\n` +
     `face~    ${dbgFaceHint}\n` +
-    `volume   ${signalVolume && signalVolume.enabled ? 'raymarch' : 'off'}\n` +
+    `volume   ${signalVolume && signalVolume.enabled ? signalVolume.quality + ' · ' + signalVolume.steps + 'st · spark ' + signalVolume.sparks : 'off'}\n` +
     `keys     V walk · T tour · ?debug=1`;
 }
 
