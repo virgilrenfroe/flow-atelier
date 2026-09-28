@@ -529,28 +529,43 @@ function addRoad(cx, cz, len, width, rotY) {
 
 function addSidewalk(cx, cz, sx, sz) {
   if (swN >= SW_MAX) return;
-  dummyR.position.set(cx, 0.03, cz);
+  // slabGeo is translated so local Y runs 0..1. The instance origin is the
+  // sole, and the tread is sole + full thickness. A half-thickness top
+  // (sole + 0.055/2) left crates 2.75cm inside the raised walk.
+  const soleY = 0.03;
+  const thick = 0.055;
+  dummyR.position.set(cx, soleY, cz);
   dummyR.rotation.set(0, 0, 0);
-  dummyR.scale.set(sx, 0.055, sz);
+  dummyR.scale.set(sx, thick, sz);
   dummyR.updateMatrix();
   sidewalks.setMatrixAt(swN++, dummyR.matrix);
-  // Box is centered on y=0.03, so the tread is half the thickness up.
   pavementCols.push({
     x: cx,
     z: cz,
     hx: sx * 0.5 + 0.03,
     hz: sz * 0.5 + 0.03,
-    top: 0.03 + 0.055 * 0.5,
+    top: soleY + thick,
   });
 }
 
 function addCurb(cx, cz, sx, sz) {
   if (curbN >= CURB_MAX) return;
-  dummyR.position.set(cx, 0.02, cz);
+  // Same bottom-aligned slab. The granite lip sits above the sidewalk tread
+  // (sole 0.02 + CURB_H 0.09 → 0.11). No collider here, so a crate on the
+  // curb rested on the road or the walk and the stone cut through it.
+  const soleY = 0.02;
+  dummyR.position.set(cx, soleY, cz);
   dummyR.rotation.set(0, 0, 0);
   dummyR.scale.set(sx, CURB_H, sz);
   dummyR.updateMatrix();
   curbs.setMatrixAt(curbN++, dummyR.matrix);
+  pavementCols.push({
+    x: cx,
+    z: cz,
+    hx: sx * 0.5,
+    hz: sz * 0.5,
+    top: soleY + CURB_H,
+  });
 }
 
 // Horizontal streets (along X) — GRID_ROWS+1 corridors
