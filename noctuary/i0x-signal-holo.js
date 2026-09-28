@@ -125,10 +125,6 @@ varying vec3 vNormalW;
 varying vec2 vUv;
 varying float vGlitch;
 
-float holoHash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
 vec3 srgbToLinear(vec3 c) {
   return mix(
     c * 0.0773993808,
@@ -138,17 +134,14 @@ vec3 srgbToLinear(vec3 c) {
 }
 
 void main() {
-  // 8-frame cycle, row-major, top row first. Frozen motion holds a stride.
+  // 16-frame cycle, row-major, top row first. A still holds the contact pose.
   float frame = floor(mod(uTime * uFps, uFrames));
-  if (uLive < 0.5) frame = 2.0;
+  if (uLive < 0.5) frame = 0.0;
   float colI = mod(frame, uGrid.x);
   float rowI = floor(frame / uGrid.x);
 
   vec2 cell = vUv;
-  // Short bar tear. Small, so the face does not smear into the next pose.
-  float slice = floor(cell.y * 14.0);
-  float gate = step(0.86, holoHash(vec2(slice, floor(uTime * (0.5 + 1.6 * uLive)))));
-  cell.x += (holoHash(vec2(slice, 3.1)) - 0.5) * 0.008 * gate;
+  // No slice tear on the plate. A torn boot reads as a pop, not a step.
   cell = clamp(cell, 0.0, 1.0);
 
   vec2 uv = vec2(
@@ -226,9 +219,9 @@ export function mountSignalHolo(opts) {
   sheath.userData.signalHolo = true;
   root.add(sheath);
 
-  // 4×2 walk cycle. flipY is on, so +V is the head — matches the box face UVs.
+  // 4×4 slow walk. flipY is on, so +V is the head — matches the box face UVs.
   const map = new THREE.TextureLoader().load(
-    new URL('./textures/signal-holo-cyber-man-walk.png?v=stride2', import.meta.url).href
+    new URL('./textures/signal-holo-cyber-man-walk.png?v=smooth16', import.meta.url).href
   );
   map.colorSpace = THREE.SRGBColorSpace;
   map.flipY = true;
@@ -240,11 +233,11 @@ export function mountSignalHolo(opts) {
     uTime: { value: 0 },
     uPulse: { value: 1 },
     uLive: { value: 1 },
-    uGlitchScale: { value: 0.08 },
+    uGlitchScale: { value: 0 },
     uMap: { value: map },
-    uGrid: { value: new THREE.Vector2(4, 2) },
-    uFrames: { value: 8 },
-    uFps: { value: 8 },
+    uGrid: { value: new THREE.Vector2(4, 4) },
+    uFrames: { value: 16 },
+    uFps: { value: 6 },
   };
   const panelMat = new THREE.ShaderMaterial({
     name: 'SignalHoloPanel',
