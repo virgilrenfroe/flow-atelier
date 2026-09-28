@@ -1,8 +1,7 @@
 /**
  * Signal hologram
  * Journey Shaders · Hologram — fresnel rim, scrolling scanlines, bar glitch.
- * Dedicated meshes: a mast sheath, a façade plate, and a vertical plane
- * that projects the cyber-man map. The sheath stays rim chrome.
+ * The mast sheath is rim chrome. The façade plate carries the cyber-man map.
  * Not bloom, not the A03 volume pass, not the circuit-moss façade atlas.
  *
  * Sliced Model was the other candidate. A moving clip would cut the beacon
@@ -109,8 +108,8 @@ void main() {
 }
 `;
 
-// Companion for the figure plane. Same scan, fresnel, and slice family as the
-// sheath, with the cyber-man map as the body. Near-black is punched out.
+// Façade plate only. Same scan, fresnel, and slice family as the sheath,
+// with the cyber-man map as the body. Near-black is punched out.
 const FIGURE_FRAG = /* glsl */`
 uniform float uTime;
 uniform float uPulse;
@@ -219,27 +218,14 @@ export function mountSignalHolo(opts) {
   sheath.userData.signalHolo = true;
   root.add(sheath);
 
-  // Façade plate beside the mast, toward the ?shot=signal camera and to its right.
-  // signalGroup is (−6.5, 0, 3.2); this local offset lands near (−4.9, 2.4, 2.85).
-  const panelGeo = new THREE.BoxGeometry(0.96, 1.72, 0.055, 8, 36, 1);
-  const panel = new THREE.Mesh(panelGeo, material);
-  panel.name = 'signal-holo-panel';
-  panel.position.set(1.58, 2.42, -0.35);
-  panel.rotation.y = 0.28;
-  panel.renderOrder = 3;
-  panel.userData.signalHolo = true;
-  root.add(panel);
-
-  // Full frame is 1280×720 with the figure in a portrait window of black.
-  // Inclusive pixel bounds of that window, then flipY so the head is +V.
+  // Full frame is 1280×720. The standing figure sits in a portrait window of black.
+  // flipY is on, so +V is the head — matches the box face UVs (v = 1 at the top).
   const imgW = 1280;
   const imgH = 720;
   const x0 = 440;
   const x1 = 838;
   const y0 = 23;
   const y1 = 687;
-  const figH = 2.15;
-  const figW = figH * ((x1 - x0) / (y1 - y0));
   const map = new THREE.TextureLoader().load(
     new URL('./textures/signal-holo-cyber-man.png', import.meta.url).href
   );
@@ -249,37 +235,38 @@ export function mountSignalHolo(opts) {
   map.wrapS = THREE.ClampToEdgeWrapping;
   map.wrapT = THREE.ClampToEdgeWrapping;
 
-  const figureUniforms = {
+  const panelUniforms = {
     uTime: { value: 0 },
     uPulse: { value: 1 },
     uLive: { value: 1 },
     uMap: { value: map },
     uCrop: { value: new THREE.Vector4(x0 / imgW, 1 - y1 / imgH, x1 / imgW, 1 - y0 / imgH) },
   };
-  const figureMat = new THREE.ShaderMaterial({
-    name: 'SignalHoloPlane',
-    uniforms: figureUniforms,
+  const panelMat = new THREE.ShaderMaterial({
+    name: 'SignalHoloPanel',
+    uniforms: panelUniforms,
     vertexShader: HOLO_VERT,
     fragmentShader: FIGURE_FRAG,
     transparent: true,
     depthWrite: false,
-    side: THREE.DoubleSide,
+    side: THREE.FrontSide,
     blending: THREE.NormalBlending,
     toneMapped: false,
   });
 
-  // Standing projection just outside the sheath, toward ?shot=holo and a
-  // step camera-left so the plate stays camera-right of the mast.
-  const planeGeo = new THREE.PlaneGeometry(figW, figH, 1, 40);
-  const plane = new THREE.Mesh(planeGeo, figureMat);
-  plane.name = 'signal-holo-plane';
-  plane.position.set(0.16, 0.88 + figH * 0.5, 0.82);
-  plane.rotation.y = 0.68;
-  plane.renderOrder = 3;
-  plane.userData.signalHolo = true;
-  // Beauty only. An opaque bloom stand-in would punch the beacon out.
-  plane.userData.signalHoloPlane = true;
-  root.add(plane);
+  // Façade plate beside the mast, toward the ?shot=signal camera and to its right.
+  // signalGroup is (−6.5, 0, 3.2); this local offset lands near (−4.9, 2.4, 2.85).
+  // Box groups: 0–3 are the thin edges (procedural rim), 4–5 are the plate faces.
+  const panelGeo = new THREE.BoxGeometry(0.96, 1.72, 0.055, 8, 36, 1);
+  const panel = new THREE.Mesh(panelGeo, [
+    material, material, material, material, panelMat, panelMat,
+  ]);
+  panel.name = 'signal-holo-panel';
+  panel.position.set(1.58, 2.42, -0.35);
+  panel.rotation.y = 0.28;
+  panel.renderOrder = 3;
+  panel.userData.signalHolo = true;
+  root.add(panel);
 
   root.visible = enabled0;
   parent.add(root);
@@ -291,7 +278,6 @@ export function mountSignalHolo(opts) {
     root,
     sheath,
     panel,
-    plane,
     setEnabled(on) {
       api.enabled = !!on;
       root.visible = api.enabled;
@@ -303,9 +289,9 @@ export function mountSignalHolo(opts) {
       uniforms.uTime.value = t;
       uniforms.uPulse.value = p;
       uniforms.uLive.value = liveV;
-      figureUniforms.uTime.value = t;
-      figureUniforms.uPulse.value = p;
-      figureUniforms.uLive.value = liveV;
+      panelUniforms.uTime.value = t;
+      panelUniforms.uPulse.value = p;
+      panelUniforms.uLive.value = liveV;
     },
   };
 

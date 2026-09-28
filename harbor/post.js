@@ -169,9 +169,8 @@ const darkPointsMat = new THREE.PointsMaterial({ color: 0x000000, size: 0.001, o
 const savedMats = new Map();
 
 function darkenNonBloomed(obj) {
-  // Air halo and the hologram figure are beauty-only. An opaque black
-  // stand-in would cover the filament or punch the beacon out of bloom.
-  if (obj.userData && (obj.userData.lanternAir || obj.userData.signalHoloPlane)) {
+  // Air halo is beauty-only. An opaque black stand-in would cover the filament.
+  if (obj.userData && obj.userData.lanternAir) {
     savedMats.set(obj.uuid, obj.material);
     obj.material = darkClearMat;
     return;
