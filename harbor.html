@@ -302,6 +302,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
+import { createHarborGlassShards, glassQuaternion } from './noctuary/glass-shards.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -5678,9 +5679,70 @@ function windApplyForces(t) {
 // Tossed crates, a grabbed shove, and the basin blast punch shop panes.
 // Shards join physCrates so the existing grab / toss path can pick them up.
 // Apartment rows are never masked. R clears the mask and the shards.
+// Debris is a thin irregular glass facet (noctuary/glass-shards.js), not a cube.
 const SHOP_GLASS_Y0 = 0.10;
 const SHOP_GLASS_Y1 = 0.70;
 const shopShards = [];
+let harborGlassKit = null;
+function harborGlass() {
+  if (!harborGlassKit) harborGlassKit = createHarborGlassShards(renderer);
+  return harborGlassKit;
+}
+
+function harborSpawnGlassShard(opts) {
+  const kit = harborGlass();
+  const built = kit.make({ span: opts.span, tint: opts.tint, rng: Math.random });
+  const mesh = new THREE.Mesh(built.geometry, built.material);
+  mesh.name = 'glass-shard';
+  mesh.renderOrder = 4;
+  const body = new CANNON.Body({
+    mass: physFreeze ? 0 : opts.mass,
+    material: physCrateMat,
+    shape: built.shape,
+    position: opts.position,
+    linearDamping: 0.14,
+    angularDamping: 0.2,
+    allowSleep: true,
+  });
+  if (opts.quaternion) {
+    body.quaternion.set(opts.quaternion.x, opts.quaternion.y, opts.quaternion.z, opts.quaternion.w);
+  }
+  if (!physFreeze && opts.velocity) body.velocity.copy(opts.velocity);
+  if (!physFreeze && opts.angularVelocity) body.angularVelocity.copy(opts.angularVelocity);
+  kit.stabilize(body);
+  const entry = physAdd(mesh, body, 'crate', opts.mass);
+  entry.shard = true;
+  entry.glassFacet = true;
+  entry.halfExtents = built.halfExtents;
+  entry.volume = built.volume;
+  entry.glassThickness = built.thickness;
+  entry.glassSpan = built.span;
+  entry.glassFacets = built.facets;
+  entry.density = opts.mass / Math.max(built.volume, 1e-4);
+  entry.densityLabel = 'glass';
+  // Sheet volume is far below a crate. Skip the crate buoyancy rescue so a
+  // flake does not buzz on the waterline. Mass and quay friction stay.
+  entry.floatable = false;
+  physCrates.push(entry);
+  return entry;
+}
+
+// Fast falls can step through a sheet. If a facet center drops through the
+// quay slab, sit it back on the deck. Off-slab shards (basin) are left alone.
+function glassCatchTunneledShards() {
+  const deck = 0.04;
+  for (let i = 0; i < physCrates.length; i++) {
+    const entry = physCrates[i];
+    if (!entry || !entry.glassFacet || !entry.body) continue;
+    const body = entry.body;
+    if (body.type !== CANNON.Body.DYNAMIC) continue;
+    const p = body.position;
+    if (Math.abs(p.x) > 11.2 || p.z < -0.75 || p.z > 5.95) continue;
+    if (p.y >= deck - 0.008) continue;
+    p.y = deck + Math.max(entry.glassThickness * 0.5, 0.006);
+    if (body.velocity.y < 0) body.velocity.y = 0;
+  }
+}
 
 function shopMarkBroken(id, face, slot) {
   if (id < 0 || id >= INSTANCE_COUNT || face < 0 || face > 3 || slot < 0 || slot > 15) return false;
@@ -5692,54 +5754,35 @@ function shopMarkBroken(id, face, slot) {
 }
 
 function shopSpawnShards(x, y, z, nx, ny, nz) {
-  const palette = [0xb8c4d8, 0x9aa8c0, 0xd5dde8, 0xf0c24b, 0x8a9bb0];
   for (let i = 0; i < 5; i++) {
-    const s = 0.045 + Math.random() * 0.06;
-    const sy = s * (0.55 + Math.random() * 0.5);
-    const sz = s * (0.7 + Math.random() * 0.45);
+    const span = 0.075 + Math.random() * 0.07;
     const mass = 0.12 + Math.random() * 0.16;
-    const color = palette[i % palette.length];
-    const mat = new THREE.MeshStandardMaterial({
-      color, roughness: 0.28 + Math.random() * 0.35, metalness: 0.08,
-      transparent: true, opacity: 0.88,
-      emissive: color, emissiveIntensity: 0.08,
-    });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, sy, sz), mat);
-    if (i % 2 === 0) mesh.layers.enable(BLOOM_LAYER);
-    const body = new CANNON.Body({
-      mass: physFreeze ? 0 : mass,
-      material: physCrateMat,
-      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5)),
+    const entry = harborSpawnGlassShard({
+      span,
+      tint: i,
+      mass,
       position: new CANNON.Vec3(
         x + nx * 0.05 + (Math.random() - 0.5) * 0.12,
-        y + (Math.random() - 0.5) * 0.12,
+        y + (Math.random() - 0.5) * 0.08,
         z + nz * 0.05 + (Math.random() - 0.5) * 0.12
       ),
-      linearDamping: 0.14,
-      angularDamping: 0.2,
-      allowSleep: true,
-    });
-    if (!physFreeze) {
-      body.velocity.set(
+      quaternion: glassQuaternion(
+        nx, ny, nz,
+        Math.random() * Math.PI * 2,
+        (Math.random() - 0.5) * 0.85
+      ),
+      velocity: new CANNON.Vec3(
         nx * (1.1 + Math.random() * 1.6) + (Math.random() - 0.5) * 1.4,
         ny + 0.8 + Math.random() * 1.6,
         nz * (1.1 + Math.random() * 1.6) + (Math.random() - 0.5) * 1.4
-      );
-      body.angularVelocity.set(
+      ),
+      angularVelocity: new CANNON.Vec3(
         (Math.random() - 0.5) * 8,
         (Math.random() - 0.5) * 8,
         (Math.random() - 0.5) * 8
-      );
-    }
-    const entry = physAdd(mesh, body, 'crate', mass);
-    entry.shard = true;
+      ),
+    });
     entry.shopGlass = true;
-    entry.halfExtents = new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5);
-    entry.volume = s * sy * sz;
-    entry.density = mass / Math.max(entry.volume, 1e-4);
-    entry.densityLabel = 'light';
-    entry.floatable = true;
-    physCrates.push(entry);
     shopShards.push(entry);
   }
 }
@@ -5886,7 +5929,14 @@ window.__shopGlass = {
       ok: true,
       broken: window.__shopGlass.broken(),
       shards: shopShards.length,
-      shard: shopShards[0] ? { shard: true, shopGlass: true, inCrates: physCrates.includes(shopShards[0]) } : null,
+      shard: shopShards[0] ? {
+        shard: true,
+        shopGlass: true,
+        inCrates: physCrates.includes(shopShards[0]),
+        facet: !!shopShards[0].glassFacet,
+        thickness: shopShards[0].glassThickness || 0,
+        span: shopShards[0].glassSpan || 0,
+      } : null,
     };
   },
 };
@@ -5907,6 +5957,7 @@ function physStep() {
   physWorld.fixedStep();
   for (const entry of physEntries) physSync(entry);
   shopGlassScan();
+  glassCatchTunneledShards();
   if (typeof physHooks.afterStep === 'function') physHooks.afterStep();
   if (typeof rubeTick === 'function') rubeTick();
   if ((physStep._n = (physStep._n || 0) + 1) % 5 === 0) refreshHarborPhysicsProbe();
@@ -7501,58 +7552,37 @@ function rubeShatter() {
   rubeVesselMesh.visible = false;
   for (const ch of rubeVesselMesh.children) ch.visible = false;
 
-  const palette = [0xb8c4d8, 0x8a7bb8, 0xf0c24b, 0xd4cbb8, 0x9aa8c0];
   const origin = rubeVesselMesh.position;
   for (let i = 0; i < 9; i++) {
-    const s = 0.06 + Math.random() * 0.09;
-    const mat = new THREE.MeshStandardMaterial({
-      color: palette[i % palette.length],
-      roughness: 0.35 + Math.random() * 0.4,
-      metalness: 0.05,
-      transparent: true,
-      opacity: 0.85,
-      emissive: palette[i % palette.length],
-      emissiveIntensity: 0.08,
-    });
-    const sy = s * (0.65 + Math.random() * 0.55);
-    const sz = s * (0.75 + Math.random() * 0.45);
+    const span = 0.08 + Math.random() * 0.08;
     const mass = 0.16 + Math.random() * 0.22;
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(s, sy, sz), mat);
-    if (i % 3 === 0) mesh.layers.enable(BLOOM_LAYER);
-    const body = new CANNON.Body({
-      mass: physFreeze ? 0 : mass,
-      material: physCrateMat,
-      shape: new CANNON.Box(new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5)),
+    const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+      Math.random() * Math.PI,
+      Math.random() * Math.PI,
+      Math.random() * Math.PI
+    ));
+    // Same entry as a quay crate: physEntry + physCrates so raycast grab/toss hits it.
+    const entry = harborSpawnGlassShard({
+      span,
+      tint: i,
+      mass,
       position: new CANNON.Vec3(
         origin.x + (Math.random() - 0.5) * 0.2,
         origin.y + (Math.random() - 0.3) * 0.2,
         origin.z + (Math.random() - 0.5) * 0.2
       ),
-      linearDamping: 0.14,
-      angularDamping: 0.2,
-      allowSleep: true,
-    });
-    if (!physFreeze) {
-      body.velocity.set(
+      quaternion: q,
+      velocity: new CANNON.Vec3(
         (Math.random() - 0.5) * 3.2,
         1.2 + Math.random() * 2.4,
         (Math.random() - 0.5) * 3.2
-      );
-      body.angularVelocity.set(
+      ),
+      angularVelocity: new CANNON.Vec3(
         (Math.random() - 0.5) * 8,
         (Math.random() - 0.5) * 8,
         (Math.random() - 0.5) * 8
-      );
-    }
-    // Same entry as a quay crate: physEntry + physCrates so raycast grab/toss hits it.
-    const entry = physAdd(mesh, body, 'crate', mass);
-    entry.shard = true;
-    entry.halfExtents = new CANNON.Vec3(s * 0.5, sy * 0.5, sz * 0.5);
-    entry.volume = s * sy * sz;
-    entry.density = mass / Math.max(entry.volume, 1e-4);
-    entry.densityLabel = 'light';
-    entry.floatable = true;
-    physCrates.push(entry);
+      ),
+    });
     rubeDebris.push(entry);
   }
   rubeHint('Shatter · fenestra debris');
@@ -7775,11 +7805,16 @@ function rubeFillProbe() {
     debris: rubeDebris.length,
     vesselVisible: rubeVesselMesh.visible,
     pickable: rubeDebris.filter((d) => d.kind === 'crate' && d.mass > 0 && d.mesh && d.mesh.userData.physEntry).length,
+    facet: rubeDebris.length > 0 && rubeDebris.every((d) => d.glassFacet),
     shards: rubeDebris.map((d) => ({
       x: +d.body.position.x.toFixed(3),
       y: +d.body.position.y.toFixed(3),
       z: +d.body.position.z.toFixed(3),
       mass: d.mass,
+      facet: !!d.glassFacet,
+      thickness: d.glassThickness ? +d.glassThickness.toFixed(4) : 0,
+      span: d.glassSpan ? +d.glassSpan.toFixed(3) : 0,
+      facets: d.glassFacets || 0,
     })),
   };
   if (window.__harborPhysics) {
@@ -7801,11 +7836,50 @@ window.__frameRube = (mode) => {
   } else if (mode === 'vessel' || mode === 'shatter') {
     camera.position.set(-2.8, 2.0, 5.8);
     controls.target.set(RUBE_VESSEL.x, 0.6, RUBE_VESSEL.z);
+  } else if (mode === 'glass') {
+    // Close deck read of shatter debris (thin faces, not the wide orbit).
+    camera.position.set(RUBE_VESSEL.x + 0.62, 0.78, RUBE_VESSEL.z + 0.92);
+    controls.target.set(RUBE_VESSEL.x + 0.02, 0.16, RUBE_VESSEL.z);
+  } else if (mode === 'glass-wide') {
+    camera.position.set(-2.55, 1.45, 4.85);
+    controls.target.set(RUBE_VESSEL.x, 0.32, RUBE_VESSEL.z);
   } else {
     camera.position.set(-1.5, 2.6, 7.0);
     controls.target.set(RUBE_PLATE.x, 0.4, RUBE_PLATE.z);
   }
   controls.update();
+};
+
+// Aim at shards that have landed (rube debris, else shop glass) for exhibit stills.
+window.__frameGlassPile = (wide) => {
+  const list = (typeof rubeDebris !== 'undefined' && rubeDebris.length) ? rubeDebris : shopShards;
+  const grounded = [];
+  for (const d of list) {
+    if (d && d.body && d.body.position.y < 0.42) grounded.push(d);
+  }
+  const use = grounded.length ? grounded : list;
+  let x = 0, y = 0, z = 0, n = 0;
+  for (const d of use) {
+    if (!d || !d.body) continue;
+    x += d.body.position.x;
+    y += d.body.position.y;
+    z += d.body.position.z;
+    n++;
+  }
+  if (!n) {
+    x = RUBE_VESSEL.x;
+    y = 0.12;
+    z = RUBE_VESSEL.z;
+  } else {
+    x /= n;
+    y /= n;
+    z /= n;
+  }
+  const dist = wide ? 2.2 : 1.28;
+  camera.position.set(x + dist * 0.38, 0.42 + dist * 0.38, z + dist * 0.82);
+  controls.target.set(x, 0.1, z);
+  controls.update();
+  return { x: +x.toFixed(3), y: +y.toFixed(3), z: +z.toFixed(3), n, wide: !!wide };
 };
 
 window.__springLive = {
