@@ -1,0 +1,32 @@
+{
+  "name": "quay-bay",
+  "units": "metres",
+  "gltf": "Y-up",
+  "opening": "plane z=0, interior extends -Z, floor y=0",
+  "roomW": 2.4,
+  "roomD": 2.1,
+  "roomH": 2.24,
+  "openL": -0.73,
+  "openR": 0.73,
+  "openW": 1.46,
+  "sill": 0.42,
+  "head": 1.96,
+  "lightmap": "quay-bay-lightmap.png",
+  "ao": "quay-bay-ao.png",
+  "combinedPreview": "quay-bay-combined.png",
+  "uv0": "UVMap",
+  "uv1": "Lightmap",
+  "bake": {
+    "engine": "Cycles",
+    "samples": 96,
+    "resolution": 1024,
+    "lightmap": "DIFFUSE direct+indirect, color pass off",
+    "ao": "AO",
+    "combined": "COMBINED preview only \u2014 not multiplied again in the drill",
+    "normalize": {
+      "scale": 0.404182947122652,
+      "p95_in": 2.8452462138414383,
+      "max_out": 2.1
+    }
+  }
+}

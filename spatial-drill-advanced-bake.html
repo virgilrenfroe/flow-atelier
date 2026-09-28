@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<title>Noctuary · A01 · Bake</title>
+<meta name="description" content="Quay bay bake — lightmap, AO, and GLTF. Fenestra night interior." />
+<style>
+  :root {
+    --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+    --font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "Space Mono", ui-monospace, monospace;
+    --ink: #05060a;
+    --paper: #f2ebe0;
+    --mute: rgba(242,235,224,0.62);
+    --line: rgba(242,235,224,0.18);
+    --accent: #f0c24b;
+    --violet: #8a7bb8;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--paper);
+    font-family: var(--font-sans); }
+  canvas { display: block; width: 100%; height: 100%; touch-action: none;
+    position: fixed; inset: 0; z-index: 0; }
+  .layer { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+  .topbar {
+    position: absolute; top: 18px; left: 18px; right: 18px;
+    display: flex; justify-content: space-between; gap: 12px; align-items: flex-start;
+  }
+  .brand {
+    font-family: var(--font-sans);
+    font-size: 11px; letter-spacing: 0.28em; text-transform: uppercase;
+    padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.5); backdrop-filter: blur(12px);
+  }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .pill {
+    border: 1px solid var(--line); background: rgba(5,6,10,0.5);
+    color: var(--paper); border-radius: 999px; padding: 9px 13px;
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+    backdrop-filter: blur(12px);
+  }
+  .pill.tech { border-color: rgba(138,123,184,0.45); color: rgba(242,235,224,0.9); }
+  .pill.gold { border-color: rgba(240,194,75,0.45); color: var(--accent); }
+  a.pill { text-decoration: none; pointer-events: auto; color: inherit; }
+  .hero {
+    position: absolute; left: 5vw; top: 14vh; max-width: min(560px, 82vw);
+  }
+  .hero .eyebrow {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em;
+    text-transform: uppercase; color: var(--violet); margin: 0 0 10px;
+  }
+  .hero .stack {
+    font-family: var(--font-display); font-optical-sizing: auto;
+    font-weight: 650; line-height: 0.92; letter-spacing: -0.03em;
+    font-size: clamp(2.6rem, 7.2vw, 5.4rem); margin: 0;
+  }
+  .hero .stack span { display: block; color: rgba(242,235,224,0.28); }
+  .hero .stack span.focus { color: var(--paper); }
+  .hero p { margin: 16px 0 0; max-width: 42ch; color: var(--mute); font-size: 14px; line-height: 1.5; }
+  .hud {
+    position: absolute; left: 18px; bottom: 18px;
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em;
+    line-height: 1.75; color: var(--mute);
+    padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line);
+    background: rgba(5,6,10,0.55); backdrop-filter: blur(14px);
+    min-width: 196px;
+  }
+  .hud .r { display: flex; justify-content: space-between; gap: 18px; }
+  .hud strong { color: var(--paper); font-weight: 400; }
+  .hud .accent { color: var(--accent); }
+  .note {
+    position: absolute; right: 18px; bottom: 18px; font-size: 11px;
+    opacity: 0.55; max-width: 280px; text-align: right; line-height: 1.45;
+  }
+  .vignette {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 52%, rgba(5,6,10,0.55) 100%);
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+  body.exhibit .hero,
+  body.exhibit .note,
+  body.exhibit .hud { opacity: 0; }
+  body.exhibit .pills { opacity: 0.4; }
+  body.exhibit .brand { opacity: 0.62; }
+  @media (prefers-reduced-motion: reduce) {
+    .layer, .hero, .hud, .note, .pills, .brand { transition: none; }
+  }
+  @media (max-width: 720px) {
+    .note { display: none; }
+    .hero { top: 12vh; }
+  }
+</style>
+</head>
+<body>
+  <h1 class="sr-only">Noctuary advanced — quay bay bake, fenestra night</h1>
+  <div class="layer" id="ui">
+    <div class="topbar">
+      <div class="brand">Noctuary · advanced</div>
+      <div class="pills">
+        <a class="pill" href="harbor.html">Harbor</a>
+        <div class="pill tech">Bake</div>
+        <div class="pill tech">Lightmap</div>
+        <div class="pill tech">AO</div>
+        <div class="pill gold">GLTF</div>
+      </div>
+    </div>
+    <div class="hero">
+      <p class="eyebrow">A01 · quay bay · fenestra night</p>
+      <h2 class="stack"><span class="focus">Quay</span><span>bay</span><span>baked</span></h2>
+      <p id="hero-blurb">One shop room with a Cycles lightmap and an AO map. Warm practicals, cool spill through the opening, creases under the counter and inside the bollard niche. Harbor · Quay · Signal · Fenestra.</p>
+    </div>
+    <div class="hud" id="hud" aria-live="polite">
+      <div class="r"><span>district</span><strong class="accent">Harbor</strong></div>
+      <div class="r"><span>step</span><strong>A01</strong></div>
+      <div class="r"><span>bake</span><strong id="h-bake">Lightmap</strong></div>
+      <div class="r"><span>ao</span><strong id="h-ao">on</strong></div>
+      <div class="r"><span>asset</span><strong>GLTF</strong></div>
+      <div class="r"><span>motif</span><strong id="h-motif">Fenestra</strong></div>
+      <div class="r"><span>motion</span><strong id="h-motion">live</strong></div>
+    </div>
+    <p class="note">Orbit · B flat sticker · 1 wide · 2 close · H chrome · ?still=1 holds the pose</p>
+    <div class="vignette"></div>
+  </div>
+
+  <script type="importmap">
+  {"imports":{"three":"https://unpkg.com/three@0.170.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.170.0/examples/jsm/"}}
+  </script>
+  <script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const params = new URLSearchParams(location.search);
+const stillMode = params.has('still') && params.get('still') !== '0';
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const freezeMotion = reduceMotion || stillMode;
+
+const HUD_KEY = 'noctuary-a01-bake-hud';
+function readHudPref() {
+  if (params.has('hud')) return params.get('hud') === '1' || params.get('hud') === 'on';
+  try {
+    const v = localStorage.getItem(HUD_KEY);
+    if (v === 'on') return true;
+    if (v === 'off') return false;
+  } catch (_) {}
+  return false;
+}
+function applyHud(show) {
+  document.body.classList.toggle('exhibit', !show);
+  try { localStorage.setItem(HUD_KEY, show ? 'on' : 'off'); } catch (_) {}
+}
+applyHud(readHudPref());
+
+const SHOTS = {
+  wide: { pos: [0.42, 1.28, 2.72], target: [-0.02, 1.08, -0.62] },
+  close: { pos: [-0.35, 0.90, 0.42], target: [0.15, 0.85, -1.35] },
+  sill: { pos: [-0.15, 0.72, 1.15], target: [0.05, 0.78, -0.85] },
+};
+const shotName = SHOTS[params.get('shot')] ? params.get('shot') : 'wide';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x05060a, 1);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.7;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.prepend(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.fog = new THREE.FogExp2(0x05060a, 0.045);
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.04, 40);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = !freezeMotion;
+controls.dampingFactor = 0.06;
+controls.rotateSpeed = 0.55;
+controls.maxPolarAngle = Math.PI * 0.62;
+controls.minDistance = 0.35;
+controls.maxDistance = 8;
+controls.target.set(0, 1.05, -0.6);
+
+function frameShot(name) {
+  const s = SHOTS[name] || SHOTS.wide;
+  camera.position.set(s.pos[0], s.pos[1], s.pos[2]);
+  controls.target.set(s.target[0], s.target[1], s.target[2]);
+  controls.update();
+}
+frameShot(shotName);
+
+document.getElementById('h-motion').textContent = freezeMotion ? 'still' : 'live';
+
+// Cycles diffuse (no albedo) through MeshPhysical Lambert, on a dark night
+// albedo, under ACES. π×4.2 is the lift that keeps pools and creases visible.
+const LIGHTMAP_INTENSITY = Math.PI * 4.2;
+const AO_INTENSITY = 0.72;
+
+function solidTex(hex, colorSpace) {
+  const c = document.createElement('canvas');
+  c.width = 2;
+  c.height = 2;
+  const g = c.getContext('2d');
+  g.fillStyle = hex;
+  g.fillRect(0, 0, 2, 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = colorSpace;
+  tex.flipY = false;
+  tex.channel = 1;
+  tex.needsUpdate = true;
+  return tex;
+}
+// Beige dollhouse fill — the sticker read this drill is meant to replace.
+const flatLight = solidTex('#e4d0ae', THREE.SRGBColorSpace);
+const flatAo = solidTex('#ffffff', THREE.NoColorSpace);
+
+const assetBase = new URL('./07-advanced-assets/a01-bake/', import.meta.url);
+const texLoader = new THREE.TextureLoader();
+let bayRoot = null;
+let lightMap = null;
+let aoMap = null;
+let flatMode = params.get('flat') === '1';
+
+function bindMaps() {
+  if (!bayRoot || !lightMap || !aoMap) return;
+  const lm = flatMode ? flatLight : lightMap;
+  const ao = flatMode ? flatAo : aoMap;
+  bayRoot.traverse((obj) => {
+    if (!obj.isMesh) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach((mat) => {
+      if (!mat) return;
+      mat.lightMap = lm;
+      mat.aoMap = ao;
+      mat.lightMapIntensity = LIGHTMAP_INTENSITY;
+      mat.aoMapIntensity = flatMode ? 0 : AO_INTENSITY;
+      mat.envMapIntensity = 0;
+      mat.needsUpdate = true;
+    });
+  });
+  document.getElementById('h-bake').textContent = flatMode ? 'flat sticker' : 'Lightmap';
+  document.getElementById('h-ao').textContent = flatMode ? 'off' : 'on';
+  document.getElementById('h-motif').textContent = flatMode ? 'sticker' : 'Fenestra';
+}
+
+Promise.all([
+  new GLTFLoader().loadAsync(new URL('quay-bay.glb', assetBase).href),
+  texLoader.loadAsync(new URL('quay-bay-lightmap.png', assetBase).href),
+  texLoader.loadAsync(new URL('quay-bay-ao.png', assetBase).href),
+]).then(([gltf, lm, ao]) => {
+  lightMap = lm;
+  aoMap = ao;
+  lightMap.colorSpace = THREE.SRGBColorSpace;
+  lightMap.flipY = false;
+  lightMap.channel = 1;
+  lightMap.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  aoMap.colorSpace = THREE.NoColorSpace;
+  aoMap.flipY = false;
+  aoMap.channel = 1;
+  bayRoot = gltf.scene;
+  bayRoot.name = 'QuayBay';
+  scene.add(bayRoot);
+  bindMaps();
+  window.__a01Bake = { flat: flatMode, shot: shotName };
+}).catch((err) => {
+  console.error('A01 bake drill failed to load', err);
+  document.getElementById('hero-blurb').textContent = 'Bake asset failed to load.';
+});
+
+addEventListener('keydown', (e) => {
+  if (e.key === 'h' || e.key === 'H') {
+    applyHud(document.body.classList.contains('exhibit'));
+  } else if (e.key === 'b' || e.key === 'B') {
+    flatMode = !flatMode;
+    bindMaps();
+    if (window.__a01Bake) window.__a01Bake.flat = flatMode;
+  } else if (e.key === '1') {
+    frameShot('wide');
+  } else if (e.key === '2') {
+    frameShot('close');
+  } else if (e.key === '3') {
+    frameShot('sill');
+  }
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+function tick() {
+  requestAnimationFrame(tick);
+  if (!freezeMotion) controls.update();
+  renderer.render(scene, camera);
+}
+tick();
+  </script>
+</body>
+</html>
