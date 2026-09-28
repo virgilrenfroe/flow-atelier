@@ -255,6 +255,7 @@
       <div class="r"><span>fps</span><strong id="fps">—</strong></div>
       <div class="r"><span>fbo</span><strong id="fbo-state">A→B</strong></div>
       <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
+      <div class="r"><span>shade</span><strong id="shade-mode">equation</strong></div>
       <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
       <div class="r"><strong class="accent">Rube plate → quay left of Signal</strong></div>
     </div>
@@ -478,6 +479,9 @@ window.addEventListener('keydown', (e) => {
   if (e.key === ']') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail: 1 }));
   }
+  if (e.key === 'k' || e.key === 'K') {
+    window.dispatchEvent(new CustomEvent('noctuary-halftone-toggle'));
+  }
 });
 
 const MOTIFS = ['Harbor', 'Quay', 'Signal'];
@@ -568,6 +572,252 @@ float fbm(vec2 p){
   return v;
 }
 `;
+
+// A02 · night fixture equation (Lights Shading) + optional soft halftone (Halftone Shading).
+// View vector is surface → camera, so Phong is dot(reflect, view) — the lesson's view points the other way.
+// Point falloff is the lesson's linear decay: max(0, 1 - distance * decay).
+// Halftone is a soft screen disk, not a hard step. Amount 0 skips it.
+const NIGHT_SHADE_GLSL = /* glsl */`
+void nightAmbientAdd(vec3 lightColor, float lightIntensity, inout vec3 shade) {
+  shade += lightColor * lightIntensity;
+}
+void nightDirectionalAdd(
+  vec3 lightColor, float lightIntensity, vec3 normal, vec3 lightDir, vec3 viewDir, float specularPower,
+  inout vec3 shade, inout vec3 spec
+) {
+  vec3 L = normalize(lightDir);
+  float shading = max(dot(normal, L), 0.0);
+  vec3 R = reflect(-L, normal);
+  float specular = pow(max(dot(R, viewDir), 0.0), specularPower);
+  shade += lightColor * lightIntensity * shading;
+  spec += lightColor * lightIntensity * specular;
+}
+void nightPointAdd(
+  vec3 lightColor, float lightIntensity, vec3 normal, vec3 lightPos, vec3 fragPos, vec3 viewDir,
+  float specularPower, float lightDecay,
+  inout vec3 shade, inout vec3 spec, inout float lum
+) {
+  vec3 delta = lightPos - fragPos;
+  float dist = length(delta);
+  vec3 L = delta / max(dist, 0.0001);
+  float shading = max(dot(normal, L), 0.0);
+  vec3 R = reflect(-L, normal);
+  float specular = pow(max(dot(R, viewDir), 0.0), specularPower);
+  float decay = max(0.0, 1.0 - dist * lightDecay);
+  shade += lightColor * lightIntensity * decay * shading;
+  spec += lightColor * lightIntensity * decay * specular;
+  lum = max(lum, decay * (shading * 0.65 + specular));
+}
+vec3 nightHalftone(vec3 color, float lightTerm, vec2 fragCoord, vec2 resolution, float repetitions, float amount) {
+  if (amount < 0.001) return color;
+  vec2 uv = fragCoord / max(resolution.y, 1.0);
+  uv *= repetitions;
+  vec2 cell = fract(uv);
+  float d = distance(cell, vec2(0.5));
+  float radius = clamp(lightTerm, 0.0, 1.0) * 0.30;
+  float disk = 1.0 - smoothstep(radius * 0.25, radius + 0.16, d);
+  vec3 ink = color * vec3(0.40, 0.38, 0.46);
+  return mix(color, mix(ink, color, disk), clamp(amount, 0.0, 1.0));
+}
+`;
+
+function shadeQuery(name, fallback) {
+  const q = params.get(name);
+  if (q === null) return fallback;
+  if (q === '0' || q === 'off' || q === 'false') return 0;
+  if (q === '' || q === '1' || q === 'on' || q === 'true') return fallback > 0 ? fallback : 1;
+  const n = Number(q);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : fallback;
+}
+const uNightShade = { value: shadeQuery('shade', 1) >= 0.5 ? 1 : 0 };
+const uHalftone = { value: uNightShade.value > 0.5 ? shadeQuery('halftone', 0.42) : 0 };
+const shadeRes = { value: new THREE.Vector2(renderer.domElement.width, renderer.domElement.height) };
+const uSigPos = [0, 1, 2, 3].map(() => ({ value: new THREE.Vector3(0, -40, 0) }));
+const uSigCol = [0, 1, 2, 3].map(() => ({ value: new THREE.Color(0x000000) }));
+const holdStill = params.has('hold');
+
+function syncShadeHud() {
+  const el = document.getElementById('shade-mode');
+  if (!el) return;
+  if (uNightShade.value < 0.5) el.textContent = 'bloom';
+  else if (uHalftone.value < 0.02) el.textContent = 'equation';
+  else el.textContent = 'equation · ink';
+}
+syncShadeHud();
+
+function patchNightShader(shader, mode) {
+  shader.uniforms.uNightShade = uNightShade;
+  shader.uniforms.uHalftone = uHalftone;
+  shader.uniforms.uShadeRes = shadeRes;
+  let extraFrag = '';
+  let extraVert = '';
+  if (mode === 'signal') {
+    for (let i = 0; i < 4; i++) {
+      shader.uniforms['uSigPos' + i] = uSigPos[i];
+      shader.uniforms['uSigCol' + i] = uSigCol[i];
+    }
+    extraFrag = `
+      uniform vec3 uSigPos0; uniform vec3 uSigCol0;
+      uniform vec3 uSigPos1; uniform vec3 uSigCol1;
+      uniform vec3 uSigPos2; uniform vec3 uSigCol2;
+      uniform vec3 uSigPos3; uniform vec3 uSigCol3;
+    `;
+  } else if (mode === 'wet') {
+    shader.uniforms.uLampA = waterMat.uniforms.uLampA;
+    shader.uniforms.uLampB = waterMat.uniforms.uLampB;
+    extraFrag = `
+      uniform vec3 uLampA;
+      uniform vec3 uLampB;
+    `;
+  } else {
+    extraVert = `
+      #ifdef NIGHT_LAMP_TINT
+        attribute vec3 aLampTint;
+        varying vec3 vLampTint;
+      #endif
+    `;
+    extraFrag = `
+      #ifdef NIGHT_LAMP_TINT
+        varying vec3 vLampTint;
+      #else
+        uniform vec3 uLampTint;
+      #endif
+    `;
+  }
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', `#include <common>
+      varying vec3 vNightWorld;
+      varying vec3 vNightN;
+      varying vec3 vNightLamp;
+      ${extraVert}
+    `)
+    .replace('#include <project_vertex>', `#include <project_vertex>
+      vec3 nightObjectN = objectNormal;
+      #ifdef USE_INSTANCING
+        mat3 nightIM = mat3(instanceMatrix);
+        nightObjectN /= max(vec3(
+          dot(nightIM[0], nightIM[0]),
+          dot(nightIM[1], nightIM[1]),
+          dot(nightIM[2], nightIM[2])
+        ), vec3(0.000001));
+        nightObjectN = nightIM * nightObjectN;
+        vNightWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+        vNightLamp = (modelMatrix * instanceMatrix * vec4(0.0, 0.016, 0.0, 1.0)).xyz;
+        #ifdef NIGHT_LAMP_TINT
+          vLampTint = aLampTint;
+        #endif
+      #else
+        vNightWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vNightLamp = (modelMatrix * vec4(0.0, 0.016, 0.0, 1.0)).xyz;
+      #endif
+      vNightN = normalize(mat3(modelMatrix) * nightObjectN);
+    `);
+  let apply = '';
+  if (mode === 'signal') {
+    apply = `
+      if (uNightShade > 0.5) {
+        vec3 nN = normalize(vNightN);
+        vec3 nV = normalize(cameraPosition - vNightWorld);
+        vec3 nShade = vec3(0.0);
+        vec3 nSpec = vec3(0.0);
+        float nLum = 0.0;
+        nightAmbientAdd(vec3(0.52, 0.50, 0.60), 0.30, nShade);
+        nightDirectionalAdd(vec3(0.86, 0.88, 1.0), 0.42, nN, vec3(0.32, 0.92, 0.22), nV, 18.0, nShade, nSpec);
+        nightPointAdd(uSigCol0, 1.55, nN, uSigPos0, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
+        nightPointAdd(uSigCol1, 1.55, nN, uSigPos1, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
+        nightPointAdd(uSigCol2, 1.55, nN, uSigPos2, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
+        nightPointAdd(uSigCol3, 1.55, nN, uSigPos3, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
+        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.85;
+        outgoingLight = nightCol;
+        outgoingLight = nightHalftone(outgoingLight, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 88.0, uHalftone * smoothstep(0.04, 0.22, nLum));
+      }
+    `;
+  } else if (mode === 'wet') {
+    apply = `
+      if (uNightShade > 0.5) {
+        vec3 nN = normalize(vNightN);
+        vec3 nV = normalize(cameraPosition - vNightWorld);
+        vec3 nShade = vec3(0.0);
+        vec3 nSpec = vec3(0.0);
+        float nLum = 0.0;
+        nightAmbientAdd(vec3(0.20, 0.24, 0.32), 0.22, nShade);
+        nightDirectionalAdd(vec3(0.55, 0.62, 0.78), 0.28, nN, vec3(0.28, 0.93, 0.18), nV, 28.0, nShade, nSpec);
+        nightPointAdd(vec3(1.0, 0.72, 0.38), 1.45, nN, uLampA, vNightWorld, nV, 36.0, 0.14, nShade, nSpec, nLum);
+        nightPointAdd(vec3(0.94, 0.66, 0.34), 1.15, nN, uLampB, vNightWorld, nV, 36.0, 0.14, nShade, nSpec, nLum);
+        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.7;
+        outgoingLight = nightCol;
+        outgoingLight = nightHalftone(outgoingLight, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 80.0, uHalftone * smoothstep(0.05, 0.24, nLum));
+      }
+    `;
+  } else {
+    apply = `
+      if (uNightShade > 0.5) {
+        vec3 nN = normalize(vNightN);
+        vec3 nV = normalize(cameraPosition - vNightWorld);
+        vec3 nShade = vec3(0.0);
+        vec3 nSpec = vec3(0.0);
+        float nLum = 0.0;
+        #ifdef NIGHT_LAMP_TINT
+          vec3 nTint = vLampTint;
+        #else
+          vec3 nTint = uLampTint;
+        #endif
+        nightAmbientAdd(vec3(0.48, 0.44, 0.40), 0.28, nShade);
+        nightDirectionalAdd(vec3(1.0, 0.90, 0.76), 0.48, nN, vec3(0.35, 0.90, 0.24), nV, 14.0, nShade, nSpec);
+        nightPointAdd(nTint, 1.85, nN, vNightLamp, vNightWorld, nV, 12.0, 2.35, nShade, nSpec, nLum);
+        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.55;
+        outgoingLight = nightCol;
+        outgoingLight = nightHalftone(outgoingLight, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 120.0, uHalftone * smoothstep(0.06, 0.28, nLum) * 0.85);
+      }
+    `;
+  }
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', `#include <common>
+      uniform float uNightShade;
+      uniform float uHalftone;
+      uniform vec2 uShadeRes;
+      varying vec3 vNightWorld;
+      varying vec3 vNightN;
+      varying vec3 vNightLamp;
+      ${extraFrag}
+      ${NIGHT_SHADE_GLSL}
+    `)
+    .replace('#include <opaque_fragment>', `${apply}\n#include <opaque_fragment>`);
+}
+
+function bindLanternHousing(mat, tintColor, instanced) {
+  const tintU = { value: tintColor.clone() };
+  mat.userData.nightTint = tintU;
+  if (instanced) mat.defines = Object.assign({}, mat.defines, { NIGHT_LAMP_TINT: '' });
+  mat.onBeforeCompile = (shader) => {
+    if (!instanced) shader.uniforms.uLampTint = tintU;
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>
+       roughnessFactor = max(roughnessFactor, 0.84);`
+    );
+    patchNightShader(shader, 'lantern');
+  };
+  mat.customProgramCacheKey = () => (instanced ? 'a02-lantern-inst' : 'a02-lantern-uni');
+}
+
+function patchNightCatch(mat, mode) {
+  mat.onBeforeCompile = (shader) => patchNightShader(shader, mode);
+  mat.customProgramCacheKey = () => 'a02-' + mode;
+}
+
+window.addEventListener('noctuary-halftone-toggle', () => {
+  if (uNightShade.value < 0.5) {
+    uNightShade.value = 1;
+    uHalftone.value = 0.42;
+  } else if (uHalftone.value > 0.02) {
+    uHalftone.value = 0;
+  } else {
+    uHalftone.value = 0.42;
+  }
+  syncShadeHud();
+});
+
 
 // ——— Urban grammar: streets → blocks → lots → buildings (pass 3 + irregular lots p4) ———
 // Hierarchy refs: CityEngine / StreetGen / Purdue procedural; Three.js CityGenerator + SidewalkGenerator;
@@ -2629,6 +2879,8 @@ const signalIron = new THREE.MeshStandardMaterial({
 const signalVisorMat = new THREE.MeshStandardMaterial({
   color: 0x101114, roughness: 0.72, metalness: 0.22,
 });
+patchNightCatch(signalIron, 'signal');
+patchNightCatch(signalVisorMat, 'signal');
 const signalPoleGeo = new THREE.CylinderGeometry(0.04, 0.048, 1, 8);
 signalPoleGeo.translate(0, 0.5, 0);
 const signalBaseGeo = new THREE.BoxGeometry(0.18, 0.035, 0.18);
@@ -2653,19 +2905,63 @@ const signalLensMat = new THREE.MeshStandardMaterial({
   emissive: 0x120808, emissiveIntensity: 0.25,
 });
 const signalLenses = new THREE.InstancedMesh(signalLampGeo, signalLensMat, SIGNAL_MAX * 6);
+const signalLampVert = /* glsl */`
+  varying vec3 vNormalW;
+  varying vec3 vWorldPos;
+  void main(){
+    #ifdef USE_INSTANCING
+      vec4 world = instanceMatrix * vec4(position, 1.0);
+      vNormalW = normalize(mat3(instanceMatrix) * normal);
+    #else
+      vec4 world = modelMatrix * vec4(position, 1.0);
+      vNormalW = normalize(mat3(modelMatrix) * normal);
+    #endif
+    vWorldPos = world.xyz;
+    gl_Position = projectionMatrix * viewMatrix * world;
+  }
+`;
+function makeSignalLampMat(hex) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(hex) },
+      uNightShade: uNightShade,
+      uHalftone: uHalftone,
+      uShadeRes: shadeRes,
+    },
+    vertexShader: signalLampVert,
+    fragmentShader: /* glsl */`
+      uniform vec3 uColor;
+      uniform float uNightShade;
+      uniform float uHalftone;
+      uniform vec2 uShadeRes;
+      varying vec3 vNormalW;
+      varying vec3 vWorldPos;
+      ${NIGHT_SHADE_GLSL}
+      void main(){
+        vec3 prior = uColor * 2.45;
+        if (uNightShade < 0.5) {
+          gl_FragColor = vec4(prior, 1.0);
+          return;
+        }
+        vec3 N = normalize(vNormalW);
+        vec3 V = normalize(cameraPosition - vWorldPos);
+        vec3 nShade = vec3(0.0);
+        vec3 nSpec = vec3(0.0);
+        float nLum = 0.0;
+        vec3 filament = vWorldPos + N * 0.11;
+        nightPointAdd(uColor, 3.1, N, filament, vWorldPos, V, 18.0, 4.2, nShade, nSpec, nLum);
+        float facing = pow(clamp(dot(N, V), 0.0, 1.0), 0.62);
+        vec3 col = uColor * (1.25 + 1.45 * facing) + nSpec * 0.55 + nShade * 0.25;
+        col = nightHalftone(col, 0.42 + 0.58 * facing, gl_FragCoord.xy, uShadeRes, 64.0, uHalftone * 0.22);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `,
+  });
+}
 const signalLitMat = [
-  new THREE.MeshStandardMaterial({
-    color: 0x3a1010, emissive: SIGNAL_LAMP_HEX[0], emissiveIntensity: 2.7,
-    roughness: 0.28, metalness: 0.02,
-  }),
-  new THREE.MeshStandardMaterial({
-    color: 0x3a2a10, emissive: SIGNAL_LAMP_HEX[1], emissiveIntensity: 2.45,
-    roughness: 0.28, metalness: 0.02,
-  }),
-  new THREE.MeshStandardMaterial({
-    color: 0x103018, emissive: SIGNAL_LAMP_HEX[2], emissiveIntensity: 2.55,
-    roughness: 0.28, metalness: 0.02,
-  }),
+  makeSignalLampMat(SIGNAL_LAMP_HEX[0]),
+  makeSignalLampMat(SIGNAL_LAMP_HEX[1]),
+  makeSignalLampMat(SIGNAL_LAMP_HEX[2]),
 ];
 const signalLit = [
   new THREE.InstancedMesh(signalLampGeo, signalLitMat[0], SIGNAL_MAX * 2),
@@ -2803,6 +3099,15 @@ function updateTrafficSignals(t) {
       rig.light.position.set(glow.x, glow.y, glow.z);
     }
   }
+  for (let i = 0; i < 4; i++) {
+    if (i < signalRigs.length) {
+      uSigPos[i].value.copy(signalRigs[i].light.position);
+      trafficGroup.localToWorld(uSigPos[i].value);
+      uSigCol[i].value.copy(signalRigs[i].light.color);
+    } else {
+      uSigCol[i].value.setRGB(0, 0, 0);
+    }
+  }
   if (window.__harborSignals) window.__harborSignals.stages = stages;
 }
 
@@ -2922,6 +3227,9 @@ const waterMat = new THREE.ShaderMaterial({
     uLampB: { value: new THREE.Vector3(4.8, 1.55, 3.85) },
     uKeyDir: { value: new THREE.Vector3(0.35, 0.9, 0.2).normalize() },
     uCamPos: { value: new THREE.Vector3() },
+    uNightShade: uNightShade,
+    uHalftone: uHalftone,
+    uShadeRes: shadeRes,
   },
   vertexShader: /* glsl */`
     uniform float uTime;
@@ -2991,6 +3299,8 @@ const waterMat = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */`
     uniform float uDepth, uFresnel, uFoam, uReflect, uWallZ, uWaterY, uTime, uAmp;
     uniform vec3 uLampA, uLampB, uKeyDir, uCamPos;
+    uniform float uNightShade, uHalftone;
+    uniform vec2 uShadeRes;
     varying vec2 vUv;
     varying vec3 vWorldPos;
     varying vec3 vWorldN;
@@ -3017,6 +3327,7 @@ const waterMat = new THREE.ShaderMaterial({
     float schlick(float cosTheta, float F0){
       return F0 + (1.0 - F0) * pow(1.0 - clamp(cosTheta, 0.0, 1.0), 5.0);
     }
+    ${NIGHT_SHADE_GLSL}
 
     void main(){
       // Nothing landward of the seawall's water face — no sheet, no splash.
@@ -3068,20 +3379,31 @@ const waterMat = new THREE.ShaderMaterial({
       vec3 col = mix(body, reflCol, fresW);
       if (uFresnel < 0.5) col = body;
 
-      vec3 Hkey = normalize(normalize(uKeyDir) + V);
-      float specKey = pow(max(dot(N, Hkey), 0.0), 160.0);
-      vec3 LA = normalize(uLampA - vWorldPos);
-      vec3 LB = normalize(uLampB - vWorldPos);
-      float specA = pow(max(dot(N, normalize(LA + V)), 0.0), 220.0);
-      float specB = pow(max(dot(N, normalize(LB + V)), 0.0), 220.0);
-      float streakMaskA = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampA.x) * 0.35), 3.0);
-      float streakMaskB = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampB.x) * 0.38), 3.0);
-      float attenA = 1.0 / (1.0 + distance(vWorldPos, uLampA) * 0.18);
-      float attenB = 1.0 / (1.0 + distance(vWorldPos, uLampB) * 0.2);
-      vec3 spec = vec3(0.55, 0.62, 0.75) * specKey * 0.28
-                + vec3(1.0, 0.84, 0.45) * (specA * 0.55 + streakMaskA * 0.12 * fres) * attenA
-                + vec3(0.95, 0.74, 0.38) * (specB * 0.4 + streakMaskB * 0.1 * fres) * attenB;
-      col += spec * mix(0.2, 1.0, uReflect);
+      float fixtureLum = 0.0;
+      if (uNightShade < 0.5) {
+        vec3 Hkey = normalize(normalize(uKeyDir) + V);
+        float specKey = pow(max(dot(N, Hkey), 0.0), 160.0);
+        vec3 LA = normalize(uLampA - vWorldPos);
+        vec3 LB = normalize(uLampB - vWorldPos);
+        float specA = pow(max(dot(N, normalize(LA + V)), 0.0), 220.0);
+        float specB = pow(max(dot(N, normalize(LB + V)), 0.0), 220.0);
+        float streakMaskA = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampA.x) * 0.35), 3.0);
+        float streakMaskB = pow(max(0.0, 1.0 - abs(vWorldPos.x - uLampB.x) * 0.38), 3.0);
+        float attenA = 1.0 / (1.0 + distance(vWorldPos, uLampA) * 0.18);
+        float attenB = 1.0 / (1.0 + distance(vWorldPos, uLampB) * 0.2);
+        vec3 spec = vec3(0.55, 0.62, 0.75) * specKey * 0.28
+                  + vec3(1.0, 0.84, 0.45) * (specA * 0.55 + streakMaskA * 0.12 * fres) * attenA
+                  + vec3(0.95, 0.74, 0.38) * (specB * 0.4 + streakMaskB * 0.1 * fres) * attenB;
+        col += spec * mix(0.2, 1.0, uReflect);
+      } else {
+        vec3 nShade = vec3(0.0);
+        vec3 nSpec = vec3(0.0);
+        nightAmbientAdd(vec3(0.18, 0.22, 0.30), 0.10, nShade);
+        nightDirectionalAdd(vec3(0.62, 0.70, 0.86), 0.18, N, normalize(uKeyDir), V, 64.0, nShade, nSpec);
+        nightPointAdd(vec3(1.0, 0.74, 0.40), 1.25, N, uLampA, vWorldPos, V, 72.0, 0.11, nShade, nSpec, fixtureLum);
+        nightPointAdd(vec3(0.96, 0.68, 0.36), 1.05, N, uLampB, vWorldPos, V, 72.0, 0.11, nShade, nSpec, fixtureLum);
+        col += nShade * 0.38 + nSpec * mix(0.35, 1.0, uReflect);
+      }
 
       // Removed leftover caustics-lite scroll bands (old night-streak grid):
       // sin(x*5) brown stripes read as ghost lines under the Gerstner basin.
@@ -3103,6 +3425,12 @@ const waterMat = new THREE.ShaderMaterial({
 
       float fogF = 1.0 - exp(-0.018 * length(uCamPos - vWorldPos));
       col = mix(col, vec3(0.02, 0.023, 0.035), fogF * 0.55);
+      if (uNightShade > 0.5) {
+        col = nightHalftone(
+          col, clamp(fixtureLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 108.0,
+          uHalftone * smoothstep(0.05, 0.26, fixtureLum)
+        );
+      }
 
       gl_FragColor = vec4(col, 1.0);
     }
@@ -3144,7 +3472,9 @@ const seawallFace = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W, faceH, 0.22)
 seawallFace.position.set(0, faceY, SEAWALL_Z);
 scene.add(seawallFace);
 
-const seawallWetCourse = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W - 0.1, 0.14, 0.05), seawallWetMat);
+const seawallWetLitMat = seawallWetMat.clone();
+patchNightCatch(seawallWetLitMat, 'wet');
+const seawallWetCourse = new THREE.Mesh(new THREE.BoxGeometry(SEAWALL_W - 0.1, 0.14, 0.05), seawallWetLitMat);
 seawallWetCourse.position.set(0, faceBottom + 0.1, SEAWALL_Z + 0.14);
 scene.add(seawallWetCourse);
 
@@ -4047,14 +4377,14 @@ const lanternHousingMat = new THREE.MeshStandardMaterial({
   emissive: 0x120e0a,
   emissiveIntensity: 0.035,
 });
+const lanternHousingCool = lanternHousingMat.clone();
+const lanternHousingInst = lanternHousingMat.clone();
 // Atlas roughness still modulates. Floor + high metalness keeps highlights iron-colored.
-lanternHousingMat.onBeforeCompile = (shader) => {
-  shader.fragmentShader = shader.fragmentShader.replace(
-    '#include <roughnessmap_fragment>',
-    `#include <roughnessmap_fragment>
-     roughnessFactor = max(roughnessFactor, 0.84);`
-  );
-};
+// Instanced heads carry a per-lamp tint attribute. Hinged lanterns use a uniform tint.
+// Seating geometry is unchanged.
+bindLanternHousing(lanternHousingMat, lampWarm, false);
+bindLanternHousing(lanternHousingCool, lampCool, false);
+bindLanternHousing(lanternHousingInst, lampWarm, true);
 const lanternFootMat = new THREE.MeshStandardMaterial({
   color: 0x3a342e,
   roughness: 1,
@@ -4075,14 +4405,17 @@ const lanternVert = /* glsl */`
   varying vec3 vWorldPos;
   varying vec3 vNormalW;
   varying vec2 vUv;
+  varying vec3 vLampPos;
   void main(){
     vUv = uv;
     #ifdef USE_INSTANCING
       vec4 world = instanceMatrix * vec4(position, 1.0);
       vNormalW = mat3(instanceMatrix) * normal;
+      vLampPos = (instanceMatrix * vec4(0.0, 0.016, 0.0, 1.0)).xyz;
     #else
       vec4 world = modelMatrix * vec4(position, 1.0);
       vNormalW = mat3(modelMatrix) * normal;
+      vLampPos = (modelMatrix * vec4(0.0, 0.016, 0.0, 1.0)).xyz;
     #endif
     vWorldPos = world.xyz;
     #ifdef USE_INSTANCING_COLOR
@@ -4094,14 +4427,43 @@ const lanternVert = /* glsl */`
   }
 `;
 
+const LANTERN_PANE_APPLY = /* glsl */`
+  if (uNightShade > 0.5) {
+    vec3 nShade = vec3(0.0);
+    vec3 nSpec = vec3(0.0);
+    float nLum = 0.0;
+    nightPointAdd(vColor, 1.15, N, vLampPos, vWorldPos, V, 30.0, 2.7, nShade, nSpec, nLum);
+    float shape = clamp(nLum, 0.0, 1.0);
+    col *= mix(0.78, 1.0, shape);
+    col += nSpec * 0.08;
+    col = min(col, vec3(0.62));
+    col = nightHalftone(col, shape, gl_FragCoord.xy, uShadeRes, 112.0, uHalftone * 0.34);
+  }
+`;
+const LANTERN_CORE_APPLY = /* glsl */`
+  if (uNightShade > 0.5) {
+    vec3 nShade = vec3(0.0);
+    vec3 nSpec = vec3(0.0);
+    float nLum = 0.0;
+    nightPointAdd(vColor, 2.2, N, vLampPos + N * 0.02, vWorldPos, V, 14.0, 5.5, nShade, nSpec, nLum);
+    col = col * (0.72 + 0.55 * clamp(nLum, 0.0, 1.4)) + nSpec * 0.16;
+  }
+`;
+function lanternShadeUniforms(extra) {
+  return Object.assign({
+    uNightShade: uNightShade,
+    uHalftone: uHalftone,
+    uShadeRes: shadeRes,
+  }, extra);
+}
 function makeLanternGlassMat(tint) {
   return new THREE.ShaderMaterial({
-    uniforms: {
+    uniforms: lanternShadeUniforms({
       uTime: lanternTime,
       uPulse: lanternPulse,
       uTint: { value: tint.clone() },
       uAtlas: lanternAtlasUniform,
-    },
+    }),
     transparent: true,
     depthWrite: true,
     side: THREE.FrontSide,
@@ -4110,10 +4472,15 @@ function makeLanternGlassMat(tint) {
       uniform sampler2D uAtlas;
       uniform float uTime;
       uniform float uPulse;
+      uniform float uNightShade;
+      uniform float uHalftone;
+      uniform vec2 uShadeRes;
       varying vec3 vColor;
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
       varying vec2 vUv;
+      varying vec3 vLampPos;
+      ${NIGHT_SHADE_GLSL}
       void main(){
         vec3 N = normalize(vNormalW);
         vec3 V = normalize(cameraPosition - vWorldPos);
@@ -4143,6 +4510,7 @@ function makeLanternGlassMat(tint) {
         float dist = length(cameraPosition - vWorldPos);
         float fog = 1.0 - exp(-0.00032 * dist * dist);
         col = mix(col, vec3(0.02, 0.024, 0.04), clamp(fog, 0.0, 0.62));
+        ${LANTERN_PANE_APPLY}
         float alpha = mix(0.16, 0.72, fres);
         alpha = mix(alpha, min(alpha, 0.22), clamp(filament, 0.0, 1.0));
         gl_FragColor = vec4(col, alpha);
@@ -4153,26 +4521,30 @@ function makeLanternGlassMat(tint) {
 
 function makeLanternBulbMat(tint) {
   return new THREE.ShaderMaterial({
-    uniforms: {
+    uniforms: lanternShadeUniforms({
       uTime: lanternTime,
       uPulse: lanternPulse,
       uTint: { value: tint.clone() },
-    },
+    }),
     transparent: true,
     depthWrite: false,
     vertexShader: lanternVert,
     fragmentShader: /* glsl */`
       uniform float uTime;
       uniform float uPulse;
+      uniform float uNightShade;
       varying vec3 vColor;
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
+      varying vec3 vLampPos;
+      ${NIGHT_SHADE_GLSL}
       void main(){
         vec3 N = normalize(vNormalW);
         vec3 V = normalize(cameraPosition - vWorldPos);
         float fres = pow(1.0 - abs(dot(N, V)), 1.7);
         float pulse = 0.93 + 0.07 * sin(uTime * 2.4 + vWorldPos.x * 0.7) * uPulse;
         vec3 col = vColor * (0.18 + 0.42 * fres) * pulse;
+        ${LANTERN_CORE_APPLY}
         float alpha = mix(0.06, 0.38, fres);
         gl_FragColor = vec4(col, alpha);
       }
@@ -4182,18 +4554,21 @@ function makeLanternBulbMat(tint) {
 
 function makeLanternFilamentMat(tint) {
   return new THREE.ShaderMaterial({
-    uniforms: {
+    uniforms: lanternShadeUniforms({
       uTime: lanternTime,
       uPulse: lanternPulse,
       uTint: { value: tint.clone() },
-    },
+    }),
     vertexShader: lanternVert,
     fragmentShader: /* glsl */`
       uniform float uTime;
       uniform float uPulse;
+      uniform float uNightShade;
       varying vec3 vColor;
       varying vec3 vWorldPos;
       varying vec3 vNormalW;
+      varying vec3 vLampPos;
+      ${NIGHT_SHADE_GLSL}
       void main(){
         vec3 N = normalize(vNormalW);
         vec3 V = normalize(cameraPosition - vWorldPos);
@@ -4203,6 +4578,7 @@ function makeLanternFilamentMat(tint) {
         vec3 tint = clamp((vColor - vec3(0.22)) * 1.65, 0.0, 1.35);
         float heat = 0.82 + 0.2 * facing;
         vec3 col = tint * heat * pulse;
+        ${LANTERN_CORE_APPLY}
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -4281,19 +4657,37 @@ function makeLanternGlowMat(tint) {
 
 function makeLanternPanMat(tint) {
   return new THREE.ShaderMaterial({
-    uniforms: {
+    uniforms: lanternShadeUniforms({
       uTint: { value: tint.clone() },
-    },
+    }),
     vertexShader: lanternVert,
     fragmentShader: /* glsl */`
+      uniform float uNightShade;
+      uniform float uHalftone;
+      uniform vec2 uShadeRes;
       varying vec3 vColor;
+      varying vec3 vWorldPos;
+      varying vec3 vNormalW;
       varying vec2 vUv;
+      varying vec3 vLampPos;
+      ${NIGHT_SHADE_GLSL}
       void main(){
+        vec3 N = normalize(vNormalW);
+        vec3 V = normalize(cameraPosition - vWorldPos);
         vec2 p = vUv * 2.0 - 1.0;
         float d = length(p);
         float pool = exp(-d * d * 2.6) * (1.0 - smoothstep(0.25, 0.92, d));
         vec3 iron = vec3(0.045, 0.04, 0.036);
         vec3 col = mix(iron, vColor * 0.16, pool);
+        if (uNightShade > 0.5) {
+          vec3 nShade = vec3(0.0);
+          vec3 nSpec = vec3(0.0);
+          float nLum = 0.0;
+          nightAmbientAdd(vec3(0.25, 0.22, 0.2), 0.2, nShade);
+          nightPointAdd(vColor, 1.6, N, vLampPos, vWorldPos, V, 18.0, 3.2, nShade, nSpec, nLum);
+          col = iron * nShade + vColor * nLum * 0.55 + nSpec * 0.35;
+          col = nightHalftone(col, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 96.0, uHalftone * 0.4);
+        }
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -4317,7 +4711,10 @@ const lanternPanWarm = makeLanternPanMat(lampWarm);
 const lanternPanCool = makeLanternPanMat(lampCool);
 
 const LANTERN_N = 18;
-const lanterns = new THREE.InstancedMesh(lanternGeos.housing, lanternHousingMat, LANTERN_N);
+const lanternHousingGeo = lanternGeos.housing.clone();
+const lanternLampTint = new THREE.InstancedBufferAttribute(new Float32Array(LANTERN_N * 3), 3);
+lanternHousingGeo.setAttribute('aLampTint', lanternLampTint);
+const lanterns = new THREE.InstancedMesh(lanternHousingGeo, lanternHousingInst, LANTERN_N);
 const lanternGlass = new THREE.InstancedMesh(lanternGeos.glass, lanternGlassMat, LANTERN_N);
 const lanternBulb = new THREE.InstancedMesh(lanternGeos.bulb, lanternBulbMat, LANTERN_N);
 const lanternFilament = new THREE.InstancedMesh(lanternGeos.filament, lanternFilamentMat, LANTERN_N);
@@ -4354,8 +4751,11 @@ for (let i = 0; i < LANTERN_N; i++) {
   dummy.rotation.set(0, 0, 0);
   dummy.updateMatrix();
   lanterns.setMatrixAt(i, dummy.matrix);
-  lanternGlass.setColorAt(i, i % 3 === 0 ? lampCool : lampWarm);
+  const lampTint = i % 3 === 0 ? lampCool : lampWarm;
+  lanternLampTint.setXYZ(i, lampTint.r, lampTint.g, lampTint.b);
+  lanternGlass.setColorAt(i, lampTint);
 }
+lanternLampTint.needsUpdate = true;
 lanterns.instanceMatrix.needsUpdate = true;
 lanternTintAttr.needsUpdate = true;
 
@@ -4382,18 +4782,21 @@ atlasLoader.load(new URL('lantern-atlas.png' + atlasCache, atlasBase).href, (tex
   rough.wrapT = THREE.ClampToEdgeWrapping;
   rough.anisotropy = tex.anisotropy;
   rough.needsUpdate = true;
-  lanternHousingMat.map = metal;
-  lanternHousingMat.roughnessMap = rough;
-  lanternHousingMat.roughness = 1;
-  lanternHousingMat.color.set(0xffffff);
-  lanternHousingMat.needsUpdate = true;
+  const housingMats = [lanternHousingMat, lanternHousingCool, lanternHousingInst];
+  for (let hi = 0; hi < housingMats.length; hi++) {
+    housingMats[hi].map = metal;
+    housingMats[hi].roughnessMap = rough;
+    housingMats[hi].roughness = 1;
+    housingMats[hi].color.set(0xffffff);
+    housingMats[hi].needsUpdate = true;
+  }
 });
 
 function makeHarborLanternMesh(warm) {
   const root = new THREE.Mesh(lanternPickGeo, lanternPickMat);
   root.name = 'harbor-lantern';
   root.layers.enable(BLOOM_LAYER);
-  const housing = new THREE.Mesh(lanternGeos.housing, lanternHousingMat);
+  const housing = new THREE.Mesh(lanternGeos.housing, warm ? lanternHousingMat : lanternHousingCool);
   const glass = new THREE.Mesh(lanternGeos.glass, warm ? lanternGlassWarm : lanternGlassCool);
   glass.layers.enable(BLOOM_LAYER);
   glass.renderOrder = 2;
@@ -6034,6 +6437,10 @@ const signalMat = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
     uPulse: { value: 1 },
+    uNightShade: uNightShade,
+    uHalftone: uHalftone,
+    uShadeRes: shadeRes,
+    uLampPos: { value: new THREE.Vector3(-6.5, 4.15, 3.2) },
   },
   transparent: true,
   vertexShader: /* glsl */`
@@ -6051,22 +6458,41 @@ const signalMat = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */`
     uniform float uTime;
     uniform float uPulse;
+    uniform float uNightShade;
+    uniform float uHalftone;
+    uniform vec2 uShadeRes;
+    uniform vec3 uLampPos;
     varying vec2 vUv;
     varying vec3 vNormalW;
     varying vec3 vWorldPos;
+    ${NIGHT_SHADE_GLSL}
     void main(){
       vec3 N = normalize(vNormalW);
+      vec3 V = normalize(cameraPosition - vWorldPos);
       float ndl = clamp(dot(N, normalize(vec3(0.3, 0.8, 0.4))), 0.2, 1.0);
-      vec3 body = vec3(0.12, 0.13, 0.18) * (0.5 + 0.5 * ndl);
-      // vertical gold core
-      float core = smoothstep(0.35, 0.0, abs(vUv.x - 0.5)) * (0.55 + 0.45 * uPulse);
       vec3 goldC = vec3(0.94, 0.76, 0.29);
-      body = mix(body, goldC * 1.6, core * 0.85);
-      // tip flare
+      float core = smoothstep(0.35, 0.0, abs(vUv.x - 0.5)) * (0.55 + 0.45 * uPulse);
       float tip = smoothstep(0.72, 1.0, vUv.y);
-      body += goldC * tip * (1.1 + 0.5 * uPulse);
-      float rim = pow(1.0 - max(dot(N, normalize(cameraPosition - vWorldPos)), 0.0), 2.0);
-      body += goldC * rim * 0.35 * uPulse;
+      vec3 prior = vec3(0.12, 0.13, 0.18) * (0.5 + 0.5 * ndl);
+      prior = mix(prior, goldC * 1.6, core * 0.85);
+      prior += goldC * tip * (1.1 + 0.5 * uPulse);
+      float rim = pow(1.0 - max(dot(N, V), 0.0), 2.0);
+      prior += goldC * rim * 0.35 * uPulse;
+      if (uNightShade < 0.5) {
+        gl_FragColor = vec4(prior, 1.0);
+        return;
+      }
+      vec3 nShade = vec3(0.0);
+      vec3 nSpec = vec3(0.0);
+      float nLum = 0.0;
+      nightAmbientAdd(vec3(0.14, 0.15, 0.20), 0.32, nShade);
+      nightDirectionalAdd(vec3(0.62, 0.68, 0.84), 0.36, N, vec3(0.25, 0.92, 0.18), V, 22.0, nShade, nSpec);
+      nightPointAdd(goldC, 2.6, N, uLampPos, vWorldPos, V, 16.0, 0.28, nShade, nSpec, nLum);
+      vec3 body = vec3(0.11, 0.12, 0.16) * nShade + nSpec;
+      body = mix(body, goldC * (1.15 + 0.35 * uPulse), core * 0.9);
+      body += goldC * tip * (0.85 + 0.4 * uPulse);
+      float fixture = clamp(nLum + core * 0.8 + tip, 0.0, 1.0);
+      body = nightHalftone(body, fixture, gl_FragCoord.xy, uShadeRes, 92.0, uHalftone * (0.25 + 0.75 * smoothstep(0.08, 0.4, nLum + core)));
       gl_FragColor = vec4(body, 1.0);
     }
   `,
@@ -6083,6 +6509,9 @@ const haloMat = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
     uPulse: { value: 1 },
+    uNightShade: uNightShade,
+    uHalftone: uHalftone,
+    uShadeRes: shadeRes,
   },
   transparent: true,
   depthWrite: false,
@@ -6098,7 +6527,11 @@ const haloMat = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */`
     uniform float uTime;
     uniform float uPulse;
+    uniform float uNightShade;
+    uniform float uHalftone;
+    uniform vec2 uShadeRes;
     varying vec2 vUv;
+    ${NIGHT_SHADE_GLSL}
     void main(){
       vec2 c = vUv - 0.5;
       float d = length(c) * 2.0;
@@ -6110,6 +6543,9 @@ const haloMat = new THREE.ShaderMaterial({
       float glow = exp(-d * d * 2.2) * 0.35 * pulse;
       col += vec3(1.0, 0.85, 0.45) * glow;
       a = max(a, glow);
+      if (uNightShade > 0.5) {
+        col = nightHalftone(col, 0.55, gl_FragCoord.xy, uShadeRes, 54.0, uHalftone * 0.28 * ring);
+      }
       gl_FragColor = vec4(col, a);
     }
   `,
@@ -8187,6 +8623,7 @@ addEventListener('resize', () => {
   finalComposer.setSize(innerWidth, innerHeight);
   stillComposer.setSize(innerWidth, innerHeight);
   bloomPass.setSize(innerWidth, innerHeight);
+  shadeRes.value.set(renderer.domElement.width, renderer.domElement.height);
   mistMat.uniforms.uPixelRatio.value = Math.min(devicePixelRatio, 2);
 });
 
@@ -8696,7 +9133,7 @@ function updateDebugHud(fps) {
     `hitDist  ${dbgHitDist}  inst ${dbgInst}\n` +
     `room~    ${dbgRoomHint}\n` +
     `face~    ${dbgFaceHint}\n` +
-    `keys     V walk · T tour · ?debug=1`;
+    `keys     V walk · T tour · K ink · ?debug=1`;
 }
 
 // ——— Animate ———
@@ -8738,13 +9175,29 @@ function pingPong(t, pulse) {
   fboEl.textContent = fboFlip ? 'B→A' : 'A→B';
 }
 
+window.__harborShade = {
+  get shade() { return uNightShade.value; },
+  get halftone() { return uHalftone.value; },
+  setShade(on) {
+    uNightShade.value = on ? 1 : 0;
+    if (!on) uHalftone.value = 0;
+    syncShadeHud();
+  },
+  setHalftone(v) {
+    const n = Math.min(1, Math.max(0, Number(v) || 0));
+    uHalftone.value = n;
+    if (n > 0) uNightShade.value = 1;
+    syncShadeHud();
+  },
+};
+
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
-  const t = freezeMotion ? 1.25 : clock.elapsedTime;
+  const t = (freezeMotion || holdStill) ? 1.25 : clock.elapsedTime;
 
-  pointerSmooth.lerp(pointer, freezeMotion ? 1 : 1 - Math.exp(-6 * dt));
+  pointerSmooth.lerp(pointer, (freezeMotion || holdStill) ? 1 : 1 - Math.exp(-6 * dt));
 
-  const pulse = freezeMotion ? 0.72 : 0.55 + 0.45 * Math.sin(t * 2.1);
+  const pulse = (freezeMotion || holdStill) ? 0.72 : 0.55 + 0.45 * Math.sin(t * 2.1);
 
   buildingMat.uniforms.uTime.value = t;
   if (typeof swayStrandBulbs === 'function') swayStrandBulbs(t);
@@ -8754,27 +9207,29 @@ function tick() {
   quayMat.uniforms.uTime.value = t;
   waterMat.uniforms.uTime.value = t;
   waterMat.uniforms.uCamPos.value.copy(camera.position);
-  waterMat.uniforms.uAmp.value = freezeMotion ? 0.0 : WATER_AMP;
+  waterMat.uniforms.uAmp.value = (freezeMotion || holdStill) ? 0.0 : WATER_AMP;
   // Quay lantern specular anchors (row at z≈3.85) — refresh if phys lanterns move later
   waterMat.uniforms.uLampA.value.set(-4.8, 1.55, 3.85);
   waterMat.uniforms.uLampB.value.set(4.8, 1.55, 3.85);
   quayMat.uniforms.uPointer.value.copy(pointerSmooth);
   mistMat.uniforms.uTime.value = t;
   lanternTime.value = t;
-  lanternPulse.value = freezeMotion ? 0.35 : 1.0;
+  lanternPulse.value = (freezeMotion || holdStill) ? 0.35 : 1.0;
   for (let li = 0; li < lanternPointLights.length; li++) {
     const lamp = lanternPointLights[li];
-    const flick = freezeMotion ? 1 : 0.94 + 0.06 * Math.sin(t * 2.15 + lamp.phase);
+    const flick = (freezeMotion || holdStill) ? 1 : 0.94 + 0.06 * Math.sin(t * 2.15 + lamp.phase);
     lamp.light.intensity = lamp.base * flick;
   }
   signalMat.uniforms.uTime.value = t;
   signalMat.uniforms.uPulse.value = pulse;
+  signalMat.uniforms.uLampPos.value.set(0, 4.15, 0);
+  signalGroup.localToWorld(signalMat.uniforms.uLampPos.value);
   haloMat.uniforms.uTime.value = t;
   haloMat.uniforms.uPulse.value = pulse;
   tipGlow.material.uniforms.uTime.value = t;
   tipGlow.material.uniforms.uPulse.value = pulse;
 
-  if (!freezeMotion) {
+  if (!freezeMotion && !holdStill) {
     motifIdx = Math.floor(t / 4) % MOTIFS.length;
     motifEl.textContent = MOTIFS[motifIdx];
     fill.intensity = 24 + 8 * Math.sin(t * 0.8);
