@@ -574,10 +574,23 @@ float fbm(vec2 p){
 `;
 
 // A02 · night fixture equation (Lights Shading) + optional soft halftone (Halftone Shading).
-// View vector is surface → camera, so Phong is dot(reflect, view) — the lesson's view points the other way.
-// Point falloff is the lesson's linear decay: max(0, 1 - distance * decay).
-// Halftone is a soft screen disk, not a hard step. Amount 0 skips it.
+// View vector is surface → camera, so Phong is dot(reflect, view).
+// Diffuse uses a short wrap so iron and wet stone keep form past the terminator.
+// Phong stays sharp. Point decay is an inverse-square core with a smooth range
+// gate: lightDecay is still 1/range. Halftone is a soft screen disk. Amount 0 skips it.
 const NIGHT_SHADE_GLSL = /* glsl */`
+float nightWrap(float ndl) {
+  float wrap = 0.34;
+  return clamp((ndl + wrap) / (1.0 + wrap), 0.0, 1.0);
+}
+float nightDecay(float dist, float lightDecay) {
+  float range = 1.0 / max(lightDecay, 0.0001);
+  float x = clamp(dist / range, 0.0, 1.0);
+  float x2 = x * x;
+  float window = clamp(1.0 - x2 * x2, 0.0, 1.0);
+  window *= window;
+  return window / (dist * dist * lightDecay * 0.45 + 1.0);
+}
 void nightAmbientAdd(vec3 lightColor, float lightIntensity, inout vec3 shade) {
   shade += lightColor * lightIntensity;
 }
@@ -586,7 +599,7 @@ void nightDirectionalAdd(
   inout vec3 shade, inout vec3 spec
 ) {
   vec3 L = normalize(lightDir);
-  float shading = max(dot(normal, L), 0.0);
+  float shading = nightWrap(dot(normal, L));
   vec3 R = reflect(-L, normal);
   float specular = pow(max(dot(R, viewDir), 0.0), specularPower);
   shade += lightColor * lightIntensity * shading;
@@ -600,13 +613,13 @@ void nightPointAdd(
   vec3 delta = lightPos - fragPos;
   float dist = length(delta);
   vec3 L = delta / max(dist, 0.0001);
-  float shading = max(dot(normal, L), 0.0);
+  float shading = nightWrap(dot(normal, L));
   vec3 R = reflect(-L, normal);
   float specular = pow(max(dot(R, viewDir), 0.0), specularPower);
-  float decay = max(0.0, 1.0 - dist * lightDecay);
+  float decay = nightDecay(dist, lightDecay);
   shade += lightColor * lightIntensity * decay * shading;
   spec += lightColor * lightIntensity * decay * specular;
-  lum = max(lum, decay * (shading * 0.65 + specular));
+  lum = max(lum, decay * (shading * 0.55 + specular));
 }
 vec3 nightHalftone(vec3 color, float lightTerm, vec2 fragCoord, vec2 resolution, float repetitions, float amount) {
   if (amount < 0.001) return color;
@@ -721,13 +734,13 @@ function patchNightShader(shader, mode) {
         vec3 nShade = vec3(0.0);
         vec3 nSpec = vec3(0.0);
         float nLum = 0.0;
-        nightAmbientAdd(vec3(0.52, 0.50, 0.60), 0.30, nShade);
-        nightDirectionalAdd(vec3(0.86, 0.88, 1.0), 0.42, nN, vec3(0.32, 0.92, 0.22), nV, 18.0, nShade, nSpec);
-        nightPointAdd(uSigCol0, 1.55, nN, uSigPos0, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
-        nightPointAdd(uSigCol1, 1.55, nN, uSigPos1, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
-        nightPointAdd(uSigCol2, 1.55, nN, uSigPos2, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
-        nightPointAdd(uSigCol3, 1.55, nN, uSigPos3, vNightWorld, nV, 16.0, 0.40, nShade, nSpec, nLum);
-        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.85;
+        nightAmbientAdd(vec3(0.42, 0.44, 0.52), 0.22, nShade);
+        nightDirectionalAdd(vec3(0.78, 0.82, 0.96), 0.34, nN, vec3(0.32, 0.92, 0.22), nV, 28.0, nShade, nSpec);
+        nightPointAdd(uSigCol0, 2.15, nN, uSigPos0, vNightWorld, nV, 22.0, 0.55, nShade, nSpec, nLum);
+        nightPointAdd(uSigCol1, 2.15, nN, uSigPos1, vNightWorld, nV, 22.0, 0.55, nShade, nSpec, nLum);
+        nightPointAdd(uSigCol2, 2.15, nN, uSigPos2, vNightWorld, nV, 22.0, 0.55, nShade, nSpec, nLum);
+        nightPointAdd(uSigCol3, 2.15, nN, uSigPos3, vNightWorld, nV, 22.0, 0.55, nShade, nSpec, nLum);
+        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.95;
         outgoingLight = nightCol;
         outgoingLight = nightHalftone(outgoingLight, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 88.0, uHalftone * smoothstep(0.04, 0.22, nLum));
       }
@@ -740,11 +753,11 @@ function patchNightShader(shader, mode) {
         vec3 nShade = vec3(0.0);
         vec3 nSpec = vec3(0.0);
         float nLum = 0.0;
-        nightAmbientAdd(vec3(0.20, 0.24, 0.32), 0.22, nShade);
-        nightDirectionalAdd(vec3(0.55, 0.62, 0.78), 0.28, nN, vec3(0.28, 0.93, 0.18), nV, 28.0, nShade, nSpec);
-        nightPointAdd(vec3(1.0, 0.72, 0.38), 1.45, nN, uLampA, vNightWorld, nV, 36.0, 0.14, nShade, nSpec, nLum);
-        nightPointAdd(vec3(0.94, 0.66, 0.34), 1.15, nN, uLampB, vNightWorld, nV, 36.0, 0.14, nShade, nSpec, nLum);
-        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.7;
+        nightAmbientAdd(vec3(0.16, 0.20, 0.28), 0.16, nShade);
+        nightDirectionalAdd(vec3(0.48, 0.56, 0.72), 0.22, nN, vec3(0.28, 0.93, 0.18), nV, 36.0, nShade, nSpec);
+        nightPointAdd(vec3(1.0, 0.70, 0.36), 2.05, nN, uLampA, vNightWorld, nV, 42.0, 0.16, nShade, nSpec, nLum);
+        nightPointAdd(vec3(0.92, 0.64, 0.32), 1.65, nN, uLampB, vNightWorld, nV, 42.0, 0.16, nShade, nSpec, nLum);
+        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.9;
         outgoingLight = nightCol;
         outgoingLight = nightHalftone(outgoingLight, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 80.0, uHalftone * smoothstep(0.05, 0.24, nLum));
       }
@@ -762,10 +775,10 @@ function patchNightShader(shader, mode) {
         #else
           vec3 nTint = uLampTint;
         #endif
-        nightAmbientAdd(vec3(0.48, 0.44, 0.40), 0.28, nShade);
-        nightDirectionalAdd(vec3(1.0, 0.90, 0.76), 0.48, nN, vec3(0.35, 0.90, 0.24), nV, 14.0, nShade, nSpec);
-        nightPointAdd(nTint, 1.85, nN, vNightLamp, vNightWorld, nV, 12.0, 2.35, nShade, nSpec, nLum);
-        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.55;
+        nightAmbientAdd(vec3(0.36, 0.32, 0.28), 0.18, nShade);
+        nightDirectionalAdd(vec3(0.86, 0.78, 0.64), 0.28, nN, vec3(0.35, 0.90, 0.24), nV, 22.0, nShade, nSpec);
+        nightPointAdd(nTint, 2.65, nN, vNightLamp, vNightWorld, nV, 16.0, 3.4, nShade, nSpec, nLum);
+        vec3 nightCol = diffuseColor.rgb * nShade + nSpec * 0.72;
         outgoingLight = nightCol;
         outgoingLight = nightHalftone(outgoingLight, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 120.0, uHalftone * smoothstep(0.06, 0.28, nLum) * 0.85);
       }
@@ -2908,13 +2921,16 @@ const signalLenses = new THREE.InstancedMesh(signalLampGeo, signalLensMat, SIGNA
 const signalLampVert = /* glsl */`
   varying vec3 vNormalW;
   varying vec3 vWorldPos;
+  varying vec3 vOrigin;
   void main(){
     #ifdef USE_INSTANCING
       vec4 world = instanceMatrix * vec4(position, 1.0);
       vNormalW = normalize(mat3(instanceMatrix) * normal);
+      vOrigin = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     #else
       vec4 world = modelMatrix * vec4(position, 1.0);
       vNormalW = normalize(mat3(modelMatrix) * normal);
+      vOrigin = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     #endif
     vWorldPos = world.xyz;
     gl_Position = projectionMatrix * viewMatrix * world;
@@ -2936,6 +2952,7 @@ function makeSignalLampMat(hex) {
       uniform vec2 uShadeRes;
       varying vec3 vNormalW;
       varying vec3 vWorldPos;
+      varying vec3 vOrigin;
       ${NIGHT_SHADE_GLSL}
       void main(){
         vec3 prior = uColor * 2.45;
@@ -2948,11 +2965,14 @@ function makeSignalLampMat(hex) {
         vec3 nShade = vec3(0.0);
         vec3 nSpec = vec3(0.0);
         float nLum = 0.0;
-        vec3 filament = vWorldPos + N * 0.11;
-        nightPointAdd(uColor, 3.1, N, filament, vWorldPos, V, 18.0, 4.2, nShade, nSpec, nLum);
-        float facing = pow(clamp(dot(N, V), 0.0, 1.0), 0.62);
-        vec3 col = uColor * (1.25 + 1.45 * facing) + nSpec * 0.55 + nShade * 0.25;
-        col = nightHalftone(col, 0.42 + 0.58 * facing, gl_FragCoord.xy, uShadeRes, 64.0, uHalftone * 0.22);
+        vec3 toCam = normalize(cameraPosition - vOrigin);
+        vec3 filament = vOrigin + toCam * 0.095;
+        nightAmbientAdd(uColor, 0.22, nShade);
+        nightPointAdd(uColor, 3.4, N, filament, vWorldPos, V, 26.0, 6.4, nShade, nSpec, nLum);
+        float limb = pow(clamp(dot(N, V), 0.0, 1.0), 0.72);
+        vec3 col = uColor * (0.28 + nShade) * mix(0.42, 1.0, limb) + nSpec * 0.9;
+        col = max(col, uColor * (1.15 + 0.85 * limb));
+        col = nightHalftone(col, 0.35 + 0.65 * limb, gl_FragCoord.xy, uShadeRes, 72.0, uHalftone * 0.16);
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -3398,11 +3418,11 @@ const waterMat = new THREE.ShaderMaterial({
       } else {
         vec3 nShade = vec3(0.0);
         vec3 nSpec = vec3(0.0);
-        nightAmbientAdd(vec3(0.18, 0.22, 0.30), 0.10, nShade);
-        nightDirectionalAdd(vec3(0.62, 0.70, 0.86), 0.18, N, normalize(uKeyDir), V, 64.0, nShade, nSpec);
-        nightPointAdd(vec3(1.0, 0.74, 0.40), 1.25, N, uLampA, vWorldPos, V, 72.0, 0.11, nShade, nSpec, fixtureLum);
-        nightPointAdd(vec3(0.96, 0.68, 0.36), 1.05, N, uLampB, vWorldPos, V, 72.0, 0.11, nShade, nSpec, fixtureLum);
-        col += nShade * 0.38 + nSpec * mix(0.35, 1.0, uReflect);
+        nightAmbientAdd(vec3(0.14, 0.18, 0.26), 0.08, nShade);
+        nightDirectionalAdd(vec3(0.55, 0.64, 0.82), 0.12, N, normalize(uKeyDir), V, 96.0, nShade, nSpec);
+        nightPointAdd(vec3(1.0, 0.72, 0.36), 0.72, N, uLampA, vWorldPos, V, 110.0, 0.09, nShade, nSpec, fixtureLum);
+        nightPointAdd(vec3(0.94, 0.66, 0.32), 0.58, N, uLampB, vWorldPos, V, 110.0, 0.09, nShade, nSpec, fixtureLum);
+        col += nShade * 0.42 + nSpec * mix(0.7, 1.35, uReflect);
       }
 
       // Removed leftover caustics-lite scroll bands (old night-streak grid):
@@ -4432,21 +4452,40 @@ const LANTERN_PANE_APPLY = /* glsl */`
     vec3 nShade = vec3(0.0);
     vec3 nSpec = vec3(0.0);
     float nLum = 0.0;
-    nightPointAdd(vColor, 1.15, N, vLampPos, vWorldPos, V, 30.0, 2.7, nShade, nSpec, nLum);
-    float shape = clamp(nLum, 0.0, 1.0);
-    col *= mix(0.78, 1.0, shape);
-    col += nSpec * 0.08;
+    nightDirectionalAdd(vec3(0.62, 0.70, 0.86), 0.14, N, vec3(0.35, 0.88, 0.22), V, 46.0, nShade, nSpec);
+    float dist = distance(vLampPos, vWorldPos);
+    vec3 L = (vLampPos - vWorldPos) / max(dist, 0.0001);
+    float decay = nightDecay(dist, 8.2);
+    float transmit = clamp((dot(-N, L) + 0.12) / 1.12, 0.0, 1.0);
+    vec3 R = reflect(-L, N);
+    float glint = pow(max(dot(R, V), 0.0), 34.0);
+    float shape = clamp(decay * (0.22 + 0.78 * transmit), 0.0, 1.0);
+    col *= mix(0.48, 1.05, shape);
+    col += nSpec * 0.1 + vColor * glint * decay * 0.2;
     col = min(col, vec3(0.62));
-    col = nightHalftone(col, shape, gl_FragCoord.xy, uShadeRes, 112.0, uHalftone * 0.34);
+    nLum = shape;
+    col = nightHalftone(col, shape, gl_FragCoord.xy, uShadeRes, 120.0, uHalftone * 0.28 * smoothstep(0.2, 0.7, shape));
   }
 `;
-const LANTERN_CORE_APPLY = /* glsl */`
+const LANTERN_BULB_APPLY = /* glsl */`
+  if (uNightShade > 0.5) {
+    vec3 nShade = vec3(0.0);
+    vec3 nSpec = vec3(0.0);
+    nightDirectionalAdd(vec3(0.82, 0.86, 0.94), 0.2, N, vec3(0.32, 0.90, 0.2), V, 30.0, nShade, nSpec);
+    float limb = pow(clamp(dot(N, V), 0.0, 1.0), 0.8);
+    float glow = nightDecay(distance(vWorldPos, vLampPos), 6.5);
+    col = vColor * (0.12 + 1.15 * limb * glow) * pulse + nSpec * 0.42;
+  }
+`;
+const LANTERN_FILAMENT_APPLY = /* glsl */`
   if (uNightShade > 0.5) {
     vec3 nShade = vec3(0.0);
     vec3 nSpec = vec3(0.0);
     float nLum = 0.0;
-    nightPointAdd(vColor, 2.2, N, vLampPos + N * 0.02, vWorldPos, V, 14.0, 5.5, nShade, nSpec, nLum);
-    col = col * (0.72 + 0.55 * clamp(nLum, 0.0, 1.4)) + nSpec * 0.16;
+    nightPointAdd(vColor, 5.2, N, vLampPos, vWorldPos, V, 18.0, 9.0, nShade, nSpec, nLum);
+    float hot = clamp(dot(nShade, vec3(0.25, 0.55, 0.2)), 0.0, 1.8);
+    col = col * (0.34 + hot) + nSpec * 0.62;
+    col = max(col, tint * (0.72 + 0.28 * hot) * pulse);
   }
 `;
 function lanternShadeUniforms(extra) {
@@ -4544,7 +4583,7 @@ function makeLanternBulbMat(tint) {
         float fres = pow(1.0 - abs(dot(N, V)), 1.7);
         float pulse = 0.93 + 0.07 * sin(uTime * 2.4 + vWorldPos.x * 0.7) * uPulse;
         vec3 col = vColor * (0.18 + 0.42 * fres) * pulse;
-        ${LANTERN_CORE_APPLY}
+        ${LANTERN_BULB_APPLY}
         float alpha = mix(0.06, 0.38, fres);
         gl_FragColor = vec4(col, alpha);
       }
@@ -4578,7 +4617,7 @@ function makeLanternFilamentMat(tint) {
         vec3 tint = clamp((vColor - vec3(0.22)) * 1.65, 0.0, 1.35);
         float heat = 0.82 + 0.2 * facing;
         vec3 col = tint * heat * pulse;
-        ${LANTERN_CORE_APPLY}
+        ${LANTERN_FILAMENT_APPLY}
         gl_FragColor = vec4(col, 1.0);
       }
     `,
@@ -4683,9 +4722,10 @@ function makeLanternPanMat(tint) {
           vec3 nShade = vec3(0.0);
           vec3 nSpec = vec3(0.0);
           float nLum = 0.0;
-          nightAmbientAdd(vec3(0.25, 0.22, 0.2), 0.2, nShade);
-          nightPointAdd(vColor, 1.6, N, vLampPos, vWorldPos, V, 18.0, 3.2, nShade, nSpec, nLum);
-          col = iron * nShade + vColor * nLum * 0.55 + nSpec * 0.35;
+          nightAmbientAdd(vec3(0.18, 0.16, 0.14), 0.14, nShade);
+          nightDirectionalAdd(vec3(0.62, 0.58, 0.5), 0.1, N, vec3(0.3, 0.9, 0.2), V, 24.0, nShade, nSpec);
+          nightPointAdd(vColor, 2.8, N, vLampPos, vWorldPos, V, 22.0, 7.2, nShade, nSpec, nLum);
+          col = iron * nShade + vColor * clamp(nLum, 0.0, 1.0) * 0.78 + nSpec * 0.48;
           col = nightHalftone(col, clamp(nLum, 0.0, 1.0), gl_FragCoord.xy, uShadeRes, 96.0, uHalftone * 0.4);
         }
         gl_FragColor = vec4(col, 1.0);
@@ -6485,10 +6525,10 @@ const signalMat = new THREE.ShaderMaterial({
       vec3 nShade = vec3(0.0);
       vec3 nSpec = vec3(0.0);
       float nLum = 0.0;
-      nightAmbientAdd(vec3(0.14, 0.15, 0.20), 0.32, nShade);
-      nightDirectionalAdd(vec3(0.62, 0.68, 0.84), 0.36, N, vec3(0.25, 0.92, 0.18), V, 22.0, nShade, nSpec);
-      nightPointAdd(goldC, 2.6, N, uLampPos, vWorldPos, V, 16.0, 0.28, nShade, nSpec, nLum);
-      vec3 body = vec3(0.11, 0.12, 0.16) * nShade + nSpec;
+      nightAmbientAdd(vec3(0.10, 0.11, 0.15), 0.22, nShade);
+      nightDirectionalAdd(vec3(0.52, 0.58, 0.74), 0.28, N, vec3(0.25, 0.92, 0.18), V, 32.0, nShade, nSpec);
+      nightPointAdd(goldC, 3.4, N, uLampPos, vWorldPos, V, 20.0, 0.34, nShade, nSpec, nLum);
+      vec3 body = vec3(0.09, 0.10, 0.14) * nShade + nSpec * 1.15;
       body = mix(body, goldC * (1.15 + 0.35 * uPulse), core * 0.9);
       body += goldC * tip * (0.85 + 0.4 * uPulse);
       float fixture = clamp(nLum + core * 0.8 + tip, 0.0, 1.0);
@@ -6544,7 +6584,7 @@ const haloMat = new THREE.ShaderMaterial({
       col += vec3(1.0, 0.85, 0.45) * glow;
       a = max(a, glow);
       if (uNightShade > 0.5) {
-        col = nightHalftone(col, 0.55, gl_FragCoord.xy, uShadeRes, 54.0, uHalftone * 0.28 * ring);
+        col = nightHalftone(col, 0.55, gl_FragCoord.xy, uShadeRes, 78.0, uHalftone * 0.22 * ring);
       }
       gl_FragColor = vec4(col, a);
     }
