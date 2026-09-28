@@ -1014,6 +1014,7 @@ const buildingMat = new THREE.ShaderMaterial({
     uSheathOn: { value: 0.0 },
     // A01 bake bay — instance id of the one shop opening. < 0 keeps atlas panes.
     uBakeBay: { value: -1.0 },
+    uBakeCenter: { value: 0.0 },
     uBakeHalf: { value: 0.28 },
     uBakeBot: { value: 0.12 },
     uBakeTop: { value: 0.68 },
@@ -1096,6 +1097,7 @@ const buildingMat = new THREE.ShaderMaterial({
     uniform sampler2D uSheathGrowth;
     uniform float uSheathOn;
     uniform float uBakeBay;
+    uniform float uBakeCenter;
     uniform float uBakeHalf;
     uniform float uBakeBot;
     uniform float uBakeTop;
@@ -1695,10 +1697,11 @@ const buildingMat = new THREE.ShaderMaterial({
       float fog = 1.0 - exp(-uFogDensity * uFogDensity * dist * dist * 12.0);
       vec3 col = mix(body, uFogColor, clamp(fog, 0.0, 0.85));
 
-      // A01 · one +Z shop opening is a hole. Baked quay bay sits behind it.
+      // A01 · one fenestra cell on the +Z shop row. The hole is that cell's
+      // glass only (mullion inset), so the pier between bays stays.
       // Inactive (uBakeBay < 0) leaves occupied-32 / shop atlas pixels unchanged.
       if (uBakeBay >= 0.0 && abs(vId - uBakeBay) < 0.5 && Ln.z > 0.65) {
-        if (abs(faceAlong) <= uBakeHalf && lpM.y >= uBakeBot && lpM.y <= uBakeTop) discard;
+        if (abs(faceAlong - uBakeCenter) <= uBakeHalf && lpM.y >= uBakeBot && lpM.y <= uBakeTop) discard;
       }
       gl_FragColor = vec4(col, 1.0);
     }
@@ -2356,6 +2359,39 @@ function pickQuayBakeBox(boxes) {
   }
   return best;
 }
+// One ground-floor shop pane. Matches the building shader: cell 0.76 m,
+// shop mullU 0.04 / mullV 0.045, plinth kill below 0.12 m. faceAlong is
+// metres from the massing center, so cell 0 is [0, 0.76) and the pier at 0
+// is the stile between two shops — never the middle of a hole.
+function shopFenestraCell(halfAlong) {
+  const CELL = 0.76;
+  const MULL_U = 0.04;
+  const MULL_V = 0.045;
+  const PLINTH = 0.12;
+  const margin = 0.02;
+  const glassBot = Math.max(PLINTH, MULL_V * CELL);
+  const glassTop = CELL * (1 - MULL_V);
+  let best = null;
+  for (let col = -8; col <= 8; col++) {
+    const lo = col * CELL;
+    const hi = (col + 1) * CELL;
+    const visLo = Math.max(lo, -halfAlong + margin);
+    const visHi = Math.min(hi, halfAlong - margin);
+    const visW = visHi - visLo;
+    if (visW < CELL * 0.55) continue;
+    const glassLo = Math.max(lo + MULL_U * CELL, visLo);
+    const glassHi = Math.min(hi - MULL_U * CELL, visHi);
+    if (glassHi - glassLo < 0.28) continue;
+    const mid = (lo + hi) * 0.5;
+    const cand = { col, mid, glassLo, glassHi, glassBot, glassTop, visW };
+    const closer = best && Math.abs(mid) < Math.abs(best.mid) - 1e-4;
+    const tie = best && Math.abs(Math.abs(mid) - Math.abs(best.mid)) <= 1e-4;
+    const fuller = !best || visW > best.visW + 0.02;
+    const sameWidth = best && Math.abs(visW - best.visW) <= 0.02;
+    if (fuller || (sameWidth && closer) || (sameWidth && tie && col > best.col)) best = cand;
+  }
+  return best;
+}
 function mountQuayBakeBay() {
   const base = new URL('./07-advanced-assets/a01-bake/', import.meta.url);
   const texLoader = new THREE.TextureLoader();
@@ -2374,17 +2410,25 @@ function mountQuayBakeBay() {
       console.warn('A01 bake bay: no quay shop massing fit');
       return;
     }
+    // Same pitch as the façade shader (cellW/cellH 0.76, shop mullions).
+    // A cell is [col, col+1) * 0.76 along the face, measured from the massing
+    // center. Centering the hole on 0 straddles the pier between two shops.
+    const cell = shopFenestraCell(box.w * 0.5);
+    if (!cell) {
+      console.warn('A01 bake bay: no single shop cell on the +Z face');
+      return;
+    }
+    const holeW = cell.glassHi - cell.glassLo;
+    const holeH = cell.glassTop - cell.glassBot;
+    const openW = meta.openW || (meta.openR - meta.openL);
     const openH = meta.head - meta.sill;
-    const s = Math.min(
-      (box.w * 0.9) / meta.roomW,
-      (box.d * 0.82) / meta.roomD,
-      0.7 / openH
-    );
-    if (!(s > 0.08)) return;
-    const uHalf = Math.min(meta.openW * s * 0.5, box.w * 0.5 - 0.05);
-    const uBot = Math.max(0.06, meta.sill * s);
-    const uTop = Math.min(meta.head * s, 0.7);
-    if (uTop - uBot < 0.18 || uHalf < 0.08) return;
+    // Cover the one pane. Extra opening height hides behind the pier and plinth.
+    const s = Math.max(holeW / openW, holeH / openH);
+    if (!(s > 0.08) || s * meta.roomD > box.d * 0.92) return;
+    const uCenter = (cell.glassLo + cell.glassHi) * 0.5;
+    const uHalf = holeW * 0.5;
+    const uBot = cell.glassBot;
+    const uTop = cell.glassTop;
 
     lightMap.colorSpace = THREE.SRGBColorSpace;
     lightMap.flipY = false;
@@ -2409,22 +2453,34 @@ function mountQuayBakeBay() {
       });
     });
     root.scale.setScalar(s);
-    // Opening at local z=0. Sink it just inside the +Z façade.
-    root.position.set(box.x, 0, box.z + box.d * 0.5 - 0.04);
+    // Opening center sits on this cell's glass. Local opening is centered
+    // on x=0; its vertical center is (sill+head)/2 above the room floor.
+    const openCy = (meta.sill + meta.head) * 0.5;
+    const holeCy = (uBot + uTop) * 0.5;
+    const worldX = box.x + uCenter;
+    const faceZ = box.z + box.d * 0.5;
+    root.position.set(worldX, holeCy - openCy * s, faceZ - 0.03);
     scene.add(root);
     buildingMat.uniforms.uBakeBay.value = box.i;
+    buildingMat.uniforms.uBakeCenter.value = uCenter;
     buildingMat.uniforms.uBakeHalf.value = uHalf;
     buildingMat.uniforms.uBakeBot.value = uBot;
     buildingMat.uniforms.uBakeTop.value = uTop;
-    window.__harborBakeBay = { i: box.i, x: box.x, z: box.z, w: box.w, d: box.d, s, half: uHalf, bot: uBot, top: uTop };
+    window.__harborBakeBay = {
+      i: box.i, x: box.x, z: box.z, w: box.w, d: box.d, s,
+      col: cell.col, center: uCenter, worldX, half: uHalf, bot: uBot, top: uTop,
+    };
     if (wantFrame && controls) {
-      // Eye just above the shop opening, close enough that the bay fills the frame.
-      // still=1 stops the render loop after a handful of frames, so this has to
-      // land before the extra renderFrame below.
-      const eyeY = (uBot + uTop) * 0.5;
-      const faceZ = box.z + box.d * 0.5;
-      camera.position.set(box.x + 0.22, eyeY + 0.28, faceZ + 1.12);
-      controls.target.set(box.x, eyeY - 0.02, box.z - box.d * 0.15);
+      // Eye on this one cell, not the massing center (that center is the pier).
+      // ?close=1 is the tighter exhibit frame. still=1 stops the render loop
+      // after a handful of frames, so this has to land before renderFrame below.
+      const tight = params.has('close');
+      camera.position.set(
+        worldX + (tight ? 0.0 : 0.18),
+        holeCy + (tight ? 0.02 : 0.22),
+        faceZ + (tight ? 0.48 : 1.05)
+      );
+      controls.target.set(worldX, holeCy, tight ? faceZ - 0.4 : box.z - box.d * 0.12);
       controls.update();
     }
     // GLB arrives after the still-mode settle frames. Paint the hole once.

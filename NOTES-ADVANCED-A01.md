@@ -72,9 +72,11 @@ Headless Blender 4.2 `Image.save()` writes a black PNG for generated float image
 `harbor.html` only:
 
 - Imports `GLTFLoader`
-- Four uniforms (`uBakeBay`, `uBakeHalf`, `uBakeBot`, `uBakeTop`)
-- One `discard` on a single `+Z` ground-floor rect when a bay instance is chosen
-- `mountQuayBakeBay()` places the GLB just inside that massing and hides the baked façade/stoop (the district wall is already there)
+- Five uniforms (`uBakeBay`, `uBakeCenter`, `uBakeHalf`, `uBakeBot`, `uBakeTop`)
+- One `discard` on a single `+Z` ground-floor fenestra cell when a bay instance is chosen
+- `mountQuayBakeBay()` places the GLB opening on that cell and hides the baked façade/stoop (the district wall is already there)
+
+The façade grid is shop | pier | shop. `faceAlong` is metres from the massing center, and cell 0 is `[0, 0.76)`, so x = 0 is the pier between two shops, not the middle of a bay. An earlier hole used `abs(faceAlong) <= uBakeHalf` and sat across that pier, reading as a third room between two atlas stickers. The hole is now one cell's glass only (shop mullion 0.04 / 0.045, plinth at 0.12 m), and the GLB opening is scaled and shifted onto that same rect. The neighboring shop pane and the pier stay on the atlas path.
 
 Street ground, deck plank atlas, prop wear, fleet, lamp props, water, pennants, and buoyancy/physics are untouched. If the GLB fails to load, `uBakeBay` stays `-1` and every pane stays on the atlas path.
 
