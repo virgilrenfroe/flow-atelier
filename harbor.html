@@ -257,7 +257,8 @@
       <div class="r"><span>fbo</span><strong id="fbo-state">A→B</strong></div>
       <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
       <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
-      <div class="r"><span>air</span><strong id="air-state">Signal</strong></div>
+        <div class="r"><span>air</span><strong id="air-state">Signal</strong></div>
+      <div class="r"><span>decals</span><strong id="decal-state">projected</strong></div>
       <div class="r"><strong class="accent">Rube plate → quay left of Signal</strong></div>
     </div>
     <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · volume · not live</p>
@@ -276,6 +277,7 @@
     <button class="pill touch-only" id="wind-str" type="button" title="Cycle wind strength ([ / ])">Gust</button>
     <button class="pill on" id="props-springs" type="button" title="Toggle soft springs (G)" aria-pressed="true">Springs</button>
     <button class="pill" id="props-blast" type="button" title="Basin blast impulse (B)">Blast</button>
+    <button class="pill on" id="props-decals" type="button" title="Toggle projected decals (K)" aria-pressed="true">Decals</button>
   </div>
   <div id="walk-pad" aria-label="Citizen move">
     <button type="button" data-move="f" aria-label="Forward">▲</button>
@@ -302,6 +304,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
+import { mountProjectedDecals } from './noctuary/i06-projected-decals.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -480,6 +483,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === ']') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail: 1 }));
+  }
+  if (e.key === 'k' || e.key === 'K') {
+    window.dispatchEvent(new CustomEvent('noctuary-decals-toggle'));
   }
 });
 
@@ -5128,6 +5134,37 @@ function makeHarborCrate(def, col) {
   return entry;
 }
 HARBOR_CRATE_DEFS.forEach((def, col) => makeHarborCrate(def, col));
+
+// I06 · projected decals — quay wear + freight stamps. Separate from prop atlases.
+const decalsParam = params.get('decals');
+function syncDecalChrome(on) {
+  const btn = document.getElementById('props-decals');
+  if (btn) {
+    btn.classList.toggle('on', !!on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  const el = document.getElementById('decal-state');
+  if (el) el.textContent = on ? 'projected' : 'off';
+}
+const projectedDecals = mountProjectedDecals({
+  scene,
+  quay,
+  seawallCap,
+  crates: physCrates.map((c) => c.mesh),
+  enabled: decalsParam !== '0' && decalsParam !== 'off',
+  onChange: syncDecalChrome,
+});
+window.__harborDecals = projectedDecals;
+syncDecalChrome(projectedDecals.enabled);
+window.addEventListener('noctuary-decals-toggle', () => {
+  projectedDecals.setEnabled(!projectedDecals.enabled);
+});
+const propsDecalsBtn = document.getElementById('props-decals');
+if (propsDecalsBtn) {
+  propsDecalsBtn.addEventListener('click', () => {
+    projectedDecals.setEnabled(!projectedDecals.enabled);
+  });
+}
 
 // Grab / toss interaction (physics-props pattern)
 const physRay = new THREE.Raycaster();
