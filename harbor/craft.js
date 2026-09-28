@@ -1,16 +1,20 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
+import { live } from './live.js';
 
 // Quay-tied boats and a quieter pair of fish schools.
 // Hulls are Cannon bodies on the crate Archimedes path. Sealed soles and the
 // water footprint discard stay with the meshes and water.js.
 // Painters end on the coping cleats. Nothing in this module stands in the basin.
+// Paint, wear, and night response come from the quay crate atlas. Marks are
+// the sheet's own stencils: HARBOR, SIGNAL, QUAY, FENESTRA.
 export function installHarborCraft(deps) {
   const {
     scene, camera, controls, params, BLOOM_LAYER,
     ORBIT_FOV, WATER_NEAR_Z, WATER_D, WATER_AMP, WATER_Y, waterMat, freezeMotion,
     SEAWALL_Z, faceTop, atlasBase, atlasLoader,
     basinBuoy, physFreeze, physCrateMat, physAdd, physHooks, physCrates, crateInBasinXZ,
+    crateWearMat, stampHarborCrateUVs, CRATE_FACE_ROW,
   } = deps;
 
   // ——— Basin craft: working boats + surface fish ———
@@ -76,30 +80,101 @@ export function installHarborCraft(deps) {
     return kept;
   }
 
+  // Same cell math as crateAtlasUV, with the 2% inset the box stamper uses.
+  function harborAtlasUV(col, row, lu, lv) {
+    const du = 0.2;
+    const dv = 0.25;
+    const inset = 0.02;
+    const u = inset + THREE.MathUtils.clamp(lu, 0, 1) * (1 - inset * 2);
+    const v = inset + THREE.MathUtils.clamp(lv, 0, 1) * (1 - inset * 2);
+    return [
+      col * du + u * du,
+      (1 - (row + 1) * dv) + v * dv,
+    ];
+  }
+
+  function harborFinishGeo(geo) {
+    if (!geo.getAttribute('normal')) geo.computeVertexNormals();
+    geo.computeTangents();
+    return geo;
+  }
+
+  function harborStampCell(geo, col, row) {
+    const uv = geo.attributes.uv;
+    for (let i = 0; i < uv.count; i++) {
+      const at = harborAtlasUV(col, row, uv.getX(i), uv.getY(i));
+      uv.setXY(i, at[0], at[1]);
+    }
+    uv.needsUpdate = true;
+    return harborFinishGeo(geo);
+  }
+
+  // Plank scale of a quay crate. Packed UV is (column * 16 + repeats, row * 16 + repeats).
+  // The fragment fold lives in harborInstallRepeat so a quad can cross a seam
+  // without smearing into the next atlas cell.
+  const HARBOR_PLANK = 0.38;
+  function harborPackedUV(col, row, lu, lv) {
+    return [col * 16 + lu, row * 16 + lv];
+  }
+
+  function harborInstallRepeat(mat) {
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          'void main() {',
+          `vec2 harborCrateUv(vec2 p) {
+            float col = floor(p.x / 16.0);
+            float row = floor(p.y / 16.0);
+            float lu = fract(p.x - col * 16.0);
+            float lv = fract(p.y - row * 16.0);
+            return vec2(
+              (col + 0.02 + lu * 0.96) * 0.2,
+              (1.0 - (row + 1.0) * 0.25) + (0.02 + lv * 0.96) * 0.25
+            );
+          }
+          void main() {`
+        )
+        .replace(
+          '#include <uv_vertex>',
+          `#include <uv_vertex>
+          #ifdef USE_MAP
+            vMapUv = harborCrateUv(uv);
+          #endif
+          #ifdef USE_NORMALMAP
+            vNormalMapUv = harborCrateUv(uv);
+          #endif
+          #ifdef USE_ROUGHNESSMAP
+            vRoughnessMapUv = harborCrateUv(uv);
+          #endif
+          #ifdef USE_EMISSIVEMAP
+            vEmissiveMapUv = harborCrateUv(uv);
+          #endif`
+        );
+    };
+    mat.customProgramCacheKey = () => 'harbor-crate-repeat-v1';
+  }
+
   function harborHull(spec) {
     const S = 16;
     const R = 7;
     const P = R * 2 - 1;
     const positions = [];
-    const colors = [];
+    const uvs = [];
     const indices = [];
-    const cHull = new THREE.Color(spec.color);
-    const cWet = cHull.clone().multiplyScalar(0.38);
-    const cStripe = new THREE.Color(spec.stripe);
-    const cStrake = cHull.clone().lerp(new THREE.Color(0xd5cbb8), 0.55);
     const sheerS = [];
     const sheerP = [];
     const wlS = [];
     const wlP = [];
-    const tint = (y, sheer) => {
-      if (y < -0.012) return cWet.clone().lerp(cHull, THREE.MathUtils.smoothstep(y, -0.1, -0.012));
-      if (Math.abs(y) <= 0.026) return cStripe;
-      if (sheer > 0.05 && y > sheer * 0.8) return cStrake;
-      return cHull;
-    };
-    const push = (x, y, z, col) => {
+    const sternRing = [];
+    const col = spec.atlasCol;
+    const side = CRATE_FACE_ROW.side;
+    const sternZ = -spec.length * 0.5;
+    // Side row, keel to sheer, repeated along the length at crate-plank size.
+    // Port and starboard share u so the keel quads stay in one repeat.
+    const push = (x, y, z, lv) => {
       positions.push(x, y, z);
-      colors.push(col.r, col.g, col.b);
+      const at = harborPackedUV(col, side, (z - sternZ) / HARBOR_PLANK, lv);
+      uvs.push(at[0], at[1]);
     };
 
     const bowPow = spec.bowPow == null ? 0.8 : spec.bowPow;
@@ -118,10 +193,14 @@ export function installHarborCraft(deps) {
         const v = j / (R - 1);
         const y = keelY + (sheer - keelY) * v;
         const x = halfB * Math.pow(Math.sin(v * Math.PI * 0.5), spec.bilge);
-        ring.push({ x, y, z });
+        ring.push({ x, y, z, v });
       }
       sheerS.push({ x: ring[R - 1].x, y: ring[R - 1].y, z });
       sheerP.push({ x: -ring[R - 1].x, y: ring[R - 1].y, z });
+      if (i === 0) {
+        for (let j = R - 1; j >= 0; j--) sternRing.push({ x: ring[j].x, y: ring[j].y, z });
+        for (let j = 1; j < R; j++) sternRing.push({ x: -ring[j].x, y: ring[j].y, z });
+      }
       let wlX = ring[0].x;
       for (let j = 0; j < R - 1; j++) {
         const y0 = ring[j].y;
@@ -136,11 +215,11 @@ export function installHarborCraft(deps) {
       wlP.push({ x: -Math.max(wlX, 0.012), z });
       for (let j = R - 1; j >= 0; j--) {
         const p = ring[j];
-        push(p.x, p.y, p.z, tint(p.y, sheer));
+        push(p.x, p.y, p.z, p.v);
       }
       for (let j = 1; j < R; j++) {
         const p = ring[j];
-        push(-p.x, p.y, p.z, tint(p.y, sheer));
+        push(-p.x, p.y, p.z, p.v);
       }
     }
 
@@ -158,60 +237,105 @@ export function installHarborCraft(deps) {
     const stemY = bowSheer * 0.42 + (-spec.draft * 0.25);
     const stemZ = spec.length * 0.5 + spec.length * 0.028;
     const stemIndex = positions.length / 3;
-    push(0, stemY, stemZ, tint(stemY, bowSheer));
+    push(0, stemY, stemZ, 0.55);
     const bowRing = (S - 1) * P;
     for (let k = 0; k < P - 1; k++) indices.push(stemIndex, bowRing + k, bowRing + k + 1);
 
-    let sx = 0, sy = 0, sz = 0;
-    for (let k = 0; k < P; k++) {
-      sx += positions[k * 3];
-      sy += positions[k * 3 + 1];
-      sz += positions[k * 3 + 2];
-    }
-    const sternIndex = positions.length / 3;
-    push(sx / P, sy / P, sz / P - 0.01, cStrake);
-    for (let k = 0; k < P; k++) {
-      const k2 = (k + 1) % P;
-      indices.push(sternIndex, k, k2);
-    }
-
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(harborOrientShell(positions, indices));
-    geo.computeVertexNormals();
-    return { geo, sheerS, sheerP, wlS, wlP };
+    harborFinishGeo(geo);
+    return { geo, sheerS, sheerP, wlS, wlP, sternRing };
   }
 
-  const harborHullMat = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff,
-    roughness: 0.48,
-    metalness: 0.05,
-    clearcoat: 0.28,
-    clearcoatRoughness: 0.45,
-    vertexColors: true,
-    side: THREE.FrontSide,
-    polygonOffset: true,
-    polygonOffsetFactor: -1.5,
-    polygonOffsetUnits: -2,
-  });
-  const harborWoodMat = new THREE.MeshStandardMaterial({
-    color: 0x6b5340, roughness: 0.88, metalness: 0.02,
-  });
-  const harborInsideMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    roughness: 0.84,
-    metalness: 0.03,
-    vertexColors: true,
-    side: THREE.DoubleSide,
-    transparent: false,
-    opacity: 1,
-    depthWrite: true,
-    depthTest: true,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
-  });
+  // Stern is its own mesh so the front-row stencil does not share vertices
+  // with the side planks (that interpolation would smear across atlas cells).
+  function harborTransomMesh(spec, ring) {
+    const positions = [];
+    const uvs = [];
+    const indices = [];
+    let sx = 0;
+    let sy = 0;
+    let sz = 0;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let i = 0; i < ring.length; i++) {
+      const p = ring[i];
+      sx += p.x;
+      sy += p.y;
+      sz += p.z;
+      minX = Math.min(minX, p.x);
+      maxX = Math.max(maxX, p.x);
+      minY = Math.min(minY, p.y);
+      maxY = Math.max(maxY, p.y);
+    }
+    const n = ring.length;
+    const spanX = maxX - minX || 1;
+    const spanY = maxY - minY || 1;
+    const push = (p) => {
+      positions.push(p.x, p.y, p.z);
+      const at = harborAtlasUV(
+        spec.atlasCol,
+        CRATE_FACE_ROW.front,
+        (p.x - minX) / spanX,
+        (p.y - minY) / spanY,
+      );
+      uvs.push(at[0], at[1]);
+    };
+    push({ x: sx / n, y: sy / n, z: sz / n - 0.012 });
+    for (let i = 0; i < n; i++) push(ring[i]);
+    for (let k = 0; k < n; k++) indices.push(0, k + 1, ((k + 1) % n) + 1);
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+    geo.setIndex(harborOrientShell(positions, indices));
+    harborFinishGeo(geo);
+    const mesh = new THREE.Mesh(geo, harborFitWear);
+    mesh.name = 'transom';
+    mesh.renderOrder = 2;
+    return mesh;
+  }
+
+  // Clones of the quay crate material. UVs pick the column; maps arrive
+  // asynchronously and syncHarborBoatWear copies them onto every clone.
+  // Polygon offset stays off the shared crateWearMat.
+  const harborBoatWear = [];
+  function harborWearClone(side, factor) {
+    const mat = crateWearMat.clone();
+    mat.vertexColors = false;
+    mat.side = side;
+    mat.polygonOffset = true;
+    mat.polygonOffsetFactor = factor;
+    mat.polygonOffsetUnits = -2;
+    harborBoatWear.push(mat);
+    return mat;
+  }
+  const harborHullWear = harborWearClone(THREE.FrontSide, -1.5);
+  const harborDeckWear = harborWearClone(THREE.DoubleSide, -2);
+  const harborFitWear = harborWearClone(THREE.DoubleSide, -2);
+  harborInstallRepeat(harborHullWear);
+  harborInstallRepeat(harborDeckWear);
+  function syncHarborBoatWear() {
+    for (let i = 0; i < harborBoatWear.length; i++) {
+      const mat = harborBoatWear[i];
+      mat.map = crateWearMat.map;
+      mat.emissiveMap = crateWearMat.emissiveMap;
+      mat.normalMap = crateWearMat.normalMap;
+      if (crateWearMat.normalMap) mat.normalScale.copy(crateWearMat.normalScale);
+      mat.roughnessMap = crateWearMat.roughnessMap;
+      mat.roughness = crateWearMat.roughness;
+      mat.metalness = crateWearMat.metalness;
+      mat.color.copy(crateWearMat.color);
+      mat.emissive.copy(crateWearMat.emissive);
+      mat.emissiveIntensity = crateWearMat.emissiveIntensity;
+      mat.needsUpdate = true;
+    }
+  }
+  live.syncBoatWear = syncHarborBoatWear;
+  syncHarborBoatWear();
   const HARBOR_DECK_Y = 0.052;
   const harborIronMat = new THREE.MeshStandardMaterial({
     color: 0x2c3138, roughness: 0.42, metalness: 0.64,
@@ -221,9 +345,6 @@ export function installHarborCraft(deps) {
   });
   const harborFenderMat = new THREE.MeshStandardMaterial({
     color: 0x16181c, roughness: 0.74, metalness: 0.06,
-  });
-  const harborCabinMat = new THREE.MeshStandardMaterial({
-    color: 0xcfc4b2, roughness: 0.72, metalness: 0.04,
   });
   const harborGlassMat = new THREE.MeshStandardMaterial({
     color: 0xffe2b8, emissive: 0xffb15e, emissiveIntensity: 1.15,
@@ -243,36 +364,11 @@ export function installHarborCraft(deps) {
   for (let i = 0; i < 13; i++) QUAY_CLEATS.push(-9.6 + i * 1.6);
   const quayCleatUsed = new Set();
 
-  function harborMarkTexture(word) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 128;
-    const g = canvas.getContext('2d');
-    g.fillStyle = '#16130f';
-    g.fillRect(0, 0, 512, 128);
-    g.strokeStyle = '#b6a27e';
-    g.lineWidth = 8;
-    g.strokeRect(10, 10, 492, 108);
-    g.fillStyle = '#f3eadc';
-    g.font = '700 78px ui-monospace, monospace';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillText(word, 256, 68);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
-    tex.needsUpdate = true;
-    return tex;
-  }
-
-  function harborNamePlate(word, w, h) {
-    const map = harborMarkTexture(word);
-    const mat = new THREE.MeshStandardMaterial({
-      map, emissive: 0x4a3c2c, emissiveMap: map, emissiveIntensity: 0.35,
-      roughness: 0.58, metalness: 0.04,
-      polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-    });
-    return new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+  function harborNamePlate(col, w, h) {
+    const geo = harborStampCell(new THREE.PlaneGeometry(w, h), col, CRATE_FACE_ROW.front);
+    const plate = new THREE.Mesh(geo, harborFitWear);
+    plate.name = 'mark-plate';
+    return plate;
   }
 
   function harborTakeCleat(x) {
@@ -296,17 +392,21 @@ export function installHarborCraft(deps) {
   function harborSeal(spec, sheerS, sheerP) {
     const group = new THREE.Group();
     const positions = [];
-    const colors = [];
+    const uvs = [];
     const indices = [];
-    const strake = new THREE.Color(spec.color).lerp(new THREE.Color(0xd8cebc), 0.5);
-    const inner = new THREE.Color(spec.color).multiplyScalar(0.72);
-    const plankA = new THREE.Color(0x7c5e46);
-    const plankB = new THREE.Color(0x6a4e3a);
     const n = sheerS.length;
     const deckY = HARBOR_DECK_Y;
-    const push = (x, y, z, col) => {
+    const col = spec.atlasCol;
+    const lid = CRATE_FACE_ROW.lid;
+    const push = (x, y, z) => {
       positions.push(x, y, z);
-      colors.push(col.r, col.g, col.b);
+      const at = harborPackedUV(
+        col,
+        lid,
+        (x + spec.beam * 0.5) / HARBOR_PLANK,
+        (z + spec.length * 0.5) / HARBOR_PLANK,
+      );
+      uvs.push(at[0], at[1]);
       return positions.length / 3 - 1;
     };
     const stemZ = spec.length * 0.5 + spec.length * 0.028;
@@ -339,14 +439,13 @@ export function installHarborCraft(deps) {
     const port = [];
     const stbd = [];
     for (let i = 0; i < n; i++) {
-      const plank = i % 2 ? plankA : plankB;
       const pRim = rim[ring.length - 1 - i];
       const sRim = rim[i];
-      port.push(push(pRim.x, deckY, pRim.z, plank));
-      stbd.push(push(sRim.x, deckY, sRim.z, plank));
+      port.push(push(pRim.x, deckY, pRim.z));
+      stbd.push(push(sRim.x, deckY, sRim.z));
     }
     const stemRim = rim[n];
-    const stem = push(stemRim.x, deckY, stemRim.z, plankA);
+    const stem = push(stemRim.x, deckY, stemRim.z);
     for (let i = 0; i < n - 1; i++) {
       indices.push(port[i], stbd[i], stbd[i + 1], port[i], stbd[i + 1], port[i + 1]);
     }
@@ -356,8 +455,8 @@ export function installHarborCraft(deps) {
     for (let i = 0; i < rim.length; i++) {
       const p = rim[i];
       const yTop = Math.max(p.y, deckY + 0.02);
-      gBot.push(push(p.x, deckY, p.z, inner));
-      gTop.push(push(p.x, yTop, p.z, strake));
+      gBot.push(push(p.x, deckY, p.z));
+      gTop.push(push(p.x, yTop, p.z));
     }
     for (let i = 0; i < rim.length; i++) {
       const j = (i + 1) % rim.length;
@@ -366,10 +465,10 @@ export function installHarborCraft(deps) {
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(indices);
-    geo.computeVertexNormals();
-    const sole = new THREE.Mesh(geo, harborInsideMat);
+    harborFinishGeo(geo);
+    const sole = new THREE.Mesh(geo, harborDeckWear);
     sole.renderOrder = 2;
     sole.frustumCulled = false;
     sole.name = 'hull-seal';
@@ -389,10 +488,12 @@ export function installHarborCraft(deps) {
     const group = new THREE.Group();
     group.name = spec.id;
     const hull = harborHull(spec);
-    const shell = new THREE.Mesh(hull.geo, harborHullMat);
+    const shell = new THREE.Mesh(hull.geo, harborHullWear);
     shell.castShadow = false;
     shell.renderOrder = 1;
+    shell.name = 'hull-shell';
     group.add(shell);
+    group.add(harborTransomMesh(spec, hull.sternRing));
     group.add(harborSeal(spec, hull.sheerS, hull.sheerP));
 
     const deckY = HARBOR_DECK_Y;
@@ -404,34 +505,47 @@ export function installHarborCraft(deps) {
           : spec.kind === 'pram' ? [0.02]
             : [0.05];
       for (const z of seats) {
-        const seat = new THREE.Mesh(new THREE.BoxGeometry(seatW, 0.028, spec.kind === 'dory' ? 0.055 : 0.07), harborWoodMat);
+        const seatD = spec.kind === 'dory' ? 0.055 : 0.07;
+        const seatGeo = new THREE.BoxGeometry(seatW, 0.028, seatD);
+        stampHarborCrateUVs(seatGeo, spec.atlasCol, seatW, 0.028, seatD);
+        const seat = new THREE.Mesh(seatGeo, harborFitWear);
         seat.position.set(0, deckY + 0.06, z * (spec.length / 2.2));
         group.add(seat);
       }
       const oarCount = spec.kind === 'dory' ? 2 : 1;
       for (let i = 0; i < oarCount; i++) {
-        const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.01, spec.length * (spec.kind === 'dory' ? 0.55 : 0.72), 5), harborWoodMat);
+        const oarGeo = new THREE.CylinderGeometry(0.012, 0.01, spec.length * (spec.kind === 'dory' ? 0.55 : 0.72), 5);
+        harborStampCell(oarGeo, spec.atlasCol, CRATE_FACE_ROW.side);
+        const oar = new THREE.Mesh(oarGeo, harborFitWear);
         oar.rotation.z = Math.PI / 2;
         oar.rotation.y = 0.35 + i * 0.5;
         oar.position.set(spec.beam * (0.08 + i * 0.08), spec.freeboard * 0.72, -0.08 + i * 0.22);
         group.add(oar);
       }
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.16), harborWoodMat);
+      const bladeGeo = new THREE.BoxGeometry(0.05, 0.012, 0.16);
+      stampHarborCrateUVs(bladeGeo, spec.atlasCol, 0.05, 0.012, 0.16);
+      const blade = new THREE.Mesh(bladeGeo, harborFitWear);
       blade.position.set(spec.beam * 0.42, spec.freeboard * 0.7, spec.length * 0.22);
       group.add(blade);
     }
 
     if (spec.kind === 'scow') {
-      const well = new THREE.Mesh(
-        new THREE.BoxGeometry(spec.beam * 0.62, 0.2, spec.length * 0.38),
-        harborWoodMat
-      );
-      well.position.set(0, deckY + 0.12, -spec.length * 0.04);
+      const wellSx = spec.beam * 0.5;
+      const wellSy = 0.24;
+      const wellSz = spec.length * 0.32;
+      const wellGeo = new THREE.BoxGeometry(wellSx, wellSy, wellSz);
+      // Cargo is a quay crate (ochre column) sitting in an HARBOR hull.
+      stampHarborCrateUVs(wellGeo, 2, wellSx, wellSy, wellSz);
+      const well = new THREE.Mesh(wellGeo, harborFitWear);
+      well.name = 'scow-crate';
+      well.position.set(0, deckY + wellSy * 0.5 + 0.02, -spec.length * 0.02);
       group.add(well);
-      const coam = new THREE.Mesh(
-        new THREE.BoxGeometry(spec.beam * 0.78, 0.06, spec.length * 0.55),
-        harborWoodMat
-      );
+      const coamSx = spec.beam * 0.78;
+      const coamSy = 0.06;
+      const coamSz = spec.length * 0.55;
+      const coamGeo = new THREE.BoxGeometry(coamSx, coamSy, coamSz);
+      stampHarborCrateUVs(coamGeo, spec.atlasCol, coamSx, coamSy, coamSz);
+      const coam = new THREE.Mesh(coamGeo, harborFitWear);
       coam.position.set(0, deckY + 0.05, 0.02);
       group.add(coam);
     }
@@ -457,10 +571,17 @@ export function installHarborCraft(deps) {
       const cabL = spec.length * 0.22;
       const cabW = spec.beam * 0.62;
       const cabH = 0.4;
-      const cab = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH, cabL), harborCabinMat);
+      const cabGeo = new THREE.BoxGeometry(cabW, cabH, cabL);
+      stampHarborCrateUVs(cabGeo, spec.atlasCol, cabW, cabH, cabL);
+      const cab = new THREE.Mesh(cabGeo, harborFitWear);
       cab.position.set(0, deckY + cabH * 0.5, -spec.length * 0.06);
       group.add(cab);
-      const roof = new THREE.Mesh(new THREE.BoxGeometry(cabW + 0.06, 0.028, cabL + 0.08), harborCabinMat);
+      const roofW = cabW + 0.06;
+      const roofH = 0.028;
+      const roofL = cabL + 0.08;
+      const roofGeo = new THREE.BoxGeometry(roofW, roofH, roofL);
+      stampHarborCrateUVs(roofGeo, spec.atlasCol, roofW, roofH, roofL);
+      const roof = new THREE.Mesh(roofGeo, harborFitWear);
       roof.position.set(0, deckY + cabH + 0.01, -spec.length * 0.06);
       group.add(roof);
       const win = (x, y, z, ry, w, h) => {
@@ -478,10 +599,14 @@ export function installHarborCraft(deps) {
       const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.038, 0.16, 6), harborIronMat);
       stack.position.set(cabW * 0.22, deckY + cabH + 0.1, cz - cabL * 0.12);
       group.add(stack);
-      const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.022, 1.15, 6), harborWoodMat);
+      const mastGeo = new THREE.CylinderGeometry(0.016, 0.022, 1.15, 6);
+      harborStampCell(mastGeo, spec.atlasCol, CRATE_FACE_ROW.side);
+      const mast = new THREE.Mesh(mastGeo, harborFitWear);
       mast.position.set(0, deckY + 0.58, spec.length * 0.2);
       group.add(mast);
-      const boom = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, spec.length * 0.28, 5), harborWoodMat);
+      const boomGeo = new THREE.CylinderGeometry(0.012, 0.012, spec.length * 0.28, 5);
+      harborStampCell(boomGeo, spec.atlasCol, CRATE_FACE_ROW.side);
+      const boom = new THREE.Mesh(boomGeo, harborFitWear);
       boom.rotation.x = Math.PI / 2;
       boom.position.set(0, deckY + cabH + 0.06, spec.length * 0.2 + spec.length * 0.12);
       group.add(boom);
@@ -503,15 +628,15 @@ export function installHarborCraft(deps) {
     }
 
     if (spec.mark) {
-      const plate = harborNamePlate(spec.mark, spec.kind === 'launch' ? 0.62 : 0.42, spec.kind === 'launch' ? 0.15 : 0.11);
+      const h = Math.max(0.24, spec.freeboard * 1.15);
+      const w = h * 1.15;
       const mid = hull.sheerS[8];
-      plate.position.set(mid.x + 0.02, spec.freeboard * 0.48, mid.z * 0.15);
-      plate.rotation.y = Math.PI / 2;
-      group.add(plate);
-      const stern = harborNamePlate(spec.mark, spec.kind === 'launch' ? 0.5 : 0.36, 0.1);
-      stern.position.set(0, spec.freeboard * 0.42, -spec.length * 0.5 - 0.02);
-      stern.rotation.y = Math.PI;
-      group.add(stern);
+      for (const sign of [1, -1]) {
+        const plate = harborNamePlate(spec.atlasCol, w, h);
+        plate.position.set(sign * (Math.abs(mid.x) + 0.015), spec.freeboard * 0.62, mid.z * 0.2);
+        plate.rotation.y = sign > 0 ? Math.PI / 2 : -Math.PI / 2;
+        group.add(plate);
+      }
     }
 
     // Alongside mooring: bow and stern painters to coping cleats.
@@ -544,42 +669,42 @@ export function installHarborCraft(deps) {
   const berthZ = (beam) => 8.05 + beam * 0.5;
   const HARBOR_BOAT_DEFS = [
     {
-      id: 'west-pram', kind: 'pram', mark: '',
+      id: 'west-pram', kind: 'pram', mark: 'HARBOR', atlasCol: 4,
       x: -8.7, z: berthZ(0.68), yaw: Math.PI / 2,
       length: 1.32, beam: 0.68, draft: 0.08, freeboard: 0.11,
       bilge: 0.34, transom: 0.92, bowRise: 0.06, bowPow: 0.38,
       color: 0x3d4a46, stripe: 0xd2c6ae, clear: 1.15,
     },
     {
-      id: 'quay-skiff', kind: 'skiff', mark: 'QUAY',
+      id: 'quay-skiff', kind: 'skiff', mark: 'QUAY', atlasCol: 2,
       x: -5.85, z: berthZ(0.78), yaw: -Math.PI / 2,
       length: 2.15, beam: 0.78, draft: 0.13, freeboard: 0.16,
       bilge: 0.5, transom: 0.8, bowRise: 0.26, bowPow: 0.8,
       color: 0x1c2a24, stripe: 0xcbbfa6, clear: 1.55,
     },
     {
-      id: 'basin-tender', kind: 'tender', mark: '',
+      id: 'basin-tender', kind: 'tender', mark: 'FENESTRA', atlasCol: 3,
       x: -3.2, z: berthZ(0.6), yaw: Math.PI / 2,
       length: 1.58, beam: 0.6, draft: 0.09, freeboard: 0.12,
       bilge: 0.44, transom: 0.72, bowRise: 0.18, bowPow: 0.7,
       color: 0x5c4332, stripe: 0xd5c6aa, clear: 1.25,
     },
     {
-      id: 'signal-dory', kind: 'dory', mark: 'SIGNAL',
+      id: 'signal-dory', kind: 'dory', mark: 'SIGNAL', atlasCol: 1,
       x: 0.45, z: berthZ(0.64), yaw: -Math.PI / 2,
       length: 4.15, beam: 0.64, draft: 0.12, freeboard: 0.18,
       bilge: 0.95, transom: 0.38, bowRise: 0.62, bowPow: 1.45,
       color: 0x243028, stripe: 0xc4b48a, clear: 2.35,
     },
     {
-      id: 'harbor-launch', kind: 'launch', mark: 'HARBOR', cabin: true,
+      id: 'harbor-launch', kind: 'launch', mark: 'HARBOR', atlasCol: 0, cabin: true,
       x: 4.85, z: berthZ(1.12), yaw: Math.PI / 2,
       length: 3.5, beam: 1.12, draft: 0.22, freeboard: 0.2,
       bilge: 0.64, transom: 0.68, bowRise: 0.4, bowPow: 0.85,
       color: 0x151a22, stripe: 0x7a3030, clear: 2.15,
     },
     {
-      id: 'harbor-scow', kind: 'scow', mark: 'HARBOR',
+      id: 'harbor-scow', kind: 'scow', mark: 'HARBOR', atlasCol: 0,
       x: 8.55, z: berthZ(1.42), yaw: -Math.PI / 2,
       length: 2.6, beam: 1.42, draft: 0.18, freeboard: 0.15,
       bilge: 0.2, transom: 0.98, bowRise: 0.05, bowPow: 0.28,
@@ -964,6 +1089,8 @@ export function installHarborCraft(deps) {
     schools: 2,
     waterPosts: 0,
     moor: 'quay-coping',
+    finish: 'quay-crate-atlas',
+    marks: harborBoats.map((b) => b.spec.mark),
     waveY: (x, z) => harborWaveY(x, z, harborFishTime.value),
     fishNow() {
       const t = harborFishTime.value;
@@ -985,6 +1112,8 @@ export function installHarborCraft(deps) {
         return {
           id: b.spec.id,
           kind: b.spec.kind,
+          mark: b.spec.mark,
+          atlasCol: b.spec.atlasCol,
           x: +harborBoatWorld.x.toFixed(3),
           y: +harborBoatWorld.y.toFixed(3),
           z: +harborBoatWorld.z.toFixed(3),
@@ -1050,7 +1179,22 @@ export function installHarborCraft(deps) {
     else if (mode === 'tender-top') top('basin-tender', 3.8);
     else if (mode === 'dory-top') top('signal-dory', 7.2);
     else if (mode === 'scow-top') top('harbor-scow', 5.4);
-    else if (mode === 'orbit') {
+    else if (mode === 'match') {
+      // Alongside the scow, looking quayward: hull planks and the east pile share the frame.
+      camera.position.set(6.2, 1.85, 7.9);
+      controls.target.set(8.5, 0.18, 7.4);
+    } else if (mode === 'match-close') {
+      // Quayward side of the scow, hull planks and the cargo crate.
+      camera.position.set(8.55, 1.15, 6.15);
+      controls.target.set(8.55, 0.16, 8.72);
+    } else if (mode === 'match-west') {
+      // QUAY skiff and worn HARBOR pram beside the west pile.
+      camera.position.set(-4.4, 1.95, 2.3);
+      controls.target.set(-7.1, 0.28, 7.2);
+    } else if (mode === 'match-top') {
+      camera.position.set(8.5, 5.4, 6.7);
+      controls.target.set(8.48, 0.08, 6.55);
+    } else if (mode === 'orbit') {
       camera.position.set(11.2, 4.6, 14.4);
       controls.target.set(0.4, 0.05, 7.2);
     } else {

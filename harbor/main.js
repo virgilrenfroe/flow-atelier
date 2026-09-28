@@ -3932,6 +3932,9 @@ const harborCraft = installHarborCraft({
   physHooks: harborPhysics.physHooks,
   physCrates: harborPhysics.physCrates,
   crateInBasinXZ: harborPhysics.crateInBasinXZ,
+  crateWearMat: harborPhysics.crateWearMat,
+  stampHarborCrateUVs: harborPhysics.stampHarborCrateUVs,
+  CRATE_FACE_ROW: harborPhysics.CRATE_FACE_ROW,
 });
 
 const harborPost = createHarborPost({
