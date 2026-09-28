@@ -302,6 +302,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
+import { mountStreetClutter } from './noctuary/street-clutter.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -480,6 +481,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === ']') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail: 1 }));
+  }
+  if (e.key === 'l' || e.key === 'L') {
+    window.dispatchEvent(new CustomEvent('noctuary-clutter-toggle'));
   }
 });
 
@@ -7153,6 +7157,72 @@ const RUBE_DECK_Y = 0.04;
 const RUBE_PLATE = { x: -9.46, z: 2.45, w: 2.9, d: 2.7, h: 0.05 };
 const RUBE_GATE = { x: -5.15, z: 2.55, w: 1.35, h: 1.55, d: 0.12 };
 const RUBE_VESSEL = { x: -4.55, y: 0.55, z: 2.88 };
+
+// Street clutter — shared photo atlas, props only. Anchored to the live
+// sidewalk / curb / quay slab. L toggles. ?clutter=0 starts hidden.
+// QUAY_WALK_W is read if a later street-width pass defines it; otherwise
+// every edge uses SIDEWALK_W, matching this mesh.
+const streetClutterOn = params.get('clutter') !== '0' && params.get('clutter') !== 'off';
+let streetClutter = {
+  toggle() { return false; },
+  frame() {},
+  counts: {},
+  total: 0,
+  atlas: 'failed',
+  enabled() { return false; },
+};
+try {
+streetClutter = mountStreetClutter({
+  scene,
+  world: physWorld,
+  CANNON,
+  enabled: streetClutterOn,
+  atlasUrl: new URL('street-clutter-atlas.png' + (location.protocol === 'file:' ? '' : '?v=clutter1'), atlasBase).href,
+  anchors: {
+    streetW: STREET_W,
+    sidewalkW: SIDEWALK_W,
+    quayWalkW: typeof QUAY_WALK_W === 'undefined' ? null : QUAY_WALK_W,
+    curbW: 0.08,
+    blockW: BLOCK_W,
+    blockD: BLOCK_D,
+    gridCols: GRID_COLS,
+    gridRows: GRID_ROWS,
+    cellW,
+    cellD,
+    gridOriginX,
+    gridOriginZ,
+    sidewalkTop: 0.085,
+    roadY: 0.018,
+    quayY: quay.position.y,
+    quay: {
+      x: quay.position.x,
+      y: quay.position.y,
+      z: quay.position.z,
+      halfX: 11,
+      halfZ: 3,
+    },
+    seawallZ: SEAWALL_Z,
+    keepOut: [
+      { z0: 3.70, z1: 4.02 },
+      { z0: 4.40, z1: 5.20 },
+    ],
+    avoid: [
+      { x: RUBE_PLATE.x, z: RUBE_PLATE.z, hw: RUBE_PLATE.w * 0.5 + 0.35, hd: RUBE_PLATE.d * 0.5 + 0.25 },
+      { x: RUBE_GATE.x, z: RUBE_GATE.z, hw: RUBE_GATE.w * 0.5 + 0.2, hd: 0.55 },
+      { x: signalGroup.position.x, z: signalGroup.position.z, r: 1.05 },
+      { x: RUBE_VESSEL.x, z: RUBE_VESSEL.z, r: 0.55 },
+      ...HARBOR_CRATE_DEFS.map((d) => ({ x: d.pos[0], z: d.pos[2], r: 0.5 })),
+    ],
+  },
+});
+window.__streetClutter = streetClutter;
+} catch (err) {
+  console.warn('Harbor street clutter skipped', err);
+  window.__streetClutter = streetClutter;
+}
+window.addEventListener('noctuary-clutter-toggle', () => {
+  streetClutter.toggle();
+});
 
 const rubeState = {
   stage: 'idle', // idle | plate | lantern | gate | done
