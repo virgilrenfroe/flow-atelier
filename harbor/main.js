@@ -4031,6 +4031,7 @@ const streetWalker = mountStreetWalker({
   parent: scene,
   enabled: walkerParam !== '0' && walkerParam !== 'off',
   anisotropy: renderer.capabilities.getMaxAnisotropy(),
+  bloomLayer: BLOOM_LAYER,
 });
 window.__streetWalker = streetWalker;
 

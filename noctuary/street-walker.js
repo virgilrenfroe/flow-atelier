@@ -55,7 +55,8 @@ void main() {
 }
 `;
 
-// Plate figure, retuned so a body this short still carries a scan.
+// Plate figure, lifted so the dark coat separates from the deck.
+// Gold trim is left alone. A thin fringe, not a second billboard.
 // No slice glitch — a torn boot reads as a pop, not a step.
 const FRAG = /* glsl */`
 uniform float uTime;
@@ -77,6 +78,16 @@ vec3 srgbToLinear(vec3 c) {
   );
 }
 
+float peakAt(vec2 cellUv, float colI, float rowI) {
+  vec2 c = clamp(cellUv, 0.0, 1.0);
+  vec2 suv = vec2(
+    (colI + c.x) / uGrid.x,
+    1.0 - (rowI + (1.0 - c.y)) / uGrid.y
+  );
+  vec3 s = texture2D(uMap, suv).rgb;
+  return max(s.r, max(s.g, s.b));
+}
+
 void main() {
   float frame = floor(mod(uFrame, uFrames));
   if (uLive < 0.5) frame = 0.0;
@@ -90,8 +101,36 @@ void main() {
   vec3 raw = texture2D(uMap, uv).rgb;
   float peak = max(raw.r, max(raw.g, raw.b));
   float presence = smoothstep(0.018, 0.032, peak);
-  if (peak < 0.016) discard;
+
+  // Screen-space fringe. A fixed texel offset vanishes once he is small in frame.
+  vec2 s = min(fwidth(cell) * 3.6, vec2(0.026));
+  float ring = 0.0;
+  ring = max(ring, peakAt(cell + s * vec2( 1.0,  0.0), colI, rowI));
+  ring = max(ring, peakAt(cell + s * vec2(-1.0,  0.0), colI, rowI));
+  ring = max(ring, peakAt(cell + s * vec2( 0.0,  1.0), colI, rowI));
+  ring = max(ring, peakAt(cell + s * vec2( 0.0, -1.0), colI, rowI));
+  ring = max(ring, peakAt(cell + s * vec2( 0.7,  0.7), colI, rowI));
+  ring = max(ring, peakAt(cell + s * vec2(-0.7,  0.7), colI, rowI));
+  ring = max(ring, peakAt(cell + s * vec2( 0.7, -0.7), colI, rowI));
+  ring = max(ring, peakAt(cell + s * vec2(-0.7, -0.7), colI, rowI));
+  float ringFar = 0.0;
+  vec2 s2 = s * 1.85;
+  ringFar = max(ringFar, peakAt(cell + s2 * vec2( 1.0,  0.0), colI, rowI));
+  ringFar = max(ringFar, peakAt(cell + s2 * vec2(-1.0,  0.0), colI, rowI));
+  ringFar = max(ringFar, peakAt(cell + s2 * vec2( 0.0,  1.0), colI, rowI));
+  ringFar = max(ringFar, peakAt(cell + s2 * vec2( 0.0, -1.0), colI, rowI));
+  float body = smoothstep(0.016, 0.04, peak);
+  float fringe = smoothstep(0.02, 0.07, ring) * (1.0 - body);
+  float fringeFar = smoothstep(0.02, 0.07, ringFar) * (1.0 - body) * (1.0 - fringe);
+  if (peak < 0.016 && fringe < 0.04 && fringeFar < 0.04) discard;
+
   vec3 tex = srgbToLinear(raw);
+  float luma = dot(tex, vec3(0.2126, 0.7152, 0.0722));
+  // Coat median is ~sRGB 28, under the lit deck. Lift the cloth enough
+  // that the mass reads after ACES. Trim past luma ~0.18 keeps the atlas.
+  float shadow = 1.0 - smoothstep(0.012, 0.20, luma);
+  float gain = mix(1.05, 3.1, shadow);
+  vec3 col = tex * gain + vec3(0.30, 0.20, 0.46) * shadow;
 
   vec3 N = normalize(vNormalW);
   if (!gl_FrontFacing) N = -N;
@@ -101,23 +140,26 @@ void main() {
   float line = smoothstep(0.93, 0.995, fract(vUv.y * 22.0 - uTime * 0.35));
   float scanPhase = fract(uTime * 0.13 + 0.2);
   float scan = exp(-abs(vUv.y - scanPhase) * 16.0);
-  float edge = smoothstep(0.22, 0.9, fwidth(presence));
+  float edge = smoothstep(0.08, 0.7, fwidth(presence));
 
   vec3 gold = vec3(0.96, 0.74, 0.26);
-  vec3 violet = vec3(0.62, 0.50, 0.84);
-  vec3 col = tex;
-  col *= 1.0 - line * 0.06;
-  col += gold * line * 0.22;
-  col += gold * scan * (0.08 + 0.03 * uPulse);
-  col += violet * edge * 0.38;
-  col += violet * fresnel * edge * 0.16;
+  vec3 violet = vec3(0.58, 0.46, 0.92);
+  col *= 1.0 - line * 0.05;
+  col += gold * line * 0.20;
+  col += gold * scan * (0.10 + 0.035 * uPulse);
+  col += violet * edge * 0.7;
+  col += violet * fresnel * edge * 0.2;
+  // Rim stays a line. The far ring is only a breath, so he does not become a lamp.
+  float fringeAmt = fringe * (0.55 + 0.06 * uPulse) + fringeFar * 0.14;
+  col += violet * fringeAmt + gold * fringeAmt * 0.10;
 
-  // Same night exp fog as the district, so he sits in the air instead of as a sticker.
+  // Night fog, capped so the far sidewalk does not swallow the coat.
   float dist = length(cameraPosition - vWorld);
   float fog = 1.0 - exp(-0.000324 * dist * dist * 12.0);
-  col = mix(col, vec3(0.020, 0.024, 0.039), clamp(fog, 0.0, 0.72));
+  col = mix(col, vec3(0.020, 0.024, 0.039), clamp(fog, 0.0, 0.40) * (1.0 - fringe * 0.5));
 
-  gl_FragColor = vec4(col, clamp(presence, 0.0, 1.0));
+  float alpha = max(clamp(presence, 0.0, 1.0), max(fringe * 0.72, fringeFar * 0.38));
+  gl_FragColor = vec4(col, alpha);
 }
 `;
 
@@ -244,6 +286,8 @@ export function mountStreetWalker(opts) {
   figure.name = 'street-walker-figure';
   figure.renderOrder = 4;
   figure.userData.streetWalker = true;
+  // Rim and trim sit above the bloom threshold; the coat stays under it.
+  if (opts.bloomLayer != null) figure.layers.enable(opts.bloomLayer);
   root.add(figure);
 
   const shadow = new THREE.Mesh(
