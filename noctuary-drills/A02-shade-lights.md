@@ -14,11 +14,11 @@ The equation, shared as `NIGHT_SHADE_GLSL` in `harbor.html`:
 
 - Ambient fill.
 - Directional moon: wrapped Lambert plus sharp Phong. The wrap is diffuse-only, so the terminator stays soft on iron and wet stone. The view vector points from the surface toward the camera, and Phong is `dot(reflect, view)`.
-- Point fixtures: the same wrapped Lambert plus Phong. Decay is an inverse-square core (`1 / (1 + dist² · decay)`) gated by a smooth range window `(1 - (dist/range)⁴)²`. `lightDecay` is still `1/range`, so a lamp dies at the pool edge instead of a hard linear cutoff.
+- Point fixtures: the same wrapped Lambert plus Phong, with a short spill so cage bars and the seawall face still catch a lamp that sits beside them. Decay is an inverse-square core (`1 / (1 + dist² · decay)`) gated by a smooth range window `(1 - (dist/range)⁴)²`. `lightDecay` is still `1/range`, so a lamp dies at the pool edge instead of a hard linear cutoff.
 
 Where it lands:
 
-- **Signal** shaft (product hero) is lit by a point at the tip. The gold core stays, and the shaft falls off down the column instead of a flat Lambert cutoff. Traffic lenses put one filament just in front of the sphere center (instance origin), then limb-darken, so the glass reads as a shaded lens. Traffic iron and visors take their color from the live lamp instead of MeshStandard.
+- **Signal** shaft (product hero) takes a side moon so the column has a lit face, plus a point at the tip so the gold stripe follows the lamp down the shaft. Traffic lenses put one filament just in front of the sphere center (instance origin), then limb-darken, so the glass reads as a shaded lens. Traffic iron and visors take their color from the live lamp instead of MeshStandard.
 - **Lanterns** — the filament is lit from the coil center (`vLampPos`), so the tube has a bright outer face. The bulb is an internal source: limb darkening plus a moon Phong, not a light stuck on the normal. Glass panes transmit from the bulb (light sits behind the pane) with a distance falloff and a small glint, and stay under the bloom cap. The pan is a warm pool under the bulb. Housing (instanced row and hinged lanterns) replaces MeshStandard lighting with the same equation, warmer on the cage nearest the bulb. Housing geometry and seating are unchanged.
 - **Wet quay** — the basin adds a wrapped warm pool plus a tight Phong from the two quay lanterns, still inside the night color cap. The seawall wet course uses the same lamps and falls off along the stone. Quay deck plates are untouched.
 
