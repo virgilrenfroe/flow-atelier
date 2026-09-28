@@ -819,7 +819,7 @@ addEventListener('pointercancel', physEndGrab);
 
 function physToss() {
   if (physFreeze) return;
-  const pool = physCrates.filter((c) => c.mass > 0);
+  const pool = physCrates.filter((c) => c.mass > 0 && !c.craft);
   if (!pool.length) return;
   const entry = (physSelected && physSelected.kind === 'crate' && physSelected.mass > 0)
     ? physSelected
@@ -1056,6 +1056,28 @@ function buoyancyApplyForces(t) {
     body.angularVelocity.x *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
     body.angularVelocity.y *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
     body.angularVelocity.z *= Math.max(0, 1 - BUOY_DRAG_ANGULAR * damp * 0.016);
+    // Moored craft: same lift as a crate, plus a painter so the hull stays in the basin.
+    if (entry.craft && entry.moor) {
+      const mx = entry.moor.x - p.x;
+      const mz = entry.moor.z - p.z;
+      const dist = Math.hypot(mx, mz);
+      if (dist > 0.22) {
+        const pull = entry.mass * 0.5 * Math.min(dist, 2);
+        const inv = 1 / dist;
+        basinBuoy.forceScratch.set(mx * inv * pull, 0, mz * inv * pull);
+        basinBuoy.offsetScratch.set(0, 0, 0);
+        body.applyForce(basinBuoy.forceScratch, basinBuoy.offsetScratch);
+      }
+      const q = body.quaternion;
+      const fx = 2 * (q.x * q.z + q.w * q.y);
+      const fz = 1 - 2 * (q.x * q.x + q.y * q.y);
+      let dyaw = entry.moor.yaw - Math.atan2(fx, fz);
+      if (dyaw > Math.PI) dyaw -= Math.PI * 2;
+      else if (dyaw < -Math.PI) dyaw += Math.PI * 2;
+      body.torque.y += dyaw * entry.mass * 0.28;
+      body.angularVelocity.x *= 0.9;
+      body.angularVelocity.z *= 0.9;
+    }
   }
   basinBuoy.submerged = wet;
 }
@@ -1095,7 +1117,7 @@ function physBlast() {
   const R = basinBuoy.blastRadius;
   const strength = basinBuoy.blastImpulse;
   for (const entry of physCrates) {
-    if (entry.mass <= 0) continue;
+    if (entry.mass <= 0 || entry.craft) continue;
     const body = entry.body;
     if (body.type !== CANNON.Body.DYNAMIC) continue;
     const p = body.position;
@@ -1241,7 +1263,7 @@ function windApplyForces(t) {
 
   // Free crates — continuous linear force at COM (wake so they stay lively)
   for (const entry of physCrates) {
-    if (entry.mass <= 0) continue;
+    if (entry.mass <= 0 || entry.craft) continue;
     const body = entry.body;
     if (body.type !== CANNON.Body.DYNAMIC) continue;
     // Light crates catch a little more air; keep it under static friction.
@@ -1369,7 +1391,7 @@ function shopGlassReset() {
 
 function shopGlassScan() {
   for (const entry of physCrates) {
-    if (!entry || entry.shopGlass || entry.shard || !(entry.mass > 0) || !entry.body) continue;
+    if (!entry || entry.craft || entry.shopGlass || entry.shard || !(entry.mass > 0) || !entry.body) continue;
     if (entry.body.type !== CANNON.Body.DYNAMIC) continue;
     const p = entry.body.position;
     const v = entry.body.velocity;
@@ -3008,7 +3030,7 @@ function rubeSamplePlateMass() {
   const held = physGrab && physGrab.entry;
   const crateByBody = new Map();
   for (const entry of physCrates) {
-    if (!entry || !(entry.mass > 0) || !entry.body) continue;
+    if (!entry || entry.craft || !(entry.mass > 0) || !entry.body) continue;
     if (entry === held) continue;
     crateByBody.set(entry.body, entry);
   }
@@ -3551,6 +3573,7 @@ window.addEventListener('noctuary-springs-toggle', () => springSetOn(!physSpring
     crateWearMat, ironWearMats, physWorld, physGroundMat,
     stampIronCell, IRON_CELL, stampHarborCrateUVs,
     CRATE_ATLAS_COLS, CRATE_ATLAS_ROWS, CRATE_FACE_ROW,
+    basinBuoy, physCrateMat, physAdd, physHooks, crateInBasinXZ,
     disposePhysics,
   };
 }
