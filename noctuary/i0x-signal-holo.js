@@ -1,7 +1,8 @@
 /**
- * Signal hologram sheath
+ * Signal hologram
  * Journey Shaders · Hologram — fresnel rim, scrolling scanlines, bar glitch.
- * Dedicated meshes only: a mast shell and a nearby façade plate.
+ * Dedicated meshes: a mast sheath, a façade plate, and a vertical plane
+ * that projects the cyber-man map. The sheath stays rim chrome.
  * Not bloom, not the A03 volume pass, not the circuit-moss façade atlas.
  *
  * Sliced Model was the other candidate. A moving clip would cut the beacon
@@ -108,17 +109,95 @@ void main() {
 }
 `;
 
+// Companion for the figure plane. Same scan, fresnel, and slice family as the
+// sheath, with the cyber-man map as the body. Near-black is punched out.
+const FIGURE_FRAG = /* glsl */`
+uniform float uTime;
+uniform float uPulse;
+uniform float uLive;
+uniform sampler2D uMap;
+uniform vec4 uCrop;
+varying vec3 vWorld;
+varying vec3 vNormalW;
+varying vec2 vUv;
+varying float vGlitch;
+
+float holoHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+vec3 srgbToLinear(vec3 c) {
+  return mix(
+    c * 0.0773993808,
+    pow(max(c * 0.9478672986 + 0.0521327014, 0.0), vec3(2.4)),
+    step(vec3(0.04045), c)
+  );
+}
+
+void main() {
+  vec2 mapUv = mix(uCrop.xy, uCrop.zw, vUv);
+  // Bar tear on the map itself, so a slice shifts the figure, not only the quad.
+  float slice = floor(vUv.y * 22.0);
+  float gate = step(0.74, holoHash(vec2(slice, floor(uTime * (0.8 + 2.2 * uLive)))));
+  float tear = gate * 0.006;
+  mapUv.x += (holoHash(vec2(slice, 2.2)) - 0.5) * 0.03 * gate;
+
+  vec3 raw;
+  raw.r = texture2D(uMap, mapUv + vec2(tear, 0.0)).r;
+  raw.g = texture2D(uMap, mapUv).g;
+  raw.b = texture2D(uMap, mapUv - vec2(tear, 0.0)).b;
+  float peak = max(raw.r, max(raw.g, raw.b));
+  // Plate black is empty. Night shows through around the body.
+  float presence = smoothstep(0.028, 0.075, peak);
+  if (presence < 0.02) discard;
+  vec3 tex = srgbToLinear(raw);
+
+  vec3 N = normalize(vNormalW);
+  if (!gl_FrontFacing) N = -N;
+  vec3 V = normalize(cameraPosition - vWorld);
+  float ndv = clamp(dot(N, V), 0.0, 1.0);
+  float fresnel = pow(1.0 - ndv, 2.15);
+
+  float scroll = vWorld.y * 10.0 - uTime * 0.85;
+  float stripes = fract(scroll);
+  float line = smoothstep(0.86, 0.99, stripes);
+
+  float scanPhase = fract(uTime * 0.16 + 0.42);
+  float scanY = 0.35 + scanPhase * 3.5;
+  float scan = exp(-abs(vWorld.y - scanY) * 7.5);
+
+  // Head-on fresnel is weak on a plane, so the silhouette carries a rim too.
+  float edge = smoothstep(0.12, 0.7, fwidth(presence));
+
+  vec3 gold = vec3(0.96, 0.74, 0.26);
+  vec3 violet = vec3(0.62, 0.50, 0.84);
+  vec3 col = tex;
+  col = mix(col, gold, clamp(line * 0.7 + scan * 0.58, 0.0, 1.0));
+  col = mix(col, violet, clamp(fresnel * 0.62 + edge * 0.42 + vGlitch * 0.3, 0.0, 1.0));
+
+  float alpha = presence * (0.74 + line * 0.18 + scan * 0.16);
+  alpha += edge * 0.28;
+  alpha += fresnel * presence * 0.14;
+  alpha += vGlitch * presence * 0.08;
+  alpha *= 0.9 + 0.1 * uPulse;
+  alpha = clamp(alpha, 0.0, 0.92);
+  gl_FragColor = vec4(col, alpha);
+}
+`;
+
 export function mountSignalHolo(opts) {
   const parent = opts.parent;
   const enabled0 = opts.enabled !== false;
 
+  const uniforms = {
+    uTime: { value: 0 },
+    uPulse: { value: 1 },
+    uLive: { value: 1 },
+  };
+
   const material = new THREE.ShaderMaterial({
     name: 'SignalHolo',
-    uniforms: {
-      uTime: { value: 0 },
-      uPulse: { value: 1 },
-      uLive: { value: 1 },
-    },
+    uniforms,
     vertexShader: HOLO_VERT,
     fragmentShader: HOLO_FRAG,
     transparent: true,
@@ -151,6 +230,57 @@ export function mountSignalHolo(opts) {
   panel.userData.signalHolo = true;
   root.add(panel);
 
+  // Full frame is 1280×720 with the figure in a portrait window of black.
+  // Inclusive pixel bounds of that window, then flipY so the head is +V.
+  const imgW = 1280;
+  const imgH = 720;
+  const x0 = 440;
+  const x1 = 838;
+  const y0 = 23;
+  const y1 = 687;
+  const figH = 2.15;
+  const figW = figH * ((x1 - x0) / (y1 - y0));
+  const map = new THREE.TextureLoader().load(
+    new URL('./textures/signal-holo-cyber-man.png', import.meta.url).href
+  );
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.flipY = true;
+  map.anisotropy = Math.min(8, opts.anisotropy || 8);
+  map.wrapS = THREE.ClampToEdgeWrapping;
+  map.wrapT = THREE.ClampToEdgeWrapping;
+
+  const figureUniforms = {
+    uTime: { value: 0 },
+    uPulse: { value: 1 },
+    uLive: { value: 1 },
+    uMap: { value: map },
+    uCrop: { value: new THREE.Vector4(x0 / imgW, 1 - y1 / imgH, x1 / imgW, 1 - y0 / imgH) },
+  };
+  const figureMat = new THREE.ShaderMaterial({
+    name: 'SignalHoloPlane',
+    uniforms: figureUniforms,
+    vertexShader: HOLO_VERT,
+    fragmentShader: FIGURE_FRAG,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.NormalBlending,
+    toneMapped: false,
+  });
+
+  // Standing projection just outside the sheath, toward ?shot=holo and a
+  // step camera-left so the plate stays camera-right of the mast.
+  const planeGeo = new THREE.PlaneGeometry(figW, figH, 1, 40);
+  const plane = new THREE.Mesh(planeGeo, figureMat);
+  plane.name = 'signal-holo-plane';
+  plane.position.set(0.16, 0.88 + figH * 0.5, 0.82);
+  plane.rotation.y = 0.68;
+  plane.renderOrder = 3;
+  plane.userData.signalHolo = true;
+  // Beauty only. An opaque bloom stand-in would punch the beacon out.
+  plane.userData.signalHoloPlane = true;
+  root.add(plane);
+
   root.visible = enabled0;
   parent.add(root);
 
@@ -161,14 +291,21 @@ export function mountSignalHolo(opts) {
     root,
     sheath,
     panel,
+    plane,
     setEnabled(on) {
       api.enabled = !!on;
       root.visible = api.enabled;
     },
     update(time, pulse, live) {
-      material.uniforms.uTime.value = time;
-      material.uniforms.uPulse.value = pulse == null ? 1 : pulse;
-      material.uniforms.uLive.value = live == null ? 1 : live;
+      const t = time;
+      const p = pulse == null ? 1 : pulse;
+      const liveV = live == null ? 1 : live;
+      uniforms.uTime.value = t;
+      uniforms.uPulse.value = p;
+      uniforms.uLive.value = liveV;
+      figureUniforms.uTime.value = t;
+      figureUniforms.uPulse.value = p;
+      figureUniforms.uLive.value = liveV;
     },
   };
 
