@@ -1400,9 +1400,10 @@ export function installHarborCraft(deps) {
       camera.position.set(-12.6, 2.6, 12.4);
       controls.target.set(-2.2, 0.2, 7.4);
     } else if (mode === 'painter') {
-      // Close profile of the scow's quayward painter: cleat, belly, and hull.
-      camera.position.set(10.35, 0.72, 6.72);
-      controls.target.set(8.85, 0.22, 6.95);
+      // Scow, quayward painter, and coping cleat in one frame. Pulled back
+      // so a 3/8 in line still has the hull beside it for scale.
+      camera.position.set(11.2, 2.2, 5.6);
+      controls.target.set(9.15, 0.22, 7.05);
     } else if (mode === 'skiff-top') top('quay-skiff', 4.6);
     else if (mode === 'launch-top') top('harbor-launch', 6.4);
     else if (mode === 'tender-top') top('basin-tender', 3.8);
