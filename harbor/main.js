@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import * as CANNON from 'cannon-es';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { live } from './live.js';
 import { createHarborScene } from './scene.js';
@@ -13,6 +14,7 @@ import { installBasinClutter } from './batch.js';
 import { installHarborCraft } from './craft.js';
 import { mountSignalVolume } from '../noctuary/a03-signal-volume.js';
 import { mountSignalHolo } from '../noctuary/i0x-signal-holo.js';
+import { mountStreetClutter } from '../noctuary/street-clutter.js';
 
 const harborLoad = createHarborLoad();
 
@@ -204,6 +206,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === ']') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail: 1 }));
+  }
+  if (e.key === 'l' || e.key === 'L') {
+    window.dispatchEvent(new CustomEvent('noctuary-clutter-toggle'));
   }
 });
 
@@ -3932,6 +3937,72 @@ const harborCraft = installHarborCraft({
   physCrates: harborPhysics.physCrates,
   crateInBasinXZ: harborPhysics.crateInBasinXZ,
 });
+
+// Street clutter — shared photo atlas, props only. Anchored to the live
+// sidewalk / curb / quay slab. L toggles. ?clutter=0 starts hidden.
+const streetClutterOn = params.get('clutter') !== '0' && params.get('clutter') !== 'off';
+let streetClutter = {
+  toggle() { return false; },
+  frame() {},
+  counts: {},
+  total: 0,
+  atlas: 'failed',
+  enabled() { return false; },
+};
+try {
+  const { HARBOR_CRATE_DEFS, RUBE_PLATE, RUBE_GATE, RUBE_VESSEL } = harborPhysics;
+  streetClutter = mountStreetClutter({
+    scene,
+    world: harborPhysics.physWorld,
+    CANNON,
+    enabled: streetClutterOn,
+    atlasUrl: new URL('street-clutter-atlas.png' + (location.protocol === 'file:' ? '' : '?v=clutter4'), atlasBase).href,
+    anchors: {
+      streetW: STREET_W,
+      sidewalkW: SIDEWALK_W,
+      quayWalkW: typeof QUAY_WALK_W === 'undefined' ? null : QUAY_WALK_W,
+      curbW: 0.08,
+      blockW: BLOCK_W,
+      blockD: BLOCK_D,
+      gridCols: GRID_COLS,
+      gridRows: GRID_ROWS,
+      cellW,
+      cellD,
+      gridOriginX,
+      gridOriginZ,
+      sidewalkTop: 0.085,
+      roadY: 0.018,
+      quayY: quay.position.y,
+      quay: {
+        x: quay.position.x,
+        y: quay.position.y,
+        z: quay.position.z,
+        halfX: 11,
+        halfZ: 3,
+      },
+      seawallZ: SEAWALL_Z,
+      keepOut: [
+        { z0: 3.70, z1: 4.02 },
+        { z0: 4.40, z1: 5.20 },
+      ],
+      avoid: [
+        { x: RUBE_PLATE.x, z: RUBE_PLATE.z, hw: RUBE_PLATE.w * 0.5 + 0.35, hd: RUBE_PLATE.d * 0.5 + 0.25 },
+        { x: RUBE_GATE.x, z: RUBE_GATE.z, hw: RUBE_GATE.w * 0.5 + 0.2, hd: 0.55 },
+        { x: signalGroup.position.x, z: signalGroup.position.z, r: 1.05 },
+        { x: RUBE_VESSEL.x, z: RUBE_VESSEL.z, r: 0.55 },
+        ...HARBOR_CRATE_DEFS.map((d) => ({ x: d.pos[0], z: d.pos[2], r: 0.5 })),
+      ],
+    },
+  });
+  window.__streetClutter = streetClutter;
+} catch (err) {
+  console.warn('Harbor street clutter skipped', err);
+  window.__streetClutter = streetClutter;
+}
+window.addEventListener('noctuary-clutter-toggle', () => {
+  streetClutter.toggle();
+});
+window.__frameClutter = (mode) => streetClutter.frame(mode, camera, controls);
 
 const harborPost = createHarborPost({
   renderer, scene, camera, freezeMotion, bloomLayer, NOISE_GLSL,

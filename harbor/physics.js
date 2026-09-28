@@ -3575,5 +3575,6 @@ window.addEventListener('noctuary-springs-toggle', () => springSetOn(!physSpring
     CRATE_ATLAS_COLS, CRATE_ATLAS_ROWS, CRATE_FACE_ROW,
     basinBuoy, physCrateMat, physAdd, physHooks, crateInBasinXZ,
     disposePhysics,
+    HARBOR_CRATE_DEFS, RUBE_PLATE, RUBE_GATE, RUBE_VESSEL,
   };
 }
