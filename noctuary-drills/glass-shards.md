@@ -17,7 +17,7 @@ count = clamp(round(26 × area), 2, 16)
 
 `area` is the broken glass in scene units, measured from the pane that actually opens (a miss is 0 and spawns nothing). The density constant is `GLASS_SHARD_DENSITY` in `noctuary/glass-shards.js`.
 
-- Shop front: one ground-floor cell of the façade (0.76 m pitch). Glazed width is the part of that cell on the wall, minus the shop mullions (0.04 of the cell on each edge that is present). Pane height is the cell above the sill at y = 0.12 and under the top mullion, about 0.606. A full cell is 0.699 × 0.606 ≈ 0.424 → 11 shards. A face only 0.72 wide clips the cell to about 0.200 → 5 shards.
+- Shop front: one ground-floor cell of the façade (0.76 m pitch). Glazed width is the part of that cell on the wall, minus the shop mullions (0.04 of the cell on each edge that is present). Pane height is the cell above the sill at y = 0.12 and under the top mullion, about 0.606. A full cell is 0.699 × 0.606 ≈ 0.424 → 11 shards. A short side clips that cell (about 0.336 → 9). A face only 0.72 wide would clip it to about 0.200 → 5.
 - Fenestra vessel: the largest face of the glass block, 0.28 × 0.38 = 0.106 → 3 shards. The mullion cross is not glass, and the other faces of the box are not unfolded into extra area, so the little pane stays smaller than a shop front.
 
 Prop-wear atlases and the street-ground sheet are untouched.

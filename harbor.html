@@ -5936,6 +5936,16 @@ window.__shopGlass = {
     return n;
   },
   shards: () => shopShards.length,
+  pile() {
+    return shopShards.map((d) => ({
+      x: +d.body.position.x.toFixed(3),
+      y: +d.body.position.y.toFixed(3),
+      z: +d.body.position.z.toFixed(3),
+      facet: !!d.glassFacet,
+      thickness: d.glassThickness ? +d.glassThickness.toFixed(4) : 0,
+      span: d.glassSpan ? +d.glassSpan.toFixed(3) : 0,
+    }));
+  },
   reset: shopGlassReset,
   strike(id, face, slot, x, y, z, nx, nz) {
     const area = shopBrokenGlassArea(harborBoxes[id], face | 0, slot | 0);
@@ -5967,10 +5977,13 @@ window.__shopGlass = {
           const a1 = a0 + SHOP_CELL;
           if (a0 < -f.limit + 0.01 || a1 > f.limit - 0.01) continue;
           const area = shopBrokenGlassArea(b, f.face, slot);
-          const quay = f.nz > 0 ? 2 : 0;
-          const score = area * 10 + quay + Math.max(-2, b.z) * 0.01;
-          if (best && score <= best.score) continue;
           const mid = (a0 + a1) * 0.5;
+          const sx = f.nx ? f.x + f.nx * 0.06 : b.x + mid;
+          const sz = f.nz ? f.z + f.nz * 0.06 : b.z + mid;
+          const quay = f.nz > 0 ? 2 : 0;
+          const onDeck = Math.abs(sx) < 10.2 && sz > -0.4 && sz < 5.4 ? 6 : 0;
+          const score = area * 10 + quay + onDeck + Math.max(-2, b.z) * 0.01;
+          if (best && score <= best.score) continue;
           best = {
             score,
             id: i,
