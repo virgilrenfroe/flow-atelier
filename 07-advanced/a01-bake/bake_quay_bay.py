@@ -169,101 +169,144 @@ def _image(name, buf, colorspace):
     return img
 
 
-def _paint_floor():
-    """1 m tile. Four boards across U, grain running along V. Night-stained."""
+# Shop atlas cell 0 (ground-floor fenestra sheet). PIL top-left coordinates.
+# Floor band is the foreground wood planks. Wall patch is the plain plaster.
+SHOP_ATLAS = os.path.join(ROOT, "06-intermediate-assets", "shop-atlas.png")
+WOOD_RECT = (180, 470, 400, 508)  # x0, y0, x1, y1 from top
+WALL_RECT = (360, 30, 490, 110)
+
+
+def _load_shop_atlas():
+    img = bpy.data.images.load(SHOP_ATLAS)
+    w, h = img.size
+    buf = array.array("f", img.pixels[:])
+    bpy.data.images.remove(img)
+    return buf, w, h
+
+
+def _grab_rect(buf, w, h, rect):
+    """Copy a top-left rect out of a bottom-up Blender pixel buffer."""
+    x0, y0, x1, y1 = rect
+    rows = []
+    for py in range(y0, y1):
+        by = h - 1 - py
+        row = []
+        for x in range(x0, x1):
+            o = (by * w + x) * 4
+            row.append((buf[o], buf[o + 1], buf[o + 2]))
+        rows.append(row)
+    return rows
+
+
+def _sample_rows(rows, u, v):
+    sh = len(rows)
+    sw = len(rows[0])
+    u = u % 1.0
+    v = v % 1.0
+    x = u * (sw - 1)
+    y = v * (sh - 1)
+    x0 = int(x)
+    y0 = int(y)
+    x1 = min(sw - 1, x0 + 1)
+    y1 = min(sh - 1, y0 + 1)
+    tx = x - x0
+    ty = y - y0
+    def lerp(a, b, t):
+        return (a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t)
+    c0 = lerp(rows[y0][x0], rows[y0][x1], tx)
+    c1 = lerp(rows[y1][x0], rows[y1][x1], tx)
+    return lerp(c0, c1, ty)
+
+
+def _lum(c):
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+
+
+def _grade_pixel(c, mean_lum, target, contrast, sat):
+    r, g, b = c
+    lum = _lum(c)
+    r = lum + (r - lum) * sat
+    g = lum + (g - lum) * sat
+    b = lum + (b - lum) * sat
+    # Atlas wood/plaster stays warm. Cool pixels get pulled off concrete grey.
+    if b > r:
+        r, g, b = r * 1.12, g * 1.02, b * 0.82
+    lum = max(_lum((r, g, b)), 1e-5)
+    rel = lum / max(mean_lum, 1e-5)
+    rel = 1.0 + (rel - 1.0) * contrast
+    out = max(0.025, min(0.48, target * rel))
+    scale = out / lum
+    return (r * scale, g * scale, b * scale, out)
+
+
+def _mean_lum(rows):
+    s = 0.0
+    n = 0
+    for row in rows:
+        for c in row:
+            s += _lum(c)
+            n += 1
+    return s / max(n, 1)
+
+
+def _paint_from_rows(rows, target, contrast, sat, rough_bias, rough_gain):
+    """One metre tile. V stacks the atlas patch (plank width / wall height)."""
     alb = _buf()
     rough = _buf()
     height = [0.0] * (TEX * TEX)
+    mean = _mean_lum(rows)
     for y in range(TEX):
         v = y / TEX
+        # Soften the repeat so the patch join is not a hard cut.
+        vf = v
+        if v < 0.06:
+            t = v / 0.06
+            blend = 1.0 - t
+        elif v > 0.94:
+            t = (v - 0.94) / 0.06
+            blend = t
+        else:
+            blend = 0.0
         for x in range(TEX):
             u = x / TEX
-            plank = math.floor(u * 4.0)
-            pu = (u * 4.0) % 1.0
-            seam = _smooth(0.0, 0.035, pu) * _smooth(0.0, 0.035, 1.0 - pu)
-            n = _fbm(u * 3.0, v * 3.0, 2.2) * 0.5 + 0.5
-            # Grain lines run the length of the board (constant U).
-            grain = 0.5 + 0.5 * math.sin((u * 4.0 * 9.0 + n * 2.0) * math.tau)
-            knot = _fbm(u * 7.0, v * 5.0, 8.0) * 0.5 + 0.5
-            tint = (math.sin(plank * 2.3) * 0.5 + 0.5)
-            base = (0.09 + tint * 0.055, 0.06 + tint * 0.03, 0.038 + tint * 0.012)
-            col = [base[i] * (0.62 + 0.55 * n) * (0.82 + 0.22 * grain) for i in range(3)]
-            if knot > 0.74:
-                k = (knot - 0.74) / 0.26
-                col = [c * (1.0 - 0.5 * k) for c in col]
-            col = [c * (0.22 + 0.78 * seam) for c in col]
-            scuff = _fbm(u * 1.5, v * 14.0, 19.0, octaves=2) * 0.5 + 0.5
-            if scuff > 0.66:
-                s = (scuff - 0.66) / 0.34
-                col = [min(1.0, c + 0.035 * s) for c in col]
-            _put(alb, x, y, *col)
-            rv = 0.74 - 0.18 * (1.0 - seam)
-            rv *= 0.88 + 0.18 * (1.0 - n)
-            if scuff > 0.66:
-                rv *= 0.52
-            rv = max(0.28, min(0.96, rv))
+            c = _sample_rows(rows, u, vf)
+            if blend > 0.0:
+                c2 = _sample_rows(rows, u, 0.5)
+                c = (
+                    c[0] * (1.0 - blend) + c2[0] * blend,
+                    c[1] * (1.0 - blend) + c2[1] * blend,
+                    c[2] * (1.0 - blend) + c2[2] * blend,
+                )
+            r, g, b, out = _grade_pixel(c, mean, target, contrast, sat)
+            _put(alb, x, y, r, g, b)
+            # Brighter plank face is smoother; dark seams stay matte.
+            rel = out / max(target, 1e-5)
+            rv = rough_bias - rough_gain * max(0.0, min(1.0, (rel - 0.75) / 0.6))
+            rv = max(0.28, min(0.94, rv))
             _put(rough, x, y, rv, rv, rv)
-            height[y * TEX + x] = seam * 0.55 + n * 0.25 + (0.15 if scuff > 0.66 else 0.0)
-    return alb, rough, _normals(height, 6.0)
+            height[y * TEX + x] = rel
+    return alb, rough, _normals(height, 5.0)
+
+
+def _paint_floor():
+    """Shop-atlas cell 0 foreground planks. Not promenade concrete."""
+    buf, w, h = _load_shop_atlas()
+    rows = _grab_rect(buf, w, h, WOOD_RECT)
+    return _paint_from_rows(rows, target=0.20, contrast=1.45, sat=1.35, rough_bias=0.62, rough_gain=0.28)
 
 
 def _paint_plaster():
-    """U tiles every metre. V is the full wall height — dirt sits at the floor."""
-    alb = _buf()
-    rough = _buf()
-    height = [0.0] * (TEX * TEX)
-    for y in range(TEX):
-        v = y / TEX
-        for x in range(TEX):
-            u = x / TEX
-            n = _fbm(u * 4.0, v * 2.4, 4.4, tile=True) * 0.5 + 0.5
-            speck = _noise(u * 40.0, v * 28.0, 1.7, tile=True) * 0.5 + 0.5
-            dirt = _smooth(0.22, 0.0, v)
-            stain = _fbm(u * 1.6, v * 0.8, 12.0, octaves=3) * 0.5 + 0.5
-            drip = _smooth(0.62, 0.82, _fbm(u * 8.0, v * 1.4, 30.0, octaves=2) * 0.5 + 0.5)
-            drip *= _smooth(0.08, 0.45, v)
-            base = (0.100, 0.106, 0.124)
-            col = [base[i] * (0.48 + 0.85 * n) for i in range(3)]
-            col = [c * (1.0 - 0.62 * dirt) for c in col]
-            col = [c * (1.0 - 0.40 * max(0.0, stain - 0.52) * 2.2) for c in col]
-            col = [c * (1.0 - 0.16 * drip) for c in col]
-            col = [min(1.0, max(0.0, c + (speck - 0.5) * 0.02)) for c in col]
-            _put(alb, x, y, *col)
-            rv = 0.84 + (n - 0.5) * 0.10 + dirt * 0.08
-            if n > 0.70:
-                rv -= 0.24 * (n - 0.70) / 0.30
-            rv = max(0.42, min(0.98, rv))
-            _put(rough, x, y, rv, rv, rv)
-            height[y * TEX + x] = n * 0.35 + dirt * 0.4 + speck * 0.05
-    return alb, rough, _normals(height, 3.5, tile_v=False)
+    """Shop-atlas cell 0 plain wall. Warm interior plaster, not quay concrete."""
+    buf, w, h = _load_shop_atlas()
+    rows = _grab_rect(buf, w, h, WALL_RECT)
+    return _paint_from_rows(rows, target=0.12, contrast=2.2, sat=1.1, rough_bias=0.84, rough_gain=0.12)
 
 
 def _paint_timber():
-    alb = _buf()
-    rough = _buf()
-    height = [0.0] * (TEX * TEX)
-    for y in range(TEX):
-        v = y / TEX
-        for x in range(TEX):
-            u = x / TEX
-            n = _fbm(u * 2.0, v * 5.0, 6.5) * 0.5 + 0.5
-            grain = 0.5 + 0.5 * math.sin((v * 22.0 + n * 3.0) * math.tau)
-            ring = _fbm(u * 3.0, v * 3.0, 15.0, octaves=2) * 0.5 + 0.5
-            base = (0.145, 0.088, 0.048)
-            col = [base[i] * (0.75 + 0.35 * n) * (0.88 + 0.14 * grain) for i in range(3)]
-            # Cup ring, off-center, reads as a worked counter.
-            du, dv = u - 0.38, v - 0.62
-            cup = math.sqrt(du * du + dv * dv)
-            ring_m = _smooth(0.07, 0.045, abs(cup - 0.11))
-            col = [c * (1.0 - 0.35 * ring_m) for c in col]
-            if ring > 0.78:
-                col = [c * 0.8 for c in col]
-            _put(alb, x, y, *col)
-            rv = 0.58 + (1.0 - grain) * 0.12 + ring_m * 0.15
-            rv = max(0.32, min(0.9, rv))
-            _put(rough, x, y, rv, rv, rv)
-            height[y * TEX + x] = grain * 0.3 + n * 0.2 + ring_m * 0.25
-    return alb, rough, _normals(height, 4.0)
+    """Same shop-atlas planks, a step darker, for counter, shelf, crates, stool."""
+    buf, w, h = _load_shop_atlas()
+    rows = _grab_rect(buf, w, h, WOOD_RECT)
+    return _paint_from_rows(rows, target=0.14, contrast=1.5, sat=1.4, rough_bias=0.55, rough_gain=0.22)
 
 
 def _paint_iron():
@@ -998,6 +1041,13 @@ def export_assets(scene, bay, stats):
         "combinedPreview": "quay-bay-combined.png",
         "uv0": "UVMap",
         "uv1": "Lightmap",
+        "atlas": {
+            "shop": "06-intermediate-assets/shop-atlas.png",
+            "occupied": "06-intermediate-assets/room-atlas-occupied-32.png",
+            "floor": "shop-atlas cell 0 foreground wood planks",
+            "walls": "shop-atlas cell 0 plain plaster",
+            "timber": "same shop-atlas planks, darker",
+        },
         "bake": {
             "engine": "Cycles",
             "samples": SAMPLES,

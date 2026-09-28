@@ -2447,7 +2447,10 @@ function mountQuayBakeBay() {
         if (!mat) return;
         mat.lightMap = lightMap;
         mat.aoMap = aoMap;
-        mat.lightMapIntensity = Math.PI * 4.2;
+        // Wood planks from shop-atlas are lighter than the night shell.
+        // Ease the floor and timber so the boards stay wood, not a white pool.
+        const wood = mat.name === 'Floor' || mat.name === 'Timber' || mat.name === 'Rug';
+        mat.lightMapIntensity = Math.PI * (wood ? 1.85 : 4.2);
         mat.aoMapIntensity = 0.72;
         mat.envMapIntensity = 0;
       });

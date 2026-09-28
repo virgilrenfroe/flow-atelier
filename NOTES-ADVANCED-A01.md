@@ -23,7 +23,7 @@ Portal-scene chapter, used as a method list. Nothing from that product’s marks
 ## What was baked
 
 - **Lightmap** — lighting only. Albedo stays on the glTF materials (textured MeshStandard, lightmap-aware). The drill sets `lightMapIntensity = π × 4.2` and ACES exposure `1.7`. The π term meets Lambert; the extra lift keeps a dark night albedo from collapsing to black while the pools stay hotter than the corners. Lamp positions and wattages are the ones Virgil already framed.
-- **Surfaces** — floor, plaster, timber, iron, rug, cloth, and paper carry tiling albedo, roughness, and (on the shell) a normal. Seams, cup rings, pits, and floor dirt are in those maps. Albedo stays in the night range so the lightmap still leads. Roughness swings wide enough that the Harbor key light breaks into sheen on worn boards and iron, and stays matte in the dust.
+- **Surfaces** — floor, walls, and timber are sampled from `shop-atlas.png` (the ground-floor fenestra sheet Harbor already uses; apartments are `room-atlas-occupied-32.png`). The floor is that sheet's foreground wood planks, not promenade concrete. Walls are that sheet's plain plaster. Timber is the same planks a step darker. Albedo stays in the night range so the lightmap still leads. Roughness follows the plank seams.
 - **Contents** — the opening still frames one cell. Inside it: rug, stool, two crates, sack, boots, bucket, rope, counter clutter (mug, ledgers, tin, cloth, bowl), a stocked shelf, a framed sheet, and a coat. The bollard niche stays.
 - **AO** — occlusion in the bollard niche, under the counter lip, along shelf uprights, and where crates and the stool meet the floor. Runtime `aoMap` uses the same UV as the lightmap (`TEXCOORD_1`, `texture.channel = 1`), intensity `0.72`.
 - **Combined preview** — `quay-bay-combined.png` is the Cycles beauty (albedo × light). It is not applied in the drill, so the albedo is not multiplied twice.
@@ -79,6 +79,8 @@ Headless Blender 4.2 `Image.save()` writes a black PNG for generated float image
 - `mountQuayBakeBay()` places the GLB opening on that cell and hides the baked façade/stoop (the district wall is already there)
 
 The façade grid is shop | pier | shop. `faceAlong` is metres from the massing center, and cell 0 is `[0, 0.76)`, so x = 0 is the pier between two shops, not the middle of a bay. An earlier hole used `abs(faceAlong) <= uBakeHalf` and sat across that pier, reading as a third room between two atlas stickers. The hole is now one cell's glass only (shop mullion 0.04 / 0.045, plinth at 0.12 m), and the GLB opening is scaled and shifted onto that same rect. The neighboring shop pane and the pier stay on the atlas path.
+
+Floor, plaster, and timber on the GLB are crops of `shop-atlas.png` (cell 0 planks and plain wall), the same ground-floor sheet as the neighboring shop stickers. Harbor and the drill ease `lightMapIntensity` on Floor, Timber, and Rug so those lighter boards stay wood instead of blowing out to a white pool. The promenade concrete is not used on the bay floor.
 
 Street ground, deck plank atlas, prop wear, fleet, lamp props, water, pennants, and buoyancy/physics are untouched. If the GLB fails to load, `uBakeBay` stays `-1` and every pane stays on the atlas path.
 

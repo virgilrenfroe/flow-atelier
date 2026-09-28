@@ -16,6 +16,13 @@
   "combinedPreview": "quay-bay-combined.png",
   "uv0": "UVMap",
   "uv1": "Lightmap",
+  "atlas": {
+    "shop": "06-intermediate-assets/shop-atlas.png",
+    "occupied": "06-intermediate-assets/room-atlas-occupied-32.png",
+    "floor": "shop-atlas cell 0 foreground wood planks",
+    "walls": "shop-atlas cell 0 plain plaster",
+    "timber": "same shop-atlas planks, darker"
+  },
   "bake": {
     "engine": "Cycles",
     "samples": 64,
@@ -24,8 +31,8 @@
     "ao": "AO",
     "combined": "COMBINED preview only \u2014 not multiplied again in the drill",
     "normalize": {
-      "scale": 0.9898019536281166,
-      "p95_in": 1.1618485857546328,
+      "scale": 0.9585475958914549,
+      "p95_in": 1.199731765985489,
       "max_out": 2.1
     }
   }
