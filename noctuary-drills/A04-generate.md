@@ -8,28 +8,28 @@ Hand-placed Harbor blocks (`placeBuilding` over the 5×4 lot roll) do not scale.
 ## What was practiced
 
 - **Height field.** Value noise + fbm. A slow octave sets the district ridge; a faster octave roughens lot to lot. The field is shifted by a seed, so two seeds are two districts. Quay row stays low. A ridge through the middle blocks becomes Signal towers. Hinterland stays shorter.
-- **Corridor mask.** Streets use the same cell as Harbor (`BLOCK + STREET`). The primary hard mask is the full street module, `STREET_W` 3.70. Alleys stay narrower: every block cuts a north–south alley 1.16 wide, and every block inland of the quay also cuts a cross alley. Parcels sit behind a 0.52 inset, and each footprint must keep a 0.14 gap from every street and alley or it is shrunk until it does. Courts (low occupancy noise) stay empty. Dark alley ribbons are drawn with the massing pass, inside the block, so the cut reads even on the existing lot pads. A check recomputes the street bands, asserts an 8 cm clearance, and asserts the primary mask and the visible carriageway are both clearly wider than an alley.
+- **Corridor mask.** Streets use the same cell as Harbor (`BLOCK + STREET`). The outer hard mask is the main street module, `STREET_W` 1.65 — the gap between building faces, not a wider district. Inside that gap the sidewalks are 0.22, so the asphalt carriageway is about 1.21 (`STREET_W − 2×SIDEWALK_W`), wider than main’s 0.65 lane and wider than the 1.16 alley. Every block cuts a north–south alley 1.16 wide. Every block inland of the quay also cuts a cross alley. Parcels sit behind a 0.52 inset, and each footprint must keep a 0.14 gap from every street and alley or it is shrunk until it does. Courts (low occupancy noise) stay empty. Dark alley ribbons are drawn with the massing pass, inside the block, so the cut reads even on the existing lot pads. A check recomputes the street bands, asserts an 8 cm clearance, and asserts the outer module is still 1.65 while the carriageway is the wider share of that gap.
 - **Sliced mass.** A stack is a fixed 1.48 podium, then a shaft at 70% of that footprint. A crown is allowed only on the tallest lot of a Signal ridge block (not Quay, not the hinterland belt), one crown per block, and the crown is 72% of the shaft so it cannot spill past it. The hard mask runs again on every slice.
 
 The mass is one `InstancedMesh` (`harbor-district-mass`) with a night façade shader: concrete body, 0.76 m fenestra cells, dark mullions, cool glass, rare warm panes. Extension streets past the hand grid are plain night asphalt in this module. They do not bind `uStreetAtlas`.
 
-## Wider corridors
+## Wider asphalt, same block spacing
 
-Sidewalks sit inside the street gap, so the lane you see is `STREET_W − 2×SIDEWALK_W`. The old module was 1.65 with 0.50 sidewalks, which left a 0.65 carriageway — narrower than the 1.16 alley. Primary streets now read as main streets. Alleys stay the narrow cut.
+The street module stays the main gap: `STREET_W` 1.65. Building faces do not move. Sidewalks sit inside that gap, so the lane you see is `STREET_W − 2×SIDEWALK_W`. Main used 0.50 sidewalks and left a 0.65 carriageway, narrower than the 1.16 alley. The sidewalks are now 0.22, which opens the asphalt to about 1.21. Alleys stay the narrow cut inside the block.
 
-| Lane | Width |
-|---|---|
-| `STREET_W` (hard mask and asphalt module) | 3.70 |
-| `SIDEWALK_W` | 0.78 |
-| Carriageway (`STREET_W − 2×SIDEWALK_W`) | ~2.14 |
-| `QUAY_WALK_W` (north walk of the quay row only) | 1.25 |
-| Alley | 1.16 |
+| Lane | Main | Now |
+|---|---|---|
+| `STREET_W` (outer gap, hard mask) | 1.65 | 1.65 |
+| `SIDEWALK_W` | 0.50 | 0.22 |
+| Carriageway (`STREET_W − 2×SIDEWALK_W`) | 0.65 | ~1.21 |
+| Quay-edge walk (north face of the first row) | 0.50 | 0.30 |
+| Alley | 1.16 | 1.16 |
 
-The same constants space the hand-placed blocks, sidewalks, curbs, and crosswalks, and they are passed into the generator, so the mask and the asphalt agree. The quay-edge walk is the raised sidewalk on the water side of the first row. Atlas cell sampling is unchanged; only the mesh scale moved. At the default camera the first internal carriageway is about 15 px across before and about 47 px after; the quay walk is about 16 px before and about 40 px after.
+The quay-edge walk is a strip on the water side of the first row. It stays inside the 1.65 gap, so it does not push the promenade or the buildings. Hand-placed asphalt, sidewalks, curbs, and crosswalks use these constants, and the generator mask uses the same outer `STREET_W` and sidewalk split. Atlas cell sampling is unchanged.
 
 ## Toggle
 
-The generator does not allocate meshes until it is turned on. Turning it off disposes those geometries and materials, then shows the hand-placed mesh again. The two cities are never both visible. The wider streets stay in both modes, because they are the street module, not a massing-only overlay.
+The generator does not allocate meshes until it is turned on. Turning it off disposes those geometries and materials, then shows the hand-placed mesh again. The two cities are never both visible. The thinner sidewalks and wider asphalt stay in both modes, because they are the street module, not a massing-only overlay.
 
 | Control | Effect |
 |---|---|
@@ -49,11 +49,11 @@ node noctuary/district-massing.check.mjs
 
 ## Harbor view
 
-Same camera. Left is the previous 0.65 carriageway; right is the 2.14 carriageway with the 1.25 quay-edge walk. Alleys stay the narrow cut inside the blocks.
+Same camera and the same building spacing. Left is main’s split (sidewalk 0.50, carriageway 0.65). Right keeps that outer gap and gives the lane the width: sidewalk 0.22, carriageway about 1.21, quay-edge strip 0.30.
 
 ![Harbor streets before and after the wider module](a04-harbor-streets-before-after.png)
 
-Seed `A04`, massing on. Primary streets stay open and wider than the alleys; the seed bar is the only added chrome:
+Seed `A04`, massing on. The asphalt ribbon is the wide part of the same gap; the seed bar is the only added chrome:
 
 ![Harbor seed A04 with wider corridors](a04-harbor-massing-seed-a04.png)
 

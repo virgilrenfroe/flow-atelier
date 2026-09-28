@@ -161,7 +161,8 @@ function blockRect(bx, bz, g) {
 }
 
 function resolveGrammar(options) {
-  const streetW = options.streetW ?? 3.70;
+  const streetW = options.streetW ?? 1.65;
+  const sidewalkW = options.sidewalkW ?? 0.22;
   const blockW = options.blockW ?? 5;
   const blockD = options.blockD ?? 4.4;
   const cols = options.cols ?? 5;
@@ -169,6 +170,7 @@ function resolveGrammar(options) {
   const originalRows = options.originalRows ?? 4;
   return {
     streetW,
+    sidewalkW,
     blockW,
     blockD,
     setback: options.setback ?? 0.32,
@@ -566,6 +568,8 @@ export function planDistrict(options = {}) {
     maskGap: MASK_GAP,
     podiumH: PODIUM_H,
     streetW: g.streetW,
+    sidewalkW: g.sidewalkW,
+    carriageway: g.streetW - 2 * g.sidewalkW,
     alleyW: g.alleyW,
     cols: g.cols,
     rows: g.rows,

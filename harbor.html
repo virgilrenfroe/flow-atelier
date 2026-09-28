@@ -624,13 +624,14 @@ float fbm(vec2 p){
 // ——— Urban grammar: streets → blocks → lots → buildings (pass 3 + irregular lots p4) ———
 // Hierarchy refs: CityEngine / StreetGen / Purdue procedural; Three.js CityGenerator + SidewalkGenerator;
 // arXiv:1801.05741; mysimulator procedural buildings. Negative space = asphalt corridors.
-// Main-street module. Sidewalks sit inside the street gap, so the lane you
-// see is STREET_W − 2×SIDEWALK_W (was 1.65 − 1.00 = 0.65, narrower than an alley).
-// Carriageway is now ~2.14; the quay-edge walk (north face of the first row) is wider still.
-// Atlas sheets are unchanged — these constants only scale the meshes.
-const STREET_W = 3.70;
-const SIDEWALK_W = 0.78;
-const QUAY_WALK_W = 1.25;
+// Outer module matches main: STREET_W 1.65 is the gap between building faces.
+// Sidewalks sit inside that gap, so the lane you see is STREET_W − 2×SIDEWALK_W.
+// Main left a 0.65 carriageway (sidewalks 0.50). Thinner sidewalks open the
+// asphalt to ~1.21 without moving the blocks. The quay-edge strip stays inside
+// the same gap. Atlas sheets are unchanged — these constants only scale meshes.
+const STREET_W = 1.65;
+const SIDEWALK_W = 0.22;
+const QUAY_WALK_W = 0.30;
 const CURB_H = 0.09;
 const BLOCK_W = 5.0;   // lot area width (X) inside sidewalks
 const BLOCK_D = 4.4;   // lot area depth (Z)
@@ -947,7 +948,7 @@ for (let r = 0; r <= GRID_ROWS; r++) {
     if (roadN < ROAD_MAX) {
       dummyR.position.set(x, 0.028, z);
       dummyR.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
-      dummyR.scale.set(STREET_W * 0.92, STREET_W * 0.92, 1);
+      dummyR.scale.set(2.15, STREET_W * 0.92, 1);
       dummyR.updateMatrix();
       roadKindAttr.setX(roadN, 1);
       roads.setMatrixAt(roadN++, dummyR.matrix);
@@ -2541,6 +2542,7 @@ window.__harborStrands = {
 const massingSeed0 = parseMassingSeed(params.get('seed'));
 const districtMassing = createDistrictMassing(THREE, {
   streetW: STREET_W,
+  sidewalkW: SIDEWALK_W,
   blockW: BLOCK_W,
   blockD: BLOCK_D,
   setback: SETBACK,
@@ -8658,7 +8660,7 @@ function fillTourChecklist() {
     '• [x] Atlas path: skip edgeKill/edgeFade→wallCol (tan side-wall panes after cool127)',
     '• [x] Distance LOD impostor (lodFlat mix to flat back atlas 16–36u)',
     '• [x] Night-street gait: walk 0.50 / sprint 0.88 + head-bob',
-    '• [x] Street widths: carriageway ~2.14 · SIDEWALK_W 0.78 · QUAY_WALK_W 1.25 · STREET_W 3.70',
+    '• [x] Street widths: carriageway ~1.21 · SIDEWALK_W 0.22 · QUAY_WALK_W 0.30 · STREET_W 1.65',
     '• [x] Collision chest = EYE_H*0.72 (was stale 1.15)',
     '• [x] Face-map default + V walk unchanged',
     '',

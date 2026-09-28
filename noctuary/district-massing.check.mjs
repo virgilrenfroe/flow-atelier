@@ -4,8 +4,9 @@
  */
 import { planDistrict, parseMassingSeed, SEED_PRESETS } from './district-massing.js';
 
-const STREET_W = 3.70;
-const SIDEWALK_W = 0.78;
+const STREET_W = 1.65;
+const SIDEWALK_W = 0.22;
+const QUAY_WALK_W = 0.30;
 const BLOCK_W = 5;
 const BLOCK_D = 4.4;
 const SETBACK = 0.32;
@@ -58,6 +59,7 @@ function harborStreets() {
 function grammar(seed, seedLabel) {
   return {
     streetW: STREET_W,
+    sidewalkW: SIDEWALK_W,
     blockW: BLOCK_W,
     blockD: BLOCK_D,
     setback: SETBACK,
@@ -133,14 +135,14 @@ const plan = planDistrict(grammar(SEED_PRESETS[0].value, 'A04'));
 assertPlan(plan, 'A04');
 const carriageway = STREET_W - 2 * SIDEWALK_W;
 expect(plan.report.streetW === STREET_W, `street mask ${plan.report.streetW} != ${STREET_W}`);
-expect(
-  plan.report.streetW > plan.report.alleyW * 2.5,
-  `primary mask ${plan.report.streetW} is not clearly wider than alley ${plan.report.alleyW}`,
-);
-expect(
-  carriageway > plan.report.alleyW * 1.6,
-  `carriageway ${carriageway.toFixed(2)} still reads as an alley (${plan.report.alleyW})`,
-);
+expect(Math.abs(plan.report.sidewalkW - SIDEWALK_W) < 1e-6, 'sidewalk split drifted');
+expect(Math.abs(plan.report.carriageway - carriageway) < 1e-6, 'carriageway split drifted');
+expect(STREET_W === 1.65, 'outer corridor footprint left the main module');
+expect(SIDEWALK_W < 0.50, 'sidewalks are not thinner than main');
+expect(carriageway > 0.65 + 0.4, `carriageway ${carriageway.toFixed(2)} is not wider than main's 0.65 lane`);
+expect(carriageway > plan.report.alleyW, `carriageway ${carriageway.toFixed(2)} still narrower than alley ${plan.report.alleyW}`);
+expect(2 * (SIDEWALK_W + 0.08) < STREET_W, 'sidewalks and curbs do not fit in the street gap');
+expect(QUAY_WALK_W < 0.50 && QUAY_WALK_W + 0.08 < STREET_W, 'quay walk expands the promenade');
 expect(plan.report.heightMax - plan.report.heightMin > 3, 'skyline is flat');
 expect(plan.roads.some((r) => r.kind === 'street'), 'extension streets missing');
 const quayH = plan.instances.filter((i) => i.role === 'quay').map((i) => i.h);
