@@ -626,12 +626,14 @@ float fbm(vec2 p){
 // arXiv:1801.05741; mysimulator procedural buildings. Negative space = asphalt corridors.
 // Outer module matches main: STREET_W 1.65 is the gap between building faces.
 // Sidewalks sit inside that gap, so the lane you see is STREET_W − 2×SIDEWALK_W.
-// Main left a 0.65 carriageway (sidewalks 0.50). Thinner sidewalks open the
-// asphalt to ~1.21 without moving the blocks. The quay-edge strip stays inside
-// the same gap. Atlas sheets are unchanged — these constants only scale meshes.
+// Main left a 0.65 carriageway (sidewalks 0.50). 0.30 sidewalks open the asphalt
+// to 1.05 without moving the blocks. The quay-edge strip stays inside the same gap.
+// Atlas sheets are unchanged — these constants only scale meshes.
 const STREET_W = 1.65;
-const SIDEWALK_W = 0.22;
-const QUAY_WALK_W = 0.30;
+const SIDEWALK_W = 0.30;
+const QUAY_WALK_W = 0.35;
+// NYC approach-band depth: ~10–12 ft. Harbor is ~15.79 ft/unit, so ~0.70.
+const CROSSWALK_D = 0.70;
 const CURB_H = 0.09;
 const BLOCK_W = 5.0;   // lot area width (X) inside sidewalks
 const BLOCK_D = 4.4;   // lot area depth (Z)
@@ -745,13 +747,22 @@ const asphaltMat = new THREE.ShaderMaterial({
         col += grain * 0.03;
         float streak = pow(max(0.0, sin(vWorldPos.x * 3.2 + grain * 2.0 + uTime * 0.15)), 14.0);
         col += vec3(0.22, 0.28, 0.42) * streak * 0.35;
-        float along = vUv.x;
-        float across = abs(vUv.y - 0.5);
-        float dash = step(0.45, fract(along * 14.0));
-        float line = smoothstep(0.06, 0.02, across) * dash;
-        col = mix(col, vec3(0.72, 0.68, 0.42), line * 0.55);
-        float edge = smoothstep(0.04, 0.0, min(vUv.y, 1.0 - vUv.y));
-        col += vec3(0.08, 0.09, 0.12) * edge;
+        if (vKind > 0.5) {
+          // Continental bars run along uv.y, matching the crosswalk cell.
+          // The mesh aligns uv.y with traffic. Edge lines close the ladder.
+          float across = abs(fract(vUv.x * 5.0) - 0.5);
+          float bar = 1.0 - smoothstep(0.14, 0.26, across);
+          float edge = smoothstep(0.05, 0.0, min(vUv.y, 1.0 - vUv.y));
+          col = mix(col, vec3(0.93, 0.94, 0.91), max(bar, edge * 0.85));
+        } else {
+          float along = vUv.x;
+          float across = abs(vUv.y - 0.5);
+          float dash = step(0.45, fract(along * 14.0));
+          float line = smoothstep(0.06, 0.02, across) * dash;
+          col = mix(col, vec3(0.72, 0.68, 0.42), line * 0.55);
+          float edge = smoothstep(0.04, 0.0, min(vUv.y, 1.0 - vUv.y));
+          col += vec3(0.08, 0.09, 0.12) * edge;
+        }
       } else {
         col = streetAsphalt(vWorldPos);
         if (vKind > 0.5) {
@@ -870,7 +881,7 @@ const roadGeo = new THREE.PlaneGeometry(1, 1);
 const slabGeo = new THREE.BoxGeometry(1, 1, 1);
 slabGeo.translate(0, 0.5, 0);
 
-const ROAD_MAX = 64;
+const ROAD_MAX = 128;
 const SW_MAX = 200;
 const CURB_MAX = 160;
 // 0 = lane paint (center dash + edge lines), 1 = crosswalk cell
@@ -939,27 +950,60 @@ for (let r = 0; r <= GRID_ROWS; r++) {
   const z = gridOriginZ + STREET_W * 0.5 - r * cellD;
   const cx = 0;
   addRoad(cx, z, districtW + 0.4, STREET_W * 0.98, 0);
-  // crosswalk ticks near block corners (simple night dashes perpendicular)
-  for (let c = 0; c <= GRID_COLS; c++) {
-    const x = gridOriginX - STREET_W * 0.5 + c * cellW;
-    // Photo zebra across the N–S street. rotZ π/2: local X (uv.x, scale.x) runs
-    // along Z, local Y (uv.y) across X. Bars in the atlas are long in uv.x.
-    // Visual only — not a pavement collider.
-    if (roadN < ROAD_MAX) {
-      dummyR.position.set(x, 0.028, z);
-      dummyR.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
-      dummyR.scale.set(2.15, STREET_W * 0.92, 1);
-      dummyR.updateMatrix();
-      roadKindAttr.setX(roadN, 1);
-      roads.setMatrixAt(roadN++, dummyR.matrix);
-    }
-  }
 }
 // Vertical streets (along Z)
 for (let c = 0; c <= GRID_COLS; c++) {
   const x = gridOriginX - STREET_W * 0.5 + c * cellW;
   const zMid = gridOriginZ - districtD * 0.5 + STREET_W * 0.5;
   addRoad(x, zMid, districtD + 0.2, STREET_W * 0.98, Math.PI / 2);
+}
+
+// NYC approach bands (MUTCD 3B / NYC Street Design Manual). One band per leg,
+// just outside the intersection, flush with the sidewalk's street face.
+// Span is the carriageway (curb to curb). Depth ~0.70 runs along the sidewalk.
+// The crosswalk cell's bars run along texture V (mesh uv.y). rotZ 0 puts
+// uv.y along Z; rotZ π/2 puts uv.y along X. Visual only — no collider.
+// Skip a leg with no sidewalk continuation.
+function addCrosswalk(cx, cz, span, depth, trafficAlongX) {
+  if (roadN >= ROAD_MAX) return;
+  dummyR.position.set(cx, 0.028, cz);
+  dummyR.rotation.set(-Math.PI / 2, 0, trafficAlongX ? Math.PI / 2 : 0);
+  dummyR.scale.set(span, depth, 1);
+  dummyR.updateMatrix();
+  roadKindAttr.setX(roadN, 1);
+  roads.setMatrixAt(roadN++, dummyR.matrix);
+}
+
+const carriageW = STREET_W - 2 * SIDEWALK_W;
+const halfCarriage = carriageW * 0.5;
+for (let r = 0; r <= GRID_ROWS; r++) {
+  for (let c = 0; c <= GRID_COLS; c++) {
+    const ix = gridOriginX - STREET_W * 0.5 + c * cellW;
+    const iz = gridOriginZ + STREET_W * 0.5 - r * cellD;
+    const west = c > 0;
+    const east = c < GRID_COLS;
+    const north = r > 0;
+    const south = r < GRID_ROWS;
+    // Across the N–S street. Traffic (and the bars) run along Z.
+    if (north && west && east) {
+      const zNear = iz + halfCarriage;
+      addCrosswalk(ix, zNear + CROSSWALK_D * 0.5, carriageW, CROSSWALK_D, false);
+    }
+    if (south && west && east) {
+      const walk = r === 0 ? QUAY_WALK_W : SIDEWALK_W;
+      const zNear = iz - (STREET_W * 0.5 - walk);
+      addCrosswalk(ix, zNear - CROSSWALK_D * 0.5, carriageW, CROSSWALK_D, false);
+    }
+    // Across the E–W street. Traffic (and the bars) run along X.
+    if (east && north && south) {
+      const xNear = ix + halfCarriage;
+      addCrosswalk(xNear + CROSSWALK_D * 0.5, iz, carriageW, CROSSWALK_D, true);
+    }
+    if (west && north && south) {
+      const xNear = ix - halfCarriage;
+      addCrosswalk(xNear - CROSSWALK_D * 0.5, iz, carriageW, CROSSWALK_D, true);
+    }
+  }
 }
 
 // Sidewalks + curbs around each block perimeter
@@ -8660,7 +8704,7 @@ function fillTourChecklist() {
     '• [x] Atlas path: skip edgeKill/edgeFade→wallCol (tan side-wall panes after cool127)',
     '• [x] Distance LOD impostor (lodFlat mix to flat back atlas 16–36u)',
     '• [x] Night-street gait: walk 0.50 / sprint 0.88 + head-bob',
-    '• [x] Street widths: carriageway ~1.21 · SIDEWALK_W 0.22 · QUAY_WALK_W 0.30 · STREET_W 1.65',
+    '• [x] Street widths: carriageway 1.05 · SIDEWALK_W 0.30 · QUAY_WALK_W 0.35 · STREET_W 1.65',
     '• [x] Collision chest = EYE_H*0.72 (was stale 1.15)',
     '• [x] Face-map default + V walk unchanged',
     '',
