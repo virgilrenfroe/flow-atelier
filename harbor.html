@@ -8044,15 +8044,29 @@ window.__frameGlassPile = (wide) => {
     z /= n;
   }
   const span = n ? Math.max(maxX - minX, maxZ - minZ, 0.4) : 0.4;
-  const dist = Math.max(wide ? 2.6 : 1.9, span * (wide ? 1.7 : 1.45));
-  camera.position.set(x + dist * 0.28, 0.62 + dist * 0.62, z + dist * 0.78);
-  controls.target.set(x, 0.08, z);
-  controls.update();
+  let dist = Math.max(wide ? 2.6 : 1.9, span * (wide ? 1.7 : 1.45));
+  const v = new THREE.Vector3();
+  let inFrame = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    camera.position.set(x + dist * 0.28, 0.62 + dist * 0.62, z + dist * 0.78);
+    controls.target.set(x, 0.08, z);
+    controls.update();
+    inFrame = 0;
+    for (const d of use) {
+      if (!d || !d.body) continue;
+      v.copy(d.body.position);
+      v.project(camera);
+      if (v.z < 1 && Math.abs(v.x) <= 0.92 && Math.abs(v.y) <= 0.88) inFrame++;
+    }
+    if (!n || inFrame >= n) break;
+    dist *= 1.35;
+  }
   return {
     x: +x.toFixed(3),
     y: +y.toFixed(3),
     z: +z.toFixed(3),
     n,
+    inFrame,
     span: +span.toFixed(3),
     dist: +dist.toFixed(3),
     wide: !!wide,
