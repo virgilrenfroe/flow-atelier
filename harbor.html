@@ -7223,6 +7223,7 @@ window.__streetClutter = streetClutter;
 window.addEventListener('noctuary-clutter-toggle', () => {
   streetClutter.toggle();
 });
+window.__frameClutter = (mode) => streetClutter.frame(mode, camera, controls);
 
 const rubeState = {
   stage: 'idle', // idle | plate | lantern | gate | done

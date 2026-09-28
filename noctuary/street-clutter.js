@@ -419,7 +419,11 @@ export function mountStreetClutter({ scene, world, CANNON, atlasUrl, anchors, en
       const quay = plan.items.filter((it) => it.surface === "quay");
       const c = hero.length ? centroid(hero) : centroid(plan.items);
       const y = anchors.sidewalkTop || 0.08;
-      if (mode === "quay" && quay.length) {
+      if (mode === "detail") {
+        const bench = plan.items.find((it) => it.hero && it.kind === "bench") || { x: c.x, z: c.z };
+        camera.position.set(bench.x + 0.05, y + 0.42, bench.z + 0.95);
+        controls.target.set(bench.x, 0.16, bench.z);
+      } else if (mode === "quay" && quay.length) {
         const q = centroid(quay);
         camera.position.set(q.x + 2.4, 1.15, q.z - 1.15);
         controls.target.set(q.x, 0.28, q.z);

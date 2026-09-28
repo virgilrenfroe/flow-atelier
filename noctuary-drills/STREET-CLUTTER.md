@@ -60,7 +60,25 @@ On the wide module the open promenade in front of the lanterns is inside the new
 node noctuary/street-clutter.check.mjs
 ```
 
-`window.__streetClutter` reports `counts`, `total`, `live`, `wider`, and `atlas` (`street-clutter-packed` once the sheet binds). `frame('hero' | 'street' | 'quay', camera, controls)` is the exhibit camera used for the stills.
+`window.__streetClutter` reports `counts`, `total`, `live`, `wider`, and `atlas` (`street-clutter-packed` once the sheet binds). `window.__frameClutter('hero' | 'street' | 'quay' | 'detail')` is the exhibit camera used for the stills.
+
+## Harbor view
+
+Exhibit chrome stays off. The center block’s quay-facing walk, close enough to read the sheet:
+
+![Hero sidewalk — can, hydrant, bench, pit, grate](street-clutter-detail.png)
+
+Same cluster from a step back, with the manhole in the lane:
+
+![Hero sidewalk, street level](street-clutter-hero.png)
+
+A wider look down the quay street. The furniture stays on the walk and the curb, not in a pile:
+
+![Quay street](street-clutter-street.png)
+
+East promenade, landward of the lantern posts and clear of the plate and the crates. Benches face the water. Planters sit in the gap before the bollard line:
+
+![East promenade benches and planters](street-clutter-quay.png)
 
 ## Left alone
 
