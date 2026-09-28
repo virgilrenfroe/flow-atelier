@@ -5,17 +5,22 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 
-// Shards per square scene-unit of broken glass. Count is
-// clamp(round(density * area), 2, 16). A full shop cell is several times
-// the fenestra vessel's pane, so it sheds more pieces.
-export const GLASS_SHARD_DENSITY = 26;
-export const GLASS_SHARD_MIN = 2;
-export const GLASS_SHARD_MAX = 16;
+// Harbor is a diorama: a storey is under one scene unit, not a metre.
+// Glass square footage uses 1 scene unit ≈ 7 feet, so
+// area_sqft = width_ft × height_ft = area_scene × 49.
+// A full shop pane is about 4.9 ft × 4.2 ft ≈ 21 sq ft.
+// The fenestra face is about 2.0 ft × 2.7 ft ≈ 5.2 sq ft.
+// Shard count is half that footage: round(0.5 × area_sqft).
+// No clamp. Those panes are about 10 and 3 shards.
+export const GLASS_FEET_PER_UNIT = 7;
 
-export function glassShardCount(area) {
-  const n = Math.round(GLASS_SHARD_DENSITY * Math.max(0, area || 0));
-  if (n <= 0) return 0;
-  return Math.max(GLASS_SHARD_MIN, Math.min(GLASS_SHARD_MAX, n));
+export function glassAreaSqFt(areaScene) {
+  const area = Math.max(0, areaScene || 0);
+  return area * GLASS_FEET_PER_UNIT * GLASS_FEET_PER_UNIT;
+}
+
+export function glassShardCount(areaScene) {
+  return Math.round(0.5 * glassAreaSqFt(areaScene));
 }
 
 const TINTS = [

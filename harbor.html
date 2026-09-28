@@ -302,7 +302,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
-import { createHarborGlassShards, glassQuaternion, glassShardCount, GLASS_SHARD_DENSITY } from './noctuary/glass-shards.js';
+import { createHarborGlassShards, glassQuaternion, glassShardCount, glassAreaSqFt, GLASS_FEET_PER_UNIT } from './noctuary/glass-shards.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -5956,8 +5956,9 @@ window.__shopGlass = {
       broken: window.__shopGlass.broken(),
       shards: shopShards.length,
       area: +area.toFixed(4),
+      sqft: +glassAreaSqFt(area).toFixed(1),
       count,
-      density: GLASS_SHARD_DENSITY,
+      feetPerUnit: GLASS_FEET_PER_UNIT,
     };
   },
   // Largest fully glazed ground-floor cell, facing the quay when one exists.
@@ -6009,8 +6010,9 @@ window.__shopGlass = {
       face: best.face,
       slot: best.slot,
       area: +best.area.toFixed(4),
+      sqft: +glassAreaSqFt(best.area).toFixed(1),
       count,
-      density: GLASS_SHARD_DENSITY,
+      feetPerUnit: GLASS_FEET_PER_UNIT,
       shards: shopShards.length,
       x: +best.x.toFixed(3),
       z: +best.z.toFixed(3),
@@ -6043,8 +6045,9 @@ window.__shopGlass = {
       broken: window.__shopGlass.broken(),
       shards: shopShards.length,
       area: +area.toFixed(4),
+      sqft: +glassAreaSqFt(area).toFixed(1),
       count: shopShards.length - before,
-      density: GLASS_SHARD_DENSITY,
+      feetPerUnit: GLASS_FEET_PER_UNIT,
       shard: shopShards[0] ? {
         shard: true,
         shopGlass: true,
@@ -7925,7 +7928,8 @@ function rubeFillProbe() {
     done: rubeState.shatterDone,
     debris: rubeDebris.length,
     area: rubeState.shardArea ? +rubeState.shardArea.toFixed(4) : 0,
-    density: GLASS_SHARD_DENSITY,
+    sqft: rubeState.shardArea ? +glassAreaSqFt(rubeState.shardArea).toFixed(1) : 0,
+    feetPerUnit: GLASS_FEET_PER_UNIT,
     vesselVisible: rubeVesselMesh.visible,
     pickable: rubeDebris.filter((d) => d.kind === 'crate' && d.mass > 0 && d.mesh && d.mesh.userData.physEntry).length,
     facet: rubeDebris.length > 0 && rubeDebris.every((d) => d.glassFacet),
