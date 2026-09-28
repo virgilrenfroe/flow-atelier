@@ -5,16 +5,18 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 
-// Human scale already in the harbor, not a free constant.
-// The shop door opening is 0.60 scene units (sill 0.10, head 0.70).
-// A shop door is 7 feet, so 1 scene unit = 7 / 0.60 feet.
-// The ground storey (window cell 0.76) is then about 8.9 ft, and the
-// tallest quay crate (0.24) is about 2.8 ft — under half that door.
-// The old 7 ft/unit made the same door about 4.2 ft and the storey about 5.3 ft.
+// Human scale from the shop storey, not a free constant.
+// The ground-floor window cell is 0.76 scene units, and that cell is the
+// shop storey (door sill 0.10, head 0.70, glazing nearly floor to head).
+// A retail floor is 12 feet, so 1 scene unit = 12 / 0.76 feet.
+// The door is then about 9.5 ft (0.60 / 0.76 of that floor) and the tallest
+// quay crate (0.24) is about 3.8 ft, still under half the storey.
+// 7 ft/unit made the storey 5.3 ft. 7/0.60 ft/unit locked a 7 ft door and an
+// 8.9 ft storey, so the bay was only ~58 sq ft and the pile was a sprinkle.
 // Walk eye (0.58) sits near the lintel, so it is not the anchor.
 // area_sqft = width_ft × height_ft. count = round(0.5 × area_sqft).
 // No clamp. A miss (0 area) is 0 shards.
-export const GLASS_FEET_PER_UNIT = 7 / 0.6;
+export const GLASS_FEET_PER_UNIT = 12 / 0.76;
 
 export function glassAreaSqFt(areaScene) {
   const area = Math.max(0, areaScene || 0);
