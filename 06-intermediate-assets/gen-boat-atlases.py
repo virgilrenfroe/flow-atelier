@@ -116,7 +116,7 @@ def paint_hull(albedo, height, rough, emit, u, v, spec):
     peel = noise(spec["seed"], 1.4)
     blot = noise(spec["seed"] + 3, 7.0)
     rgb = base + peel[:, :, None] * 7.0 + blot[:, :, None] * 5.0
-    h = peel * 0.035 + blot * 0.02
+    h = peel * 0.055 + blot * 0.03
     # Boot stripe at the keel (low v). A single hairline above it is a
     # waterline, not a hull graphic.
     boot = smooth(np.clip((spec["boot_h"] - v) / 0.018, 0.0, 1.0))
@@ -133,10 +133,14 @@ def paint_hull(albedo, height, rough, emit, u, v, spec):
     h += rub * 0.06
     if spec["seams"] == "vertical":
         grooves = seam_band(u, (0.0, 0.5, 1.0), 2.2e-5)
-    else:
-        grooves = seam_band(v, spec["strakes"], 1.4e-5)
-    rgb *= 1.0 - grooves[:, :, None] * 0.07
-    h -= grooves * 0.11
+        rgb *= 1.0 - grooves[:, :, None] * 0.06
+        h -= grooves * 0.1
+    # One molded spray rail: a groove and a light shoulder. Not a plank field.
+    rail = np.exp(-((v - 0.62) ** 2) / 2.4e-5)
+    lip = np.exp(-((v - 0.648) ** 2) / 1.5e-5)
+    rgb *= 1.0 - rail[:, :, None] * 0.1
+    rgb = rgb + lip[:, :, None] * 9.0
+    h = h - rail * 0.22 + lip * 0.1
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = h
     r = spec["hull_rough"] + boot * 0.18 + rub * 0.22 + np.abs(peel) * 0.05
@@ -211,9 +215,9 @@ def paint_deck(albedo, height, rough, emit, u, v, spec):
         r = np.sqrt((fu - 0.5) ** 2 + (fv - 0.5) ** 2)
         peak = smooth(np.clip(1.0 - r / 0.22, 0.0, 1.0))
     ink = np.array(spec["deck_ink"], np.float32)
-    rgb = rgb * (1.0 - peak[:, :, None] * 0.28) + ink * (peak[:, :, None] * 0.28)
+    rgb = rgb * (1.0 - peak[:, :, None] * 0.4) + ink * (peak[:, :, None] * 0.4)
     albedo[:] = np.clip(rgb, 0, 255)
-    height[:] = peak * 0.16
+    height[:] = peak * 0.26
     rough[:] = np.clip(0.9 - peak * 0.08, 0, 1)
     emit[:] = np.clip(rgb / 255.0 * 0.42, 0, 1)
 
@@ -225,7 +229,7 @@ def paint_seat(albedo, height, rough, emit, u, v, spec):
     welt = seam_band(v, (0.08, 0.92), 8e-5) + seam_band(u, (0.06, 0.94), 8e-5)
     stitch = seam_band(v, (0.16, 0.84), 2.4e-5)
     dark = base * 0.55
-    rgb = rgb * (1.0 - welt[:, :, None] * 0.35) + dark * (welt[:, :, None] * 0.35)
+    rgb = rgb * (1.0 - welt[:, :, None] * 0.55) + dark * (welt[:, :, None] * 0.55)
     rgb *= 1.0 - stitch[:, :, None] * 0.25
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = grain * 0.03 + welt * 0.05 - stitch * 0.06
@@ -234,25 +238,23 @@ def paint_seat(albedo, height, rough, emit, u, v, spec):
 
 
 def paint_console(albedo, height, rough, emit, u, v, spec):
+    """Gelcoat panel. The screen is a separate mesh, so this cell stays a panel."""
     base = np.array(spec["hull"], np.float32)
     rgb = np.broadcast_to(base, (CELL, CELL, 3)).astype(np.float32).copy()
-    h = noise(spec["seed"] + 5, 2.0) * 0.02
-    bezel_u = smooth(np.clip((0.14 - np.abs(u - 0.5)) / 0.05 + 0.55, 0, 1))
-    bezel_v = smooth(np.clip((0.16 - np.abs(v - spec["screen_v"])) / 0.05 + 0.55, 0, 1))
-    screen = bezel_u * bezel_v
-    glass = np.array([28, 26, 24], np.float32)
-    rgb = rgb * (1.0 - screen[:, :, None]) + glass * screen[:, :, None]
-    h -= screen * 0.1
-    slash = np.exp(-((u * 0.55 + (v - spec["screen_v"]) - 0.05) ** 2) / 0.004) * screen
-    rgb = rgb + slash[:, :, None] * np.array([90, 70, 48], np.float32)
-    belt = seam_band(v, (0.22,), 6e-5)
-    rgb *= 1.0 - belt[:, :, None] * 0.08
-    h -= belt * 0.05
+    h = noise(spec["seed"] + 5, 2.0) * 0.025
+    belt = seam_band(v, (0.28, 0.72), 4.5e-5)
+    rgb *= 1.0 - belt[:, :, None] * 0.07
+    h -= belt * 0.07
+    # Small instrument recess, not a face-sized display.
+    recess = smooth(np.clip((0.07 - np.abs(u - 0.5)) / 0.02, 0, 1)) * smooth(
+        np.clip((0.05 - np.abs(v - 0.8)) / 0.015, 0, 1)
+    )
+    rgb = rgb * (1.0 - recess[:, :, None]) + np.array([32, 30, 28], np.float32) * recess[:, :, None]
+    h -= recess * 0.08
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = h
-    rough[:] = np.clip(0.42 - screen * 0.28, 0.08, 1)
-    glow = 0.62 + screen * 0.2 + slash * 0.5
-    emit[:] = np.clip((rgb / 255.0) * glow[:, :, None] + slash[:, :, None] * 0.35, 0, 1)
+    rough[:] = np.clip(0.4 - recess * 0.15, 0.12, 1)
+    emit[:] = np.clip(rgb / 255.0 * (0.55 + recess[:, :, None] * 0.2), 0, 1)
 
 
 def paint_roof(albedo, height, rough, emit, u, v, spec):
