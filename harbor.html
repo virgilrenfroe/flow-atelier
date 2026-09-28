@@ -258,6 +258,7 @@
       <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
       <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
       <div class="r"><span>air</span><strong id="air-state">Signal</strong></div>
+      <div class="r"><span>contact</span><strong id="contact-state">soft</strong></div>
       <div class="r"><strong class="accent">Rube plate → quay left of Signal</strong></div>
     </div>
     <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · volume · not live</p>
@@ -302,6 +303,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
+import { mountLanternContact } from './noctuary/lantern-contact.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -474,6 +476,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === '.' || e.key === '>') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-dir', { detail: 1 }));
+  }
+  if (e.key === 'l' || e.key === 'L') {
+    window.dispatchEvent(new CustomEvent('noctuary-contact-toggle'));
   }
   if (e.key === '[') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-str', { detail: -1 }));
@@ -2849,6 +2854,12 @@ const quayMat = new THREE.ShaderMaterial({
     uTime: { value: 0 },
     uPointer: { value: new THREE.Vector2(0, 0) },
     uAmp: { value: freezeMotion ? 0 : 0.1 },
+    uContactMap: { value: null },
+    uContactMatrix: { value: new THREE.Matrix4() },
+    uContactTexel: { value: new THREE.Vector2(1 / 1024, 1 / 256) },
+    uContactOn: { value: 0 },
+    uContactDebug: { value: 0 },
+    uLamps: { value: Array.from({ length: 20 }, () => new THREE.Vector4(0, 0, -999, -1)) },
   },
   vertexShader: /* glsl */`
     uniform float uTime;
@@ -2874,6 +2885,12 @@ const quayMat = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */`
     uniform float uTime;
     uniform vec2 uPointer;
+    uniform sampler2D uContactMap;
+    uniform mat4 uContactMatrix;
+    uniform vec2 uContactTexel;
+    uniform float uContactOn;
+    uniform float uContactDebug;
+    uniform vec4 uLamps[20];
     varying vec2 vUv;
     varying vec3 vPos;
     varying vec3 vWorldPos;
@@ -2892,6 +2909,43 @@ const quayMat = new THREE.ShaderMaterial({
       float againstWall = 1.0 - smoothstep(0.0, 0.07, vUv.y);
       stone = mix(stone, vec3(0.045, 0.055, 0.07), againstWall * 0.55);
       vec3 col = clamp(stone, 0.0, 0.35);
+      if (uContactOn > 0.5) {
+        vec3 pool = vec3(0.0);
+        for (int i = 0; i < 20; i++) {
+          float use = step(-0.1, uLamps[i].w);
+          vec2 d = vWorldPos.xz - uLamps[i].xz;
+          float dist2 = dot(d, d);
+          float dist = sqrt(dist2);
+          float atten = exp(-dist2 * 0.95) * (1.0 - smoothstep(1.15, 1.85, dist));
+          vec3 tint = mix(vec3(0.62, 0.74, 1.05), vec3(1.05, 0.62, 0.28), clamp(uLamps[i].w, 0.0, 1.0));
+          float towardWater = 1.0 - smoothstep(0.0, 0.55, vUv.y);
+          float wet = 0.7 + 0.55 * towardWater;
+          pool += tint * atten * wet * use;
+        }
+        pool *= 0.84 + 0.32 * fbm(vWorldPos.xz * 2.2);
+        vec3 V = normalize(cameraPosition - vWorldPos);
+        float graze = pow(1.0 - clamp(V.y, 0.0, 1.0), 1.4);
+        pool *= mix(0.82, 1.22, graze);
+        vec4 sp = uContactMatrix * vec4(vWorldPos, 1.0);
+        vec2 suv = sp.xy / sp.w * 0.5 + 0.5;
+        float occ = 0.0;
+        if (suv.x > 0.001 && suv.x < 0.999 && suv.y > 0.001 && suv.y < 0.999) {
+          vec2 texel = uContactTexel * 1.65;
+          occ += texture2D(uContactMap, suv).r * 0.28;
+          occ += texture2D(uContactMap, suv + vec2(texel.x, 0.0)).r * 0.18;
+          occ += texture2D(uContactMap, suv - vec2(texel.x, 0.0)).r * 0.18;
+          occ += texture2D(uContactMap, suv + vec2(0.0, texel.y)).r * 0.18;
+          occ += texture2D(uContactMap, suv - vec2(0.0, texel.y)).r * 0.18;
+        }
+        if (uContactDebug > 0.5) {
+          col = vec3(occ);
+        } else {
+          float shade = clamp(occ, 0.0, 1.0);
+          col += pool * 0.16 * (1.0 - shade * 0.92);
+          col = mix(col, col * vec3(0.40, 0.48, 0.62), shade * 0.82);
+          col = clamp(col, 0.0, 0.58);
+        }
+      }
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -4785,6 +4839,7 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
   });
   if (physFreeze) lanternBody.type = CANNON.Body.STATIC;
   const lanternEntry = physAdd(lanternMesh, lanternBody, 'lantern', lanternMass);
+  lanternEntry.warm = !!def.warm;
   lanternEntry.halfExtents = new CANNON.Vec3(0.11, 0.15, 0.11);
   lanternEntry.armBody = armBody;
   lanternEntry.pivotA = new CANNON.Vec3(def.armLen * 0.5 - 0.02, -hookDrop, 0);
@@ -4829,6 +4884,68 @@ for (let i = 0; i < PHYS_LANTERN_DEFS.length; i++) {
     }
     posts.instanceMatrix.needsUpdate = true;
   })();
+}
+
+// Soft PCF contact under lantern pools on the quay. Posts, feet, and housings
+// only — glow, glass, and filament stay off the shadow map. ?contact=0 compares off.
+const contactParam = params.get('contact');
+const contactEnabled = contactParam !== '0' && contactParam !== 'off';
+const contactMask = contactParam === 'mask';
+const contactCasters = [posts, lanterns, lanternFoot];
+for (let ci = 0; ci < physEntries.length; ci++) {
+  const kind = physEntries[ci].kind;
+  if (kind === 'post') contactCasters.push(physEntries[ci].mesh);
+}
+for (let ci = 0; ci < physLanterns.length; ci++) {
+  physLanterns[ci].mesh.traverse((obj) => {
+    if (!obj.isMesh) return;
+    if (obj.geometry === lanternGeos.housing || obj.geometry === lanternGeos.foot) {
+      contactCasters.push(obj);
+    }
+  });
+}
+const _lampPos = new THREE.Vector3();
+const _lampScl = new THREE.Vector3();
+const _lampMat = new THREE.Matrix4();
+let lanternPoolCount = 0;
+function syncLanternPools() {
+  const lamps = quayMat.uniforms.uLamps.value;
+  let n = 0;
+  for (let i = 0; i < LANTERN_N && n < 20; i++) {
+    lanterns.getMatrixAt(i, _lampMat);
+    _lampPos.setFromMatrixPosition(_lampMat);
+    _lampScl.setFromMatrixScale(_lampMat);
+    if (_lampScl.x < 0.2) continue;
+    lamps[n++].set(_lampPos.x, 0.05, _lampPos.z, i % 3 === 0 ? 0 : 1);
+  }
+  for (let i = 0; i < physLanterns.length && n < 20; i++) {
+    const L = physLanterns[i];
+    lamps[n++].set(L.mesh.position.x, 0.05, L.mesh.position.z, L.warm ? 1 : 0);
+  }
+  for (let i = n; i < 20; i++) lamps[i].set(0, 0, -999, -1);
+  lanternPoolCount = n;
+  harborContact.physSeen = physLanterns.length;
+}
+const harborContact = mountLanternContact({
+  renderer,
+  scene,
+  casters: contactCasters,
+  uniforms: quayMat.uniforms,
+  deckY: 0.04,
+  center: new THREE.Vector3(0, 0.04, 3.85),
+  enabled: contactEnabled,
+  mask: contactMask,
+});
+window.__harborContact = harborContact;
+harborContact.lampCount = () => lanternPoolCount;
+window.addEventListener('noctuary-contact-toggle', () => {
+  harborContact.setEnabled(!harborContact.enabled);
+  const el = document.getElementById('contact-state');
+  if (el) el.textContent = harborContact.enabled ? (harborContact.mask ? 'mask' : 'soft') : 'off';
+});
+{
+  const el = document.getElementById('contact-state');
+  if (el) el.textContent = harborContact.enabled ? (harborContact.mask ? 'mask' : 'soft') : 'off';
 }
 
 // Free crates — grab + toss. Masses stay the Rube plate signal (latch at 1.75:
@@ -8720,6 +8837,7 @@ function updateDebugHud(fps) {
     `room~    ${dbgRoomHint}\n` +
     `face~    ${dbgFaceHint}\n` +
     `volume   ${signalVolume && signalVolume.enabled ? 'raymarch' : 'off'}\n` +
+    `contact  ${harborContact && harborContact.enabled ? 'soft-pcf' : 'off'}  lamps ${lanternPoolCount}\n` +
     `keys     V walk · T tour · ?debug=1`;
 }
 
@@ -8837,6 +8955,8 @@ function tick() {
 
   // Quay physics props (cannon-es) — skip under RM / ?still=1
   if (typeof physStep === 'function') physStep();
+  if (typeof syncLanternPools === 'function') syncLanternPools();
+  if (harborContact) harborContact.render();
 
   if (!walkMode && !tourMode) controls.update();
   renderFrame();
@@ -8856,6 +8976,12 @@ function tick() {
 if (params.get('shot') === 'signal') {
   camera.position.set(-3.4, 2.55, 8.1);
   controls.target.set(-6.5, 3.55, 3.2);
+  controls.update();
+}
+if (params.get('shot') === 'lantern') {
+  // Water-side three-quarter so the wet pools and the contact under the feet read together.
+  camera.position.set(-0.85, 2.15, 6.85);
+  controls.target.set(-3.15, 0.12, 3.55);
   controls.update();
 }
 
