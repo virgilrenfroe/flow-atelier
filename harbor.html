@@ -241,6 +241,7 @@
         <div class="pill tech">Instance</div>
         <div class="pill tech">Shader</div>
         <div class="pill tech">FBO</div>
+        <div class="pill tech">Volume</div>
       </div>
     </div>
     <div class="hero">
@@ -256,9 +257,10 @@
       <div class="r"><span>fbo</span><strong id="fbo-state">A→B</strong></div>
       <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
       <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
+      <div class="r"><span>air</span><strong id="air-state">Signal</strong></div>
       <div class="r"><strong class="accent">Rube plate → quay left of Signal</strong></div>
     </div>
-    <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · not live</p>
+    <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · volume · not live</p>
   </div>
   <div id="walk-hint" aria-live="polite">Citizen · WASD · click to look · V to exit</div>
   <div id="props-hint" aria-live="polite">Quay · crate → plate → lantern → Signal · shatter</div>
@@ -299,6 +301,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
+import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -8161,6 +8164,25 @@ softBloom.enabled = false;
 stillComposer.addPass(softBloom);
 stillComposer.addPass(new OutputPass());
 
+// ——— A03 · Signal volume air ———
+// Raymarched umber shafts on the beacon. Separate pass: does not rewrite
+// sheath, asphalt, quay, water, lanterns, pennants, or the ember Points.
+const volumeParam = params.get('volume');
+const signalVolume = mountSignalVolume({
+  camera,
+  composers: [finalComposer, stillComposer],
+  enabled: volumeParam !== '0' && volumeParam !== 'off',
+  debug: volumeParam === 'mask',
+  center: new THREE.Vector3(signalGroup.position.x, 3.25, signalGroup.position.z),
+  lamp: new THREE.Vector3(signalGroup.position.x, 4.15, signalGroup.position.z),
+  half: new THREE.Vector3(2.35, 3.55, 1.95),
+});
+window.__harborVolume = signalVolume;
+{
+  const airEl = document.getElementById('air-state');
+  if (airEl) airEl.textContent = signalVolume.enabled ? 'Signal' : 'off';
+}
+
 function renderFrame() {
   if (freezeMotion) {
     stillComposer.render();
@@ -8186,6 +8208,7 @@ addEventListener('resize', () => {
   bloomComposer.setSize(innerWidth, innerHeight);
   finalComposer.setSize(innerWidth, innerHeight);
   stillComposer.setSize(innerWidth, innerHeight);
+  if (signalVolume) signalVolume.syncDepth();
   bloomPass.setSize(innerWidth, innerHeight);
   mistMat.uniforms.uPixelRatio.value = Math.min(devicePixelRatio, 2);
 });
@@ -8696,6 +8719,7 @@ function updateDebugHud(fps) {
     `hitDist  ${dbgHitDist}  inst ${dbgInst}\n` +
     `room~    ${dbgRoomHint}\n` +
     `face~    ${dbgFaceHint}\n` +
+    `volume   ${signalVolume && signalVolume.enabled ? 'raymarch' : 'off'}\n` +
     `keys     V walk · T tour · ?debug=1`;
 }
 
@@ -8760,6 +8784,7 @@ function tick() {
   waterMat.uniforms.uLampB.value.set(4.8, 1.55, 3.85);
   quayMat.uniforms.uPointer.value.copy(pointerSmooth);
   mistMat.uniforms.uTime.value = t;
+  if (signalVolume) signalVolume.update(t, pulse, typeof harborWind !== 'undefined' ? harborWind : null);
   lanternTime.value = t;
   lanternPulse.value = freezeMotion ? 0.35 : 1.0;
   for (let li = 0; li < lanternPointLights.length; li++) {
