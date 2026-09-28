@@ -22,8 +22,8 @@
     "shopCell": 6,
     "shopCellCol": 2,
     "shopCellRow": 1,
-    "room": "shop-atlas cell 6 photographic interior, floor band cropped off the plate",
-    "floor": "shop-atlas cell 6 foreground \u2014 interior floor, not promenade concrete",
+    "room": "shop-atlas cell 6 photographic interior, pale floor wedge cropped off the plate",
+    "floor": "shop-atlas cell 6 warm interior grain, not the pale bottom wedge",
     "walls": "shop-atlas cell 6 upper interior, softened"
   },
   "bake": {
@@ -34,9 +34,9 @@
     "ao": "AO",
     "combined": "COMBINED preview only \u2014 not multiplied again in the drill",
     "normalize": {
-      "scale": 0.17845484238901768,
-      "p95_in": 6.4442073109626765,
-      "max_out": 1.881718743017641
+      "scale": 0.17955355689412494,
+      "p95_in": 6.404774262857437,
+      "max_out": 1.8761975855815027
     }
   }
 }

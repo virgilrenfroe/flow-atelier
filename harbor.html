@@ -2401,10 +2401,10 @@ function shopFenestraCell(halfAlong) {
   }
   return best;
 }
-// The baked floor box sits under the lot pad. A partial lift left the pad
-// (top y=0.085) on top of it, so the pad's two big triangles z-fought the
-// tan floor into a butterfly at the sill. Hide that box and lay one quad
-// of the same atlas floor above every outdoor tread, out to the façade.
+// The baked floor box sits under the lot pad (tread y=0.085). Hide it and
+// lay one quad of the atlas floor above that tread, ending on the façade
+// plane. It must not lap the outdoor sidewalk — that overlap is the sill
+// z-fight. Outdoor tread inside this cell is clipped to the same plane.
 function seatShopFloor(root, worldX, faceZ, floorY, roomW, roomD, s) {
   let src = null;
   root.traverse((obj) => {
@@ -2420,9 +2420,7 @@ function seatShopFloor(root, worldX, faceZ, floorY, roomW, roomD, s) {
   mat.name = 'AtlasFloorCover';
   mat.lightMap = null;
   mat.aoMap = null;
-  mat.polygonOffset = true;
-  mat.polygonOffsetFactor = -4;
-  mat.polygonOffsetUnits = -4;
+  mat.polygonOffset = false;
   mat.depthWrite = true;
   mat.side = THREE.DoubleSide;
   const w = roomW * s + 0.08;
@@ -2443,7 +2441,8 @@ function seatShopFloor(root, worldX, faceZ, floorY, roomW, roomD, s) {
   mesh.position.set(worldX, floorY, 0);
   mesh.updateMatrixWorld(true);
   const span = new THREE.Box3().setFromObject(mesh);
-  mesh.position.z += faceZ + 0.012 - span.max.z;
+  // Flush with the façade. Past this plane the sidewalk is the promenade.
+  mesh.position.z += faceZ - span.max.z;
   scene.add(mesh);
   return mesh;
 }
@@ -2532,11 +2531,11 @@ function mountQuayBakeBay() {
       faceZ - roomD * s - 0.2
     );
     // Through the façade plane, inside this cell only. Outdoor tread in
-    // front of the wall (larger z) stays.
+    // front of the wall (larger z) stays. The floor quad ends on this plane.
     const bayMax = new THREE.Vector3(
       worldX + roomW * s * 0.5 + 0.06,
       2,
-      faceZ + 0.004
+      faceZ
     );
     for (const mat of [quayMat, sidewalkMat]) {
       mat.uniforms.uBayClip.value = 1;

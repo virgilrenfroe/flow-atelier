@@ -43,10 +43,12 @@ SHOP_ATLAS = os.path.join(ROOT, "06-intermediate-assets", "shop-atlas.png")
 ROOM_ATLAS = os.path.join(ROOT, "06-intermediate-assets", "room-atlas-occupied-32.png")
 SHOP_COLS, SHOP_ROWS = 4, 4
 SHOP_CELL = 6
-# Cell-local, top-left origin. Plate drops the photo's own floor band.
-PLATE_RECT = (28, 18, 484, 400)
-# Foreground of the same cell — interior floor, not promenade concrete.
-FLOOR_RECT = (168, 446, 400, 508)
+# Cell-local, top-left origin. The plate stops above the pale perspective
+# wedge at the bottom of the cell (that wedge reads as promenade concrete).
+PLATE_RECT = (28, 18, 484, 352)
+# Warm interior grain from the same cell. The cell's bottom band is the
+# pale wedge — do not use it as the floor.
+FLOOR_RECT = (208, 36, 320, 100)
 # Upper interior of the same cell, softened into side walls and ceiling.
 WALL_RECT = (176, 28, 360, 150)
 FLOOR_TILE_U = 1.05
@@ -673,8 +675,8 @@ def export_assets(scene, bay, stats):
             "shopCell": SHOP_CELL,
             "shopCellCol": SHOP_CELL % SHOP_COLS,
             "shopCellRow": SHOP_CELL // SHOP_COLS,
-            "room": "shop-atlas cell 6 photographic interior, floor band cropped off the plate",
-            "floor": "shop-atlas cell 6 foreground — interior floor, not promenade concrete",
+            "room": "shop-atlas cell 6 photographic interior, pale floor wedge cropped off the plate",
+            "floor": "shop-atlas cell 6 warm interior grain, not the pale bottom wedge",
             "walls": "shop-atlas cell 6 upper interior, softened",
         },
         "bake": {
