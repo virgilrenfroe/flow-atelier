@@ -11,18 +11,18 @@ Second pass, so the pile reads as broken glass from the quay rather than as acry
 
 How many pieces:
 
-The harbor is a diorama. A storey is under one scene unit, so scene units are not metres and not feet. Glass uses **1 scene unit ≈ 7 feet**.
+Scene units are not feet. The shop door opening is 0.60 scene units (sill at y = 0.10, head at y = 0.70), and a shop door is 7 feet, so **1 scene unit = 7 / 0.60 ≈ 11.67 feet**. The ground storey (the 0.76 window cell) is then about 8.9 ft. The tallest quay crate (0.24) is about 2.8 ft, under half that door. An earlier 7 ft/unit made the same door about 4.2 ft and the storey about 5.3 ft, which is too small next to those props. The walk eye (0.58) sits near the lintel, so it is not the anchor.
 
 ```
-width_ft = width_scene × 7
-height_ft = height_scene × 7
+width_ft = width_scene × (7 / 0.60)
+height_ft = height_scene × (7 / 0.60)
 area_sqft = width_ft × height_ft
 count = round(0.5 × area_sqft)
 ```
 
-That is one shard for every two square feet. A miss (no pane) is 0 and spawns nothing. There is no clamp: a full shop cell is about 10 shards and the vessel face is 3, which is already a small pile.
+One shard for every two square feet. A miss is 0 and spawns nothing. There is no clamp.
 
-- Shop front: one ground-floor cell (0.76 scene units). Glazed width drops the shop mullions (0.04 of the cell on each edge that is present). Pane height is the cell above the sill at y = 0.12 and under the top mullion, about 0.606. A full cell is 0.699 × 0.606 scene units ≈ 4.9 ft × 4.2 ft ≈ 20.8 sq ft → 10 shards. A short side clips that cell to about 0.336 scene units ≈ 16.5 sq ft → 8 shards.
-- Fenestra vessel: the largest face of the glass block, 0.28 × 0.38 scene units ≈ 2.0 ft × 2.7 ft ≈ 5.2 sq ft → 3 shards. Half of 5 squares rounds the same as half of 6. The mullion cross is not glass, and the other faces of the box are not unfolded into extra area.
+- Shop front: one ground-floor cell. Glazed width drops the shop mullions (0.04 of the cell on each edge that is present). Pane height runs from the sill clearance at y = 0.12 to the top mullion, 0.606 scene units. A full cell is 0.699 × 0.606 scene units ≈ 8.2 ft × 7.1 ft. Area in the scene is 0.424; square footage is 57.7 → 29 shards.
+- Fenestra vessel: the largest face of the glass block, read off the mesh, 0.28 × 0.38 scene units ≈ 3.3 ft × 4.4 ft. Area in the scene is 0.106; square footage is 14.5 → 7 shards. The mullion cross is a bar on the glass, not extra area, and the other faces of the box are not unfolded.
 
 Prop-wear atlases and the street-ground sheet are untouched.

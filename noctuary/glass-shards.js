@@ -5,14 +5,16 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 
-// Harbor is a diorama: a storey is under one scene unit, not a metre.
-// Glass square footage uses 1 scene unit ≈ 7 feet, so
-// area_sqft = width_ft × height_ft = area_scene × 49.
-// A full shop pane is about 4.9 ft × 4.2 ft ≈ 21 sq ft.
-// The fenestra face is about 2.0 ft × 2.7 ft ≈ 5.2 sq ft.
-// Shard count is half that footage: round(0.5 × area_sqft).
-// No clamp. Those panes are about 10 and 3 shards.
-export const GLASS_FEET_PER_UNIT = 7;
+// Human scale already in the harbor, not a free constant.
+// The shop door opening is 0.60 scene units (sill 0.10, head 0.70).
+// A shop door is 7 feet, so 1 scene unit = 7 / 0.60 feet.
+// The ground storey (window cell 0.76) is then about 8.9 ft, and the
+// tallest quay crate (0.24) is about 2.8 ft — under half that door.
+// The old 7 ft/unit made the same door about 4.2 ft and the storey about 5.3 ft.
+// Walk eye (0.58) sits near the lintel, so it is not the anchor.
+// area_sqft = width_ft × height_ft. count = round(0.5 × area_sqft).
+// No clamp. A miss (0 area) is 0 shards.
+export const GLASS_FEET_PER_UNIT = 7 / 0.6;
 
 export function glassAreaSqFt(areaScene) {
   const area = Math.max(0, areaScene || 0);

@@ -5760,23 +5760,40 @@ const SHOP_MULL_U = 0.04;
 const SHOP_MULL_V = 0.045;
 const SHOP_PANE_H = SHOP_CELL * (1 - SHOP_MULL_V) - 0.12;
 
-function shopBrokenGlassArea(box, face, slot) {
-  if (!box) return 0;
+function shopGlassPatch(box, face, slot) {
+  if (!box) return { width: 0, height: 0, area: 0 };
   const limit = (face === 0 || face === 1) ? box.d * 0.5 : box.w * 0.5;
   const a0 = (slot - 8) * SHOP_CELL;
   const a1 = a0 + SHOP_CELL;
   const overlap = Math.max(0, Math.min(a1, limit) - Math.max(a0, -limit));
-  if (overlap <= 0.02) return 0;
+  const height = SHOP_PANE_H;
+  if (overlap <= 0.02) return { width: 0, height, area: 0 };
   const edgeMullions = overlap >= SHOP_CELL - 0.02 ? 2 : 1;
-  const glazedW = Math.max(0, overlap - edgeMullions * SHOP_MULL_U * SHOP_CELL);
-  return glazedW * SHOP_PANE_H;
+  const width = Math.max(0, overlap - edgeMullions * SHOP_MULL_U * SHOP_CELL);
+  return { width, height, area: width * height };
 }
 
-// Fenestra vessel: the mullioned face of the glass block, not the unfolded box.
-function vesselGlassArea(mesh) {
+function shopBrokenGlassArea(box, face, slot) {
+  return shopGlassPatch(box, face, slot).area;
+}
+
+// Fenestra vessel: the largest face of the glass block, not the unfolded box.
+function vesselGlassFace(mesh) {
   const g = mesh && mesh.geometry && mesh.geometry.parameters;
-  if (!g || !(g.width > 0) || !(g.height > 0) || !(g.depth > 0)) return 0.1;
-  return Math.max(g.width * g.height, g.width * g.depth, g.height * g.depth);
+  if (!g || !(g.width > 0) || !(g.height > 0) || !(g.depth > 0)) {
+    return { width: 0, height: 0, area: 0 };
+  }
+  const faces = [
+    [g.width, g.height],
+    [g.width, g.depth],
+    [g.height, g.depth],
+  ];
+  faces.sort((a, b) => (b[0] * b[1]) - (a[0] * a[1]));
+  return { width: faces[0][0], height: faces[0][1], area: faces[0][0] * faces[0][1] };
+}
+
+function vesselGlassArea(mesh) {
+  return vesselGlassFace(mesh).area;
 }
 
 function shopSpawnShards(x, y, z, nx, ny, nz, area) {
@@ -5948,17 +5965,19 @@ window.__shopGlass = {
   },
   reset: shopGlassReset,
   strike(id, face, slot, x, y, z, nx, nz) {
-    const area = shopBrokenGlassArea(harborBoxes[id], face | 0, slot | 0);
+    const patch = shopGlassPatch(harborBoxes[id], face | 0, slot | 0);
     const count = shopMarkBroken(id, face, slot)
-      ? shopSpawnShards(x, y, z, nx || 0, 0.4, nz || 0, area)
+      ? shopSpawnShards(x, y, z, nx || 0, 0.4, nz || 0, patch.area)
       : 0;
     return {
       broken: window.__shopGlass.broken(),
       shards: shopShards.length,
-      area: +area.toFixed(4),
-      sqft: +glassAreaSqFt(area).toFixed(1),
+      width: +patch.width.toFixed(4),
+      height: +patch.height.toFixed(4),
+      area: +patch.area.toFixed(4),
+      sqft: +glassAreaSqFt(patch.area).toFixed(1),
       count,
-      feetPerUnit: GLASS_FEET_PER_UNIT,
+      feetPerUnit: +GLASS_FEET_PER_UNIT.toFixed(4),
     };
   },
   // Largest fully glazed ground-floor cell, facing the quay when one exists.
@@ -5977,7 +5996,8 @@ window.__shopGlass = {
           const a0 = (slot - 8) * SHOP_CELL;
           const a1 = a0 + SHOP_CELL;
           if (a0 < -f.limit + 0.01 || a1 > f.limit - 0.01) continue;
-          const area = shopBrokenGlassArea(b, f.face, slot);
+          const patch = shopGlassPatch(b, f.face, slot);
+          const area = patch.area;
           const mid = (a0 + a1) * 0.5;
           const sx = f.nx ? f.x + f.nx * 0.06 : b.x + mid;
           const sz = f.nz ? f.z + f.nz * 0.06 : b.z + mid;
@@ -5991,6 +6011,8 @@ window.__shopGlass = {
             face: f.face,
             slot,
             area,
+            width: patch.width,
+            height: patch.height,
             x: f.nx ? f.x + f.nx * 0.06 : b.x + mid,
             y: 0.42,
             z: f.nz ? f.z + f.nz * 0.06 : b.z + mid,
@@ -6009,10 +6031,12 @@ window.__shopGlass = {
       id: best.id,
       face: best.face,
       slot: best.slot,
+      width: +best.width.toFixed(4),
+      height: +best.height.toFixed(4),
       area: +best.area.toFixed(4),
       sqft: +glassAreaSqFt(best.area).toFixed(1),
       count,
-      feetPerUnit: GLASS_FEET_PER_UNIT,
+      feetPerUnit: +GLASS_FEET_PER_UNIT.toFixed(4),
       shards: shopShards.length,
       x: +best.x.toFixed(3),
       z: +best.z.toFixed(3),
@@ -6039,15 +6063,17 @@ window.__shopGlass = {
     const before = shopShards.length;
     shopGlassScan();
     const slot = 8;
-    const area = shopBrokenGlassArea(b, f, slot);
+    const patch = shopGlassPatch(b, f, slot);
     return {
       ok: true,
       broken: window.__shopGlass.broken(),
       shards: shopShards.length,
-      area: +area.toFixed(4),
-      sqft: +glassAreaSqFt(area).toFixed(1),
+      width: +patch.width.toFixed(4),
+      height: +patch.height.toFixed(4),
+      area: +patch.area.toFixed(4),
+      sqft: +glassAreaSqFt(patch.area).toFixed(1),
       count: shopShards.length - before,
-      feetPerUnit: GLASS_FEET_PER_UNIT,
+      feetPerUnit: +GLASS_FEET_PER_UNIT.toFixed(4),
       shard: shopShards[0] ? {
         shard: true,
         shopGlass: true,
@@ -7340,6 +7366,8 @@ const rubeState = {
   shatterDone: false,
   shatterAt: 0,
   shardArea: 0,
+  shardW: 0,
+  shardH: 0,
   signalPulseUntil: 0,
   hintAt: 0,
 };
@@ -7673,9 +7701,12 @@ function rubeShatter() {
   for (const ch of rubeVesselMesh.children) ch.visible = false;
 
   const origin = rubeVesselMesh.position;
-  const area = vesselGlassArea(rubeVesselMesh);
+  const face = vesselGlassFace(rubeVesselMesh);
+  const area = face.area;
   const count = glassShardCount(area);
   rubeState.shardArea = area;
+  rubeState.shardW = face.width;
+  rubeState.shardH = face.height;
   for (let i = 0; i < count; i++) {
     const span = 0.12 + Math.random() * 0.09;
     const mass = 0.16 + Math.random() * 0.22;
@@ -7745,6 +7776,8 @@ function rubeReset() {
   rubeState.shatterDone = false;
   rubeState.shatterAt = 0;
   rubeState.shardArea = 0;
+  rubeState.shardW = 0;
+  rubeState.shardH = 0;
   rubeState.signalPulseUntil = 0;
   rubeGateBody.position.y = rubeState.gateClosedY;
   rubeGateBody.velocity.set(0, 0, 0);
@@ -7929,7 +7962,9 @@ function rubeFillProbe() {
     debris: rubeDebris.length,
     area: rubeState.shardArea ? +rubeState.shardArea.toFixed(4) : 0,
     sqft: rubeState.shardArea ? +glassAreaSqFt(rubeState.shardArea).toFixed(1) : 0,
-    feetPerUnit: GLASS_FEET_PER_UNIT,
+    faceW: rubeState.shardW ? +rubeState.shardW.toFixed(4) : 0,
+    faceH: rubeState.shardH ? +rubeState.shardH.toFixed(4) : 0,
+    feetPerUnit: +GLASS_FEET_PER_UNIT.toFixed(4),
     vesselVisible: rubeVesselMesh.visible,
     pickable: rubeDebris.filter((d) => d.kind === 'crate' && d.mass > 0 && d.mesh && d.mesh.userData.physEntry).length,
     facet: rubeDebris.length > 0 && rubeDebris.every((d) => d.glassFacet),
@@ -7984,14 +8019,20 @@ window.__frameGlassPile = (wide) => {
   for (const d of list) {
     if (d && d.body && d.body.position.y < 0.42) grounded.push(d);
   }
-  const use = grounded.length ? grounded : list;
+  const use = list.length ? list : grounded;
   let x = 0, y = 0, z = 0, n = 0;
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (const d of use) {
     if (!d || !d.body) continue;
-    x += d.body.position.x;
-    y += d.body.position.y;
-    z += d.body.position.z;
+    const p = d.body.position;
+    x += p.x;
+    y += p.y;
+    z += p.z;
     n++;
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.z < minZ) minZ = p.z;
+    if (p.z > maxZ) maxZ = p.z;
   }
   if (!n) {
     x = RUBE_VESSEL.x;
@@ -8002,11 +8043,20 @@ window.__frameGlassPile = (wide) => {
     y /= n;
     z /= n;
   }
-  const dist = wide ? 2.2 : 1.28;
-  camera.position.set(x + dist * 0.38, 0.42 + dist * 0.38, z + dist * 0.82);
-  controls.target.set(x, 0.1, z);
+  const span = n ? Math.max(maxX - minX, maxZ - minZ, 0.4) : 0.4;
+  const dist = Math.max(wide ? 2.6 : 1.9, span * (wide ? 1.7 : 1.45));
+  camera.position.set(x + dist * 0.28, 0.62 + dist * 0.62, z + dist * 0.78);
+  controls.target.set(x, 0.08, z);
   controls.update();
-  return { x: +x.toFixed(3), y: +y.toFixed(3), z: +z.toFixed(3), n, wide: !!wide };
+  return {
+    x: +x.toFixed(3),
+    y: +y.toFixed(3),
+    z: +z.toFixed(3),
+    n,
+    span: +span.toFixed(3),
+    dist: +dist.toFixed(3),
+    wide: !!wide,
+  };
 };
 
 window.__springLive = {
