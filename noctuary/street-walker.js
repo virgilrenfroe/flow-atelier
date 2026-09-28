@@ -26,11 +26,12 @@ const HEIGHT = 0.96;
 const WIDTH = HEIGHT * (CELL_W / CELL_H);
 const TURN_S = 0.7;
 
-// Support-boot travel in cell pixels, frame i → i+1. Two stances.
-// Sum is one full cycle (both plants). A negative step is double-support.
+// Forward travel of the support boot, in cell pixels, frame i → i+1.
+// The nose is on the right of the cell. A forward step moves the body that
+// way, so the planted boot slides left in the sprite. Two stances.
 const STEP_PX = [
-  4.4, 25.2, 14.6, 65.2, 44.5, 18.0, 14.9, 13.7,
-  -0.3, 26.6, 22.2, 55.3, 62.1, 10.9, 14.4, 6.9,
+  3.0, 41.1, 11.8, 36.6, 27.1, 37.4, 12.6, 28.5,
+  0.0, 41.6, 18.5, 34.1, 26.2, 33.0, 10.3, 38.1,
 ];
 
 const STEP_SUM = STEP_PX.reduce((a, b) => a + b, 0);
@@ -197,7 +198,8 @@ function groundY(x, z) {
 function yawFor(dir, tangent) {
   const tx = dir * tangent.x;
   const tz = dir * tangent.z;
-  return Math.atan2(tz, -tx);
+  // Nose is local +X (right side of the cell). Aim that along travel.
+  return Math.atan2(-tz, tx);
 }
 
 export function mountStreetWalker(opts) {
