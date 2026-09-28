@@ -25,7 +25,6 @@ export function installHarborCraft(deps) {
   scene.add(harborCraftRoot);
 
   const harborFishTime = { value: 0 };
-  const harborUp = new THREE.Vector3(0, 1, 0);
   const harborA = new THREE.Vector3();
   const harborB = new THREE.Vector3();
   const harborC = new THREE.Vector3();
@@ -340,8 +339,106 @@ export function installHarborCraft(deps) {
   const harborIronMat = new THREE.MeshStandardMaterial({
     color: 0x2c3138, roughness: 0.42, metalness: 0.64,
   });
+  // Three-strand laid dock line. One tile is a turn of the lay; the tube
+  // repeats it along arc length so the braid stays the same size on every painter.
+  function harborBraidMaps() {
+    const w = 512;
+    const h = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(w, h);
+    const height = new Float32Array(w * h);
+    const dyes = [
+      [214, 176, 122],
+      [156, 108, 64],
+      [186, 142, 92],
+    ];
+    for (let y = 0; y < h; y++) {
+      const v = y / (h - 1);
+      for (let x = 0; x < w; x++) {
+        const u = x / (w - 1);
+        let rr = 62;
+        let gg = 44;
+        let bb = 28;
+        let weight = 0.22;
+        let crest = 0;
+        for (let s = 0; s < 3; s++) {
+          let center = (s / 3 + u * 1.05) % 1;
+          let dv = Math.abs(v - center);
+          if (dv > 0.5) dv = 1 - dv;
+          const ridge = Math.exp(-(dv * 6.4) * (dv * 6.4));
+          const yarn = 0.8 + 0.2 * Math.sin((u * 34 + s * 1.7) * Math.PI * 2);
+          const dye = dyes[s];
+          const wgt = ridge * ridge;
+          rr += dye[0] * wgt * yarn;
+          gg += dye[1] * wgt * yarn;
+          bb += dye[2] * wgt * yarn;
+          weight += wgt;
+          if (ridge > crest) crest = ridge;
+        }
+        const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        const spec = (n - Math.floor(n) - 0.5) * 8;
+        const o = (y * w + x) * 4;
+        img.data[o] = Math.max(0, Math.min(255, rr / weight + spec));
+        img.data[o + 1] = Math.max(0, Math.min(255, gg / weight + spec * 0.75));
+        img.data[o + 2] = Math.max(0, Math.min(255, bb / weight + spec * 0.45));
+        img.data[o + 3] = 255;
+        height[y * w + x] = crest;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const color = new THREE.CanvasTexture(canvas);
+    color.colorSpace = THREE.SRGBColorSpace;
+    color.wrapS = THREE.RepeatWrapping;
+    color.wrapT = THREE.RepeatWrapping;
+    color.anisotropy = 8;
+    color.needsUpdate = true;
+
+    const ncanvas = document.createElement('canvas');
+    ncanvas.width = w;
+    ncanvas.height = h;
+    const nctx = ncanvas.getContext('2d');
+    const nimg = nctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const hl = height[y * w + x];
+        const hr = height[y * w + ((x + 1) % w)];
+        const hu = height[((y + 1) % h) * w + x];
+        let nx = (hl - hr) * 3.2;
+        let ny = (hl - hu) * 3.2;
+        let nz = 1;
+        const len = Math.hypot(nx, ny, nz);
+        nx /= len;
+        ny /= len;
+        nz /= len;
+        const o = (y * w + x) * 4;
+        nimg.data[o] = (nx * 0.5 + 0.5) * 255;
+        nimg.data[o + 1] = (ny * 0.5 + 0.5) * 255;
+        nimg.data[o + 2] = (nz * 0.5 + 0.5) * 255;
+        nimg.data[o + 3] = 255;
+      }
+    }
+    nctx.putImageData(nimg, 0, 0);
+    const normal = new THREE.CanvasTexture(ncanvas);
+    normal.colorSpace = THREE.NoColorSpace;
+    normal.wrapS = THREE.RepeatWrapping;
+    normal.wrapT = THREE.RepeatWrapping;
+    normal.needsUpdate = true;
+    return { color, normal };
+  }
+  const harborBraid = harborBraidMaps();
   const harborRopeMat = new THREE.MeshStandardMaterial({
-    color: 0xd2c2a4, roughness: 0.84, metalness: 0.0,
+    color: 0xffffff,
+    map: harborBraid.color,
+    normalMap: harborBraid.normal,
+    normalScale: new THREE.Vector2(1.05, 1.05),
+    roughness: 0.94,
+    metalness: 0.0,
+    emissive: 0xffe4c4,
+    emissiveMap: harborBraid.color,
+    emissiveIntensity: 0.22,
   });
   const harborFenderMat = new THREE.MeshStandardMaterial({
     color: 0x16181c, roughness: 0.74, metalness: 0.06,
@@ -356,7 +453,51 @@ export function installHarborCraft(deps) {
   const harborStbdMat = new THREE.MeshStandardMaterial({
     color: 0x3dff7a, emissive: 0x1ec85a, emissiveIntensity: 1.6, roughness: 0.35,
   });
-  const harborRopeGeo = new THREE.CylinderGeometry(1, 1, 1, 5);
+  // Dock-line gauge. Thick enough to read in the lineup, still a rope on a skiff.
+  const HARBOR_ROPE_R = 0.062;
+  const HARBOR_ROPE_RINGS = 26;
+  const HARBOR_ROPE_RADIAL = 9;
+  // Paid-out tail past the straight berth span. A settled hull hangs this
+  // as a catenary; a wave that opens the span past it snatches the line taut.
+  const HARBOR_ROPE_SLACK = 0.006;
+
+  function harborMakeRope() {
+    const rings = HARBOR_ROPE_RINGS;
+    const radial = HARBOR_ROPE_RADIAL;
+    const positions = new Float32Array(rings * radial * 3);
+    const uvs = new Float32Array(rings * radial * 2);
+    const indices = [];
+    for (let i = 0; i < rings - 1; i++) {
+      for (let j = 0; j < radial; j++) {
+        const j2 = (j + 1) % radial;
+        const a = i * radial + j;
+        const b = i * radial + j2;
+        const c = (i + 1) * radial + j2;
+        const d = (i + 1) * radial + j;
+        indices.push(a, d, b, b, d, c);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.setIndex(indices);
+    const mesh = new THREE.Mesh(geo, harborRopeMat);
+    mesh.name = 'painter';
+    mesh.frustumCulled = false;
+    harborCraftRoot.add(mesh);
+    return {
+      mesh,
+      positions,
+      uvs,
+      rings,
+      radial,
+      pts: Array.from({ length: rings }, () => new THREE.Vector3()),
+      rest: 0,
+      lastD: 0,
+      lastSag: 0,
+      lastTaut: false,
+    };
+  }
   // Coping horn, same station as the BatchedMesh cleats (batch.js).
   const QUAY_CLEAT_Y = faceTop + 0.1 + 0.09;
   const QUAY_CLEAT_Z = SEAWALL_Z + 0.04;
@@ -476,12 +617,90 @@ export function installHarborCraft(deps) {
     return group;
   }
 
-  function harborSpan(mesh, a, b, radius) {
-    harborD.subVectors(b, a);
-    const len = Math.max(harborD.length(), 1e-4);
-    mesh.position.copy(a).lerp(b, 0.5);
-    mesh.scale.set(radius, len, radius);
-    mesh.quaternion.setFromUnitVectors(harborUp, harborD.multiplyScalar(1 / len));
+  // Parabola is the dock-line catenary for this span. Sag is zero when the
+  // hull has pulled the ends out to the paid-out length, and grows with the
+  // spare line when the boat settles back toward the cleat.
+  function harborLayPainter(painter, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const dz = b.z - a.z;
+    const dist = Math.max(Math.hypot(dx, dy, dz), 1e-4);
+    if (painter.rest <= 0) painter.rest = dist + HARBOR_ROPE_SLACK;
+    const excess = Math.max(0, painter.rest - dist);
+    const horiz = Math.max(Math.hypot(dx, dz), 1e-4);
+    // Spare line hangs below the chord. The berth only opens the span by a
+    // few centimetres, so the belly is sized to read, then clamped so it
+    // stays a curve across the water and never a vertical drop.
+    const sag = Math.min(Math.sqrt(excess * dist * 1.35), horiz * 0.36);
+    const rings = painter.rings;
+    const pts = painter.pts;
+    for (let i = 0; i < rings; i++) {
+      const t = i / (rings - 1);
+      pts[i].set(
+        a.x + dx * t,
+        a.y + dy * t - sag * 4 * t * (1 - t),
+        a.z + dz * t,
+      );
+    }
+    painter.lastD = dist;
+    painter.lastSag = sag;
+    painter.lastTaut = sag < 0.04;
+
+    const radial = painter.radial;
+    const pos = painter.positions;
+    const uv = painter.uvs;
+    const radius = HARBOR_ROPE_R;
+    let tx = pts[1].x - pts[0].x;
+    let ty = pts[1].y - pts[0].y;
+    let tz = pts[1].z - pts[0].z;
+    let tl = Math.hypot(tx, ty, tz) || 1;
+    tx /= tl; ty /= tl; tz /= tl;
+    let bx = -tz;
+    let by = 0;
+    let bz = tx;
+    let bl = Math.hypot(bx, bz) || 1;
+    bx /= bl; bz /= bl;
+    let nx = by * tz - bz * ty;
+    let ny = bz * tx - bx * tz;
+    let nz = bx * ty - by * tx;
+    let arc = 0;
+    for (let i = 0; i < rings; i++) {
+      if (i > 0) {
+        const i0 = i - 1;
+        const i1 = Math.min(i + 1, rings - 1);
+        tx = pts[i1].x - pts[i0].x;
+        ty = pts[i1].y - pts[i0].y;
+        tz = pts[i1].z - pts[i0].z;
+        tl = Math.hypot(tx, ty, tz) || 1;
+        tx /= tl; ty /= tl; tz /= tl;
+        const dot = bx * tx + by * ty + bz * tz;
+        bx -= tx * dot;
+        by -= ty * dot;
+        bz -= tz * dot;
+        bl = Math.hypot(bx, by, bz) || 1;
+        bx /= bl; by /= bl; bz /= bl;
+        nx = by * tz - bz * ty;
+        ny = bz * tx - bx * tz;
+        nz = bx * ty - by * tx;
+        arc += pts[i].distanceTo(pts[i - 1]);
+      }
+      for (let j = 0; j < radial; j++) {
+        const ang = (j / radial) * Math.PI * 2;
+        const c = Math.cos(ang);
+        const s = Math.sin(ang);
+        const o = (i * radial + j) * 3;
+        pos[o] = pts[i].x + (nx * c + bx * s) * radius;
+        pos[o + 1] = pts[i].y + (ny * c + by * s) * radius;
+        pos[o + 2] = pts[i].z + (nz * c + bz * s) * radius;
+        const uo = (i * radial + j) * 2;
+        uv[uo] = arc / 0.2;
+        uv[uo + 1] = j / radial;
+      }
+    }
+    const geo = painter.mesh.geometry;
+    geo.attributes.position.needsUpdate = true;
+    geo.attributes.uv.needsUpdate = true;
+    geo.computeVertexNormals();
   }
 
   function harborAddBoat(spec) {
@@ -647,12 +866,8 @@ export function installHarborCraft(deps) {
     const painters = [-0.42, 0.4].map((along) => {
       const local = new THREE.Vector3(gunnelX, gunnelY, spec.length * along);
       const worldX = spec.x + Math.sin(spec.yaw) * local.z + Math.cos(spec.yaw) * local.x;
-      const ropeA = new THREE.Mesh(harborRopeGeo, harborRopeMat);
-      const ropeB = new THREE.Mesh(harborRopeGeo, harborRopeMat);
-      ropeA.frustumCulled = false;
-      ropeB.frustumCulled = false;
-      harborCraftRoot.add(ropeA, ropeB);
-      return { local, cleat: harborTakeCleat(worldX), ropeA, ropeB };
+      const rope = harborMakeRope();
+      return { local, cleat: harborTakeCleat(worldX), rope };
     });
 
     group.position.set(spec.x, WATER_Y, spec.z);
@@ -976,10 +1191,7 @@ export function installHarborCraft(deps) {
         const painter = boat.painters[p];
         harborA.copy(painter.local).applyMatrix4(boat.group.matrixWorld);
         harborB.copy(painter.cleat);
-        harborC.copy(harborA).lerp(harborB, 0.55);
-        harborC.y = Math.max(-0.08, Math.min(harborA.y, harborB.y) - 0.02);
-        harborSpan(painter.ropeA, harborA, harborC, 0.016);
-        harborSpan(painter.ropeB, harborC, harborB, 0.016);
+        harborLayPainter(painter.rope, harborA, harborB);
       }
     }
   }
@@ -1089,6 +1301,7 @@ export function installHarborCraft(deps) {
     schools: 2,
     waterPosts: 0,
     moor: 'quay-coping',
+    rope: 'braid',
     finish: 'quay-crate-atlas',
     marks: harborBoats.map((b) => b.spec.mark),
     waveY: (x, z) => harborWaveY(x, z, harborFishTime.value),
@@ -1126,6 +1339,10 @@ export function installHarborCraft(deps) {
               x: +p.cleat.x.toFixed(2),
               y: +p.cleat.y.toFixed(2),
               z: +p.cleat.z.toFixed(2),
+              d: +p.rope.lastD.toFixed(3),
+              rest: +p.rope.rest.toFixed(3),
+              sag: +p.rope.lastSag.toFixed(3),
+              taut: p.rope.lastTaut,
               from: {
                 x: +harborA.x.toFixed(2),
                 y: +harborA.y.toFixed(2),
@@ -1174,6 +1391,10 @@ export function installHarborCraft(deps) {
       // Along the berth, so painters read across the water to the coping.
       camera.position.set(-12.6, 2.6, 12.4);
       controls.target.set(-2.2, 0.2, 7.4);
+    } else if (mode === 'painter') {
+      // Close profile of the scow's quayward painter: cleat, belly, and hull.
+      camera.position.set(10.35, 0.72, 6.72);
+      controls.target.set(8.85, 0.22, 6.95);
     } else if (mode === 'skiff-top') top('quay-skiff', 4.6);
     else if (mode === 'launch-top') top('harbor-launch', 6.4);
     else if (mode === 'tender-top') top('basin-tender', 3.8);
