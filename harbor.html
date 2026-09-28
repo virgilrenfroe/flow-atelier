@@ -258,6 +258,7 @@
       <div class="r"><span>bloom</span><strong id="bloom-mode">selective</strong></div>
       <div class="r"><span>motif</span><strong id="motif">Quay</strong></div>
       <div class="r"><span>air</span><strong id="air-state">Signal</strong></div>
+      <div class="r"><span>holo</span><strong id="holo-state">sheath</strong></div>
       <div class="r"><strong class="accent">Rube plate → quay left of Signal</strong></div>
     </div>
     <p class="note">Local intermediate · Orbit · interior mapping · mullions · local UV · irregular lots · Signal · quay · mist · volume · not live</p>
@@ -302,6 +303,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
 import { mountSignalVolume } from './noctuary/a03-signal-volume.js';
+import { mountSignalHolo } from './noctuary/i0x-signal-holo.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -6156,6 +6158,18 @@ const beaconLight = new THREE.PointLight(0xf0c24b, 16, 22, 2);
 beaconLight.position.set(0, 4.0, 0);
 signalGroup.add(beaconLight);
 
+// Hologram sheath + façade plate. Own meshes; beacon, moss atlas, and A03 stay put.
+const holoParam = params.get('holo');
+const signalHolo = mountSignalHolo({
+  parent: signalGroup,
+  enabled: holoParam !== '0' && holoParam !== 'off',
+});
+window.__signalHolo = signalHolo;
+{
+  const holoEl = document.getElementById('holo-state');
+  if (holoEl) holoEl.textContent = signalHolo.enabled ? 'sheath' : 'off';
+}
+
 const signalWorld = new THREE.Vector3();
 const signalChip = document.getElementById('signal-chip');
 
@@ -8725,6 +8739,7 @@ function updateDebugHud(fps) {
     `room~    ${dbgRoomHint}\n` +
     `face~    ${dbgFaceHint}\n` +
     `volume   ${signalVolume && signalVolume.enabled ? signalVolume.quality + ' · ' + signalVolume.steps + 'st · spark ' + signalVolume.sparks : 'off'}\n` +
+    `holo     ${signalHolo && signalHolo.enabled ? 'hologram' : 'off'}\n` +
     `keys     V walk · T tour · ?debug=1`;
 }
 
@@ -8790,6 +8805,7 @@ function tick() {
   quayMat.uniforms.uPointer.value.copy(pointerSmooth);
   mistMat.uniforms.uTime.value = t;
   if (signalVolume) signalVolume.update(t, pulse, typeof harborWind !== 'undefined' ? harborWind : null);
+  if (signalHolo) signalHolo.update(t, pulse, freezeMotion ? 0 : 1);
   lanternTime.value = t;
   lanternPulse.value = freezeMotion ? 0.35 : 1.0;
   for (let li = 0; li < lanternPointLights.length; li++) {
@@ -8861,6 +8877,13 @@ function tick() {
 if (params.get('shot') === 'signal') {
   camera.position.set(-3.4, 2.55, 8.1);
   controls.target.set(-6.5, 3.55, 3.2);
+  controls.update();
+}
+if (params.get('shot') === 'holo') {
+  // Above the look point so maxPolarAngle does not flatten the frame.
+  // Sheath full height, plate to camera-right, beacon tip still in view.
+  camera.position.set(-1.7, 4.05, 9.1);
+  controls.target.set(-5.9, 2.05, 3.0);
   controls.update();
 }
 
