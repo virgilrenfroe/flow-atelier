@@ -299,6 +299,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
+import { createDistrictMassing } from './noctuary/district-massing.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -465,6 +466,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.key === 'b' || e.key === 'B') {
     window.dispatchEvent(new CustomEvent('noctuary-props-blast'));
+  }
+  if ((e.key === 'p' || e.key === 'P') && !e.repeat) {
+    window.dispatchEvent(new CustomEvent('noctuary-massing-toggle'));
   }
   if (e.key === ',' || e.key === '<') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-dir', { detail: -1 }));
@@ -2476,6 +2480,37 @@ window.__harborStrands = {
   roofs: strandRoofs.map((b) => ({ x: b.x, z: b.z, w: b.w, h: b.h, d: b.d })),
   bulbs: strandBulbs.count,
 };
+
+// A04 · procedural district massing. Off unless ?generate=1 / ?massing=1 or P.
+// Hides the hand-placed building mesh while on so the two masses do not stack.
+// Street atlas, prop wear, and cannon bodies are left alone.
+const districtMassing = createDistrictMassing(THREE, {
+  streetW: STREET_W,
+  blockW: BLOCK_W,
+  blockD: BLOCK_D,
+  setback: SETBACK,
+  originX: gridOriginX,
+  originZ: gridOriginZ,
+  cols: GRID_COLS,
+  rows: GRID_ROWS + 2,
+  originalRows: GRID_ROWS,
+  live: freezeMotion ? 0 : 1,
+});
+scene.add(districtMassing.group);
+let massingOn = params.get('generate') === '1' || params.get('massing') === '1';
+function applyDistrictMassing(on) {
+  massingOn = !!on;
+  districtMassing.setEnabled(massingOn);
+  mesh.visible = !massingOn;
+  scars.visible = !massingOn;
+  strandGroup.visible = !massingOn;
+  strandBulbs.visible = !massingOn;
+  window.__harborMassing = { on: massingOn, ...districtMassing.report };
+}
+applyDistrictMassing(massingOn);
+window.addEventListener('noctuary-massing-toggle', () => {
+  applyDistrictMassing(!massingOn);
+});
 
 function swayStrandBulbs(t) {
   if (!strandBulbs.count) return;
@@ -8747,6 +8782,7 @@ function tick() {
   const pulse = freezeMotion ? 0.72 : 0.55 + 0.45 * Math.sin(t * 2.1);
 
   buildingMat.uniforms.uTime.value = t;
+  if (districtMassing) districtMassing.update(t);
   if (typeof swayStrandBulbs === 'function') swayStrandBulbs(t);
   if (typeof pennantSyncCloth === 'function') pennantSyncCloth(t);
   if (typeof updateTrafficSignals === 'function') updateTrafficSignals(t);
