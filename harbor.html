@@ -626,12 +626,12 @@ float fbm(vec2 p){
 // arXiv:1801.05741; mysimulator procedural buildings. Negative space = asphalt corridors.
 // Outer module matches main: STREET_W 1.65 is the gap between building faces.
 // Sidewalks sit inside that gap, so the lane you see is STREET_W − 2×SIDEWALK_W.
-// Main left a 0.65 carriageway (sidewalks 0.50). 0.30 sidewalks open the asphalt
-// to 1.05 without moving the blocks. The quay-edge strip stays inside the same gap.
+// Main left a 0.65 carriageway (sidewalks 0.50). Skinny 0.18 walks open the
+// asphalt to 1.29 without moving the blocks. The quay-edge strip stays inside the gap.
 // Atlas sheets are unchanged — these constants only scale meshes.
 const STREET_W = 1.65;
-const SIDEWALK_W = 0.30;
-const QUAY_WALK_W = 0.35;
+const SIDEWALK_W = 0.18;
+const QUAY_WALK_W = 0.22;
 // NYC approach-band depth: ~10–12 ft. Harbor is ~15.79 ft/unit, so ~0.70.
 const CROSSWALK_D = 0.70;
 const CURB_H = 0.09;
@@ -8704,7 +8704,7 @@ function fillTourChecklist() {
     '• [x] Atlas path: skip edgeKill/edgeFade→wallCol (tan side-wall panes after cool127)',
     '• [x] Distance LOD impostor (lodFlat mix to flat back atlas 16–36u)',
     '• [x] Night-street gait: walk 0.50 / sprint 0.88 + head-bob',
-    '• [x] Street widths: carriageway 1.05 · SIDEWALK_W 0.30 · QUAY_WALK_W 0.35 · STREET_W 1.65',
+    '• [x] Street widths: carriageway 1.29 · SIDEWALK_W 0.18 · QUAY_WALK_W 0.22 · STREET_W 1.65',
     '• [x] Collision chest = EYE_H*0.72 (was stale 1.15)',
     '• [x] Face-map default + V walk unchanged',
     '',

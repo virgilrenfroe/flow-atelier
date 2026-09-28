@@ -5,8 +5,8 @@
 import { planDistrict, parseMassingSeed, SEED_PRESETS } from './district-massing.js';
 
 const STREET_W = 1.65;
-const SIDEWALK_W = 0.30;
-const QUAY_WALK_W = 0.35;
+const SIDEWALK_W = 0.18;
+const QUAY_WALK_W = 0.22;
 const BLOCK_W = 5;
 const BLOCK_D = 4.4;
 const SETBACK = 0.32;
@@ -138,11 +138,11 @@ expect(plan.report.streetW === STREET_W, `street mask ${plan.report.streetW} != 
 expect(Math.abs(plan.report.sidewalkW - SIDEWALK_W) < 1e-6, 'sidewalk split drifted');
 expect(Math.abs(plan.report.carriageway - carriageway) < 1e-6, 'carriageway split drifted');
 expect(STREET_W === 1.65, 'outer corridor footprint left the main module');
-expect(Math.abs(SIDEWALK_W - 0.30) < 1e-6, 'sidewalk left the 0.30 split');
-expect(Math.abs(carriageway - 1.05) < 1e-6, `carriageway ${carriageway.toFixed(2)} is not 1.05`);
+expect(Math.abs(SIDEWALK_W - 0.18) < 1e-6, 'sidewalk left the 0.18 split');
+expect(Math.abs(carriageway - 1.29) < 1e-6, `carriageway ${carriageway.toFixed(2)} is not 1.29`);
 expect(carriageway > 0.65 + 0.3, `carriageway ${carriageway.toFixed(2)} is not wider than main's 0.65 lane`);
 expect(2 * (SIDEWALK_W + 0.08) < STREET_W, 'sidewalks and curbs do not fit in the street gap');
-expect(Math.abs(QUAY_WALK_W - 0.35) < 1e-6, 'quay walk left 0.35');
+expect(Math.abs(QUAY_WALK_W - 0.22) < 1e-6, 'quay walk left 0.22');
 expect(QUAY_WALK_W + 0.08 < STREET_W, 'quay walk expands the promenade');
 expect(plan.report.heightMax - plan.report.heightMin > 3, 'skyline is flat');
 expect(plan.roads.some((r) => r.kind === 'street'), 'extension streets missing');

@@ -162,7 +162,7 @@ function blockRect(bx, bz, g) {
 
 function resolveGrammar(options) {
   const streetW = options.streetW ?? 1.65;
-  const sidewalkW = options.sidewalkW ?? 0.30;
+  const sidewalkW = options.sidewalkW ?? 0.18;
   const blockW = options.blockW ?? 5;
   const blockD = options.blockD ?? 4.4;
   const cols = options.cols ?? 5;
