@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { live } from './live.js';
 
-// Quay-tied boats and a quieter pair of fish schools.
+// Quay-tied modern boats and a quieter pair of fish schools.
 // Hulls are Cannon bodies on the crate Archimedes path. Sealed soles and the
 // water footprint discard stay with the meshes and water.js.
 // Painters end on the coping cleats. Nothing in this module stands in the basin.
-// Paint, wear, and night response come from the quay crate atlas. Marks are
-// the sheet's own stencils: HARBOR, SIGNAL, QUAY, FENESTRA.
+// Shells are gelcoat so the fleet reads as fiberglass, not planked workboats.
+// Marks are crate-atlas plates only: HARBOR, SIGNAL, QUAY, FENESTRA.
 export function installHarborCraft(deps) {
   const {
     scene, camera, controls, params, BLOOM_LAYER,
@@ -292,7 +292,7 @@ export function installHarborCraft(deps) {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(harborOrientShell(positions, indices));
     harborFinishGeo(geo);
-    const mesh = new THREE.Mesh(geo, harborFitWear);
+    const mesh = new THREE.Mesh(geo, harborGelcoat(spec.gel));
     mesh.name = 'transom';
     mesh.renderOrder = 2;
     return mesh;
@@ -317,6 +317,33 @@ export function installHarborCraft(deps) {
   const harborFitWear = harborWearClone(THREE.DoubleSide, -2);
   harborInstallRepeat(harborHullWear);
   harborInstallRepeat(harborDeckWear);
+  // Gelcoat stands in for the crate plank on the shell. Night emissive is the
+  // same warm key as crateWearMat, without the wood grain. Atlas sampling stays
+  // on name plates and the odd deck crate.
+  const harborGelcoats = new Map();
+  function harborGelcoat(hex, opts) {
+    const side = (opts && opts.side) || THREE.FrontSide;
+    const deck = !!(opts && opts.deck);
+    const key = (hex >>> 0) + (deck ? ':d' : ':h') + side;
+    let mat = harborGelcoats.get(key);
+    if (mat) return mat;
+    const color = new THREE.Color(hex >>> 0);
+    if (deck) color.multiplyScalar(0.72);
+    const emissive = color.clone().lerp(new THREE.Color(0xfff1dc), deck ? 0.22 : 0.35);
+    mat = new THREE.MeshStandardMaterial({
+      color,
+      roughness: deck ? 0.62 : 0.36,
+      metalness: 0.02,
+      emissive,
+      emissiveIntensity: 0.08,
+      side,
+      polygonOffset: true,
+      polygonOffsetFactor: -1.4,
+      polygonOffsetUnits: -2,
+    });
+    harborGelcoats.set(key, mat);
+    return mat;
+  }
   function syncHarborBoatWear() {
     for (let i = 0; i < harborBoatWear.length; i++) {
       const mat = harborBoatWear[i];
@@ -338,6 +365,15 @@ export function installHarborCraft(deps) {
   const HARBOR_DECK_Y = 0.052;
   const harborIronMat = new THREE.MeshStandardMaterial({
     color: 0x2c3138, roughness: 0.42, metalness: 0.64,
+    emissive: 0x2a2824, emissiveIntensity: 0.08,
+  });
+  const harborAlumMat = new THREE.MeshStandardMaterial({
+    color: 0xc5ccd2, roughness: 0.28, metalness: 0.72,
+    emissive: 0x8d8880, emissiveIntensity: 0.05,
+  });
+  const harborTubeMat = new THREE.MeshStandardMaterial({
+    color: 0x2a2e33, roughness: 0.78, metalness: 0.02,
+    emissive: 0x3a342c, emissiveIntensity: 0.07,
   });
   // Three-strand laid dock line. One tile is a turn of the lay; the tube
   // repeats it along arc length so the braid stays the same size on every painter.
@@ -453,12 +489,9 @@ export function installHarborCraft(deps) {
   const harborStbdMat = new THREE.MeshStandardMaterial({
     color: 0x3dff7a, emissive: 0x1ec85a, emissiveIntensity: 1.6, roughness: 0.35,
   });
-  // Painter gauge, metres. Every hull on this berth is under 14 ft LOA
-  // (pram 1.32, tender 1.58, skiff 2.15, scow 2.60, launch 3.50, dory 4.15).
-  // West Marine, Orion Cordage, Anchoring.com, and Better Boat all chart
-  // boats through 20–27 ft at 3/8 in (9.5 mm), and call 3/8 in the minimum
-  // even when the 1/8-in-per-9-ft rule would go thinner. RHADC Bermuda
-  // splits the same way: 3/8 in through 17 ft. One size for the fleet.
+  // Painter gauge, metres. The modern fleet is still under 12 ft LOA
+  // (tenders 2.2–2.4, RIBs 2.6–2.9, cabins 2.8–3.6). West Marine, Orion,
+  // Anchoring.com, Better Boat, and RHADC all chart that range at 3/8 in.
   const HARBOR_ROPE_D = 0.009525;
   const HARBOR_ROPE_R = HARBOR_ROPE_D * 0.5;
   // One turn of a three-strand lay is a handful of diameters, not a long smear.
@@ -617,7 +650,7 @@ export function installHarborCraft(deps) {
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
     geo.setIndex(indices);
     harborFinishGeo(geo);
-    const sole = new THREE.Mesh(geo, harborDeckWear);
+    const sole = new THREE.Mesh(geo, harborGelcoat(spec.gel, { side: THREE.DoubleSide, deck: true }));
     sole.renderOrder = 2;
     sole.frustumCulled = false;
     sole.name = 'hull-seal';
@@ -711,11 +744,157 @@ export function installHarborCraft(deps) {
     geo.computeVertexNormals();
   }
 
+  function harborMark(group, spec, x, y, z, ry, w, h) {
+    const plate = harborNamePlate(spec.atlasCol, w, h);
+    plate.position.set(x, y, z);
+    plate.rotation.y = ry;
+    group.add(plate);
+    return plate;
+  }
+
+  function harborBench(group, spec, deckY, z, depth) {
+    const w = spec.beam * 0.62;
+    const h = 0.05;
+    const d = depth || 0.1;
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), harborGelcoat(spec.gel, { deck: true }));
+    seat.position.set(0, deckY + 0.1, z);
+    group.add(seat);
+    const ped = new THREE.Mesh(new THREE.BoxGeometry(w * 0.72, 0.08, d * 0.7), harborGelcoat(spec.gel, { deck: true }));
+    ped.position.set(0, deckY + 0.04, z);
+    group.add(ped);
+  }
+
+  function harborOutboard(group, spec) {
+    const motor = new THREE.Group();
+    const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 0.22), harborGelcoat(0x2c3136));
+    cowl.position.set(0, spec.freeboard * 0.35, 0);
+    motor.add(cowl);
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.26, 0.045), harborAlumMat);
+    leg.position.set(0, spec.freeboard * 0.05, 0.02);
+    motor.add(leg);
+    motor.position.set(0, 0.02, -spec.length * 0.5 - 0.02);
+    group.add(motor);
+  }
+
+  function harborConsole(group, spec, deckY, z) {
+    const w = spec.beam * 0.28;
+    const h = 0.28;
+    const d = 0.22;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), harborGelcoat(spec.gel));
+    box.position.set(0, deckY + h * 0.5 + 0.02, z);
+    group.add(box);
+    const wheel = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.008, 6, 10), harborAlumMat);
+    wheel.position.set(0, deckY + h * 0.72, z + d * 0.5 + 0.01);
+    group.add(wheel);
+    harborMark(group, spec, 0, deckY + h * 0.42, z + d * 0.5 + 0.012, 0, w * 0.78, 0.08);
+  }
+
+  function harborRibCollar(sheerS, sheerP, radius) {
+    const pts = [];
+    const inset = radius * 0.22;
+    for (let i = 0; i < sheerP.length; i++) {
+      const p = sheerP[i];
+      pts.push(new THREE.Vector3(p.x + inset, p.y - radius * 0.02, p.z));
+    }
+    const bow = sheerS[sheerS.length - 1];
+    pts.push(new THREE.Vector3(0, bow.y + radius * 0.05, bow.z + radius * 0.15));
+    for (let i = sheerS.length - 1; i >= 0; i--) {
+      const p = sheerS[i];
+      pts.push(new THREE.Vector3(p.x - inset, p.y - radius * 0.02, p.z));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 40, radius, 8, false), harborTubeMat);
+    mesh.name = 'rib-tube';
+    return mesh;
+  }
+
+  function harborFitRib(group, spec, hull, deckY) {
+    group.add(harborRibCollar(hull.sheerS, hull.sheerP, spec.tube || spec.beam * 0.09));
+    harborBench(group, spec, deckY, -spec.length * 0.16, 0.16);
+    harborConsole(group, spec, deckY, spec.length * 0.08);
+    harborOutboard(group, spec);
+  }
+
+  function harborFitTender(group, spec, hull, deckY) {
+    harborBench(group, spec, deckY, -spec.length * 0.22, 0.12);
+    harborBench(group, spec, deckY, spec.length * 0.12, 0.1);
+    if (spec.console) harborConsole(group, spec, deckY, spec.length * 0.02);
+    else harborMark(group, spec, 0, spec.freeboard * 0.42, -spec.length * 0.5 - 0.01, Math.PI, spec.beam * 0.36, 0.08);
+    harborOutboard(group, spec);
+    const railY = spec.freeboard * 0.78;
+    for (const sign of [1, -1]) {
+      const rail = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, spec.length * 0.34, 5), harborAlumMat);
+      rail.rotation.x = Math.PI / 2;
+      rail.position.set(sign * spec.beam * 0.36, railY, spec.length * 0.22);
+      group.add(rail);
+    }
+    if (spec.crate) {
+      const s = 0.22;
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.8, s * 0.9), harborFitWear);
+      stampHarborCrateUVs(crate.geometry, spec.atlasCol, s, s * 0.8, s * 0.9);
+      crate.position.set(spec.beam * 0.12, deckY + s * 0.4, -spec.length * 0.02);
+      crate.name = 'deck-crate';
+      group.add(crate);
+    }
+  }
+
+  function harborFitCabin(group, spec, hull, deckY) {
+    const cabL = spec.length * 0.36;
+    const cabW = spec.beam * 0.7;
+    const cabH = 0.42;
+    const cz = spec.length * 0.06;
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(cabW, cabH, cabL), harborGelcoat(spec.gel));
+    cab.position.set(0, deckY + cabH * 0.5, cz);
+    group.add(cab);
+    const roof = new THREE.Mesh(
+      new THREE.BoxGeometry(cabW + 0.06, 0.03, cabL + 0.1),
+      harborGelcoat(spec.gel, { deck: true }),
+    );
+    roof.position.set(0, deckY + cabH + 0.012, cz + 0.02);
+    group.add(roof);
+    const win = (x, y, z, rx, ry, w, h) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), harborGlassMat);
+      m.position.set(x, y, z);
+      m.rotation.set(rx, ry, 0);
+      m.layers.enable(BLOOM_LAYER);
+      group.add(m);
+    };
+    const wy = deckY + cabH * 0.62;
+    win(0, wy + 0.02, cz + cabL * 0.5 + 0.02, -0.55, 0, cabW * 0.62, 0.22);
+    win(cabW * 0.5 + 0.012, wy, cz, 0, Math.PI / 2, cabL * 0.46, cabH * 0.36);
+    win(-cabW * 0.5 - 0.012, wy, cz, 0, -Math.PI / 2, cabL * 0.46, cabH * 0.36);
+    const whip = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.008, 0.34, 5), harborAlumMat);
+    whip.position.set(cabW * 0.28, deckY + cabH + 0.18, cz - cabL * 0.2);
+    group.add(whip);
+    harborMark(group, spec, cabW * 0.5 + 0.014, deckY + cabH * 0.28, cz, Math.PI / 2, 0.2, 0.07);
+    harborMark(group, spec, -cabW * 0.5 - 0.014, deckY + cabH * 0.28, cz, -Math.PI / 2, 0.2, 0.07);
+    harborBench(group, spec, deckY, -spec.length * 0.22, 0.14);
+    const port = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), harborPortMat);
+    port.position.set(-cabW * 0.46, wy, cz + cabL * 0.42);
+    port.layers.enable(BLOOM_LAYER);
+    group.add(port);
+    const stbd = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), harborStbdMat);
+    stbd.position.set(cabW * 0.46, wy, cz + cabL * 0.42);
+    stbd.layers.enable(BLOOM_LAYER);
+    group.add(stbd);
+    const lamp = new THREE.PointLight(0xffc48a, 0.55, 2.4, 2);
+    lamp.position.set(0, deckY + cabH * 0.45, cz);
+    group.add(lamp);
+    if (spec.crate) {
+      const s = 0.24;
+      const crate = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.75, s), harborFitWear);
+      stampHarborCrateUVs(crate.geometry, 0, s, s * 0.75, s);
+      crate.position.set(-spec.beam * 0.16, deckY + s * 0.38, -spec.length * 0.28);
+      crate.name = 'deck-crate';
+      group.add(crate);
+    }
+  }
+
   function harborAddBoat(spec) {
     const group = new THREE.Group();
     group.name = spec.id;
     const hull = harborHull(spec);
-    const shell = new THREE.Mesh(hull.geo, harborHullWear);
+    const shell = new THREE.Mesh(hull.geo, harborGelcoat(spec.gel));
     shell.castShadow = false;
     shell.renderOrder = 1;
     shell.name = 'hull-shell';
@@ -724,153 +903,15 @@ export function installHarborCraft(deps) {
     group.add(harborSeal(spec, hull.sheerS, hull.sheerP));
 
     const deckY = HARBOR_DECK_Y;
-    const openBoat = spec.kind === 'skiff' || spec.kind === 'tender' || spec.kind === 'pram' || spec.kind === 'dory';
-    if (openBoat) {
-      const seatW = spec.beam * (spec.kind === 'dory' ? 0.7 : 0.62);
-      const seats = spec.kind === 'skiff' ? [-0.28, 0.38]
-        : spec.kind === 'dory' ? [-0.62, -0.08, 0.42]
-          : spec.kind === 'pram' ? [0.02]
-            : [0.05];
-      for (const z of seats) {
-        const seatD = spec.kind === 'dory' ? 0.055 : 0.07;
-        const seatGeo = new THREE.BoxGeometry(seatW, 0.028, seatD);
-        stampHarborCrateUVs(seatGeo, spec.atlasCol, seatW, 0.028, seatD);
-        const seat = new THREE.Mesh(seatGeo, harborFitWear);
-        seat.position.set(0, deckY + 0.06, z * (spec.length / 2.2));
-        group.add(seat);
-      }
-      const oarCount = spec.kind === 'dory' ? 2 : 1;
-      for (let i = 0; i < oarCount; i++) {
-        const oarGeo = new THREE.CylinderGeometry(0.012, 0.01, spec.length * (spec.kind === 'dory' ? 0.55 : 0.72), 5);
-        harborStampCell(oarGeo, spec.atlasCol, CRATE_FACE_ROW.side);
-        const oar = new THREE.Mesh(oarGeo, harborFitWear);
-        oar.rotation.z = Math.PI / 2;
-        oar.rotation.y = 0.35 + i * 0.5;
-        oar.position.set(spec.beam * (0.08 + i * 0.08), spec.freeboard * 0.72, -0.08 + i * 0.22);
-        group.add(oar);
-      }
-      const bladeGeo = new THREE.BoxGeometry(0.05, 0.012, 0.16);
-      stampHarborCrateUVs(bladeGeo, spec.atlasCol, 0.05, 0.012, 0.16);
-      const blade = new THREE.Mesh(bladeGeo, harborFitWear);
-      blade.position.set(spec.beam * 0.42, spec.freeboard * 0.7, spec.length * 0.22);
-      group.add(blade);
-    }
-
-    if (spec.kind === 'scow') {
-      const wellSx = spec.beam * 0.5;
-      const wellSy = 0.24;
-      const wellSz = spec.length * 0.32;
-      const wellGeo = new THREE.BoxGeometry(wellSx, wellSy, wellSz);
-      // Cargo is a quay crate (ochre column) sitting in an HARBOR hull.
-      stampHarborCrateUVs(wellGeo, 2, wellSx, wellSy, wellSz);
-      const well = new THREE.Mesh(wellGeo, harborFitWear);
-      well.name = 'scow-crate';
-      well.position.set(0, deckY + wellSy * 0.5 + 0.02, -spec.length * 0.02);
-      group.add(well);
-      const coamSx = spec.beam * 0.78;
-      const coamSy = 0.06;
-      const coamSz = spec.length * 0.55;
-      const coamGeo = new THREE.BoxGeometry(coamSx, coamSy, coamSz);
-      stampHarborCrateUVs(coamGeo, spec.atlasCol, coamSx, coamSy, coamSz);
-      const coam = new THREE.Mesh(coamGeo, harborFitWear);
-      coam.position.set(0, deckY + 0.05, 0.02);
-      group.add(coam);
-    }
-
-    if (spec.kind === 'skiff') {
-      const motor = new THREE.Group();
-      const cowl = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.18, 0.2), harborIronMat);
-      cowl.position.set(0, spec.freeboard * 0.45, 0);
-      motor.add(cowl);
-      const leg = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.22, 0.05), harborIronMat);
-      leg.position.set(0, -0.02, 0.02);
-      motor.add(leg);
-      motor.position.set(0, 0.02, -spec.length * 0.5 - 0.02);
-      group.add(motor);
-      for (let i = 0; i < 3; i++) {
-        const fender = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 6), harborFenderMat);
-        fender.position.set(-spec.beam * 0.46, spec.freeboard * 0.35, -0.35 + i * 0.38);
-        group.add(fender);
-      }
-    }
-
-    if (spec.cabin) {
-      const cabL = spec.length * 0.22;
-      const cabW = spec.beam * 0.62;
-      const cabH = 0.4;
-      const cabGeo = new THREE.BoxGeometry(cabW, cabH, cabL);
-      stampHarborCrateUVs(cabGeo, spec.atlasCol, cabW, cabH, cabL);
-      const cab = new THREE.Mesh(cabGeo, harborFitWear);
-      cab.position.set(0, deckY + cabH * 0.5, -spec.length * 0.06);
-      group.add(cab);
-      const roofW = cabW + 0.06;
-      const roofH = 0.028;
-      const roofL = cabL + 0.08;
-      const roofGeo = new THREE.BoxGeometry(roofW, roofH, roofL);
-      stampHarborCrateUVs(roofGeo, spec.atlasCol, roofW, roofH, roofL);
-      const roof = new THREE.Mesh(roofGeo, harborFitWear);
-      roof.position.set(0, deckY + cabH + 0.01, -spec.length * 0.06);
-      group.add(roof);
-      const win = (x, y, z, ry, w, h) => {
-        const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), harborGlassMat);
-        m.position.set(x, y, z);
-        m.rotation.y = ry;
-        m.layers.enable(BLOOM_LAYER);
-        group.add(m);
-      };
-      const wy = deckY + cabH * 0.58;
-      const cz = -spec.length * 0.06;
-      win(cabW * 0.5 + 0.01, wy, cz, Math.PI / 2, cabL * 0.62, cabH * 0.42);
-      win(-cabW * 0.5 - 0.01, wy, cz, -Math.PI / 2, cabL * 0.62, cabH * 0.42);
-      win(0, wy, cz + cabL * 0.5 + 0.01, 0, cabW * 0.46, cabH * 0.38);
-      const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.038, 0.16, 6), harborIronMat);
-      stack.position.set(cabW * 0.22, deckY + cabH + 0.1, cz - cabL * 0.12);
-      group.add(stack);
-      const mastGeo = new THREE.CylinderGeometry(0.016, 0.022, 1.15, 6);
-      harborStampCell(mastGeo, spec.atlasCol, CRATE_FACE_ROW.side);
-      const mast = new THREE.Mesh(mastGeo, harborFitWear);
-      mast.position.set(0, deckY + 0.58, spec.length * 0.2);
-      group.add(mast);
-      const boomGeo = new THREE.CylinderGeometry(0.012, 0.012, spec.length * 0.28, 5);
-      harborStampCell(boomGeo, spec.atlasCol, CRATE_FACE_ROW.side);
-      const boom = new THREE.Mesh(boomGeo, harborFitWear);
-      boom.rotation.x = Math.PI / 2;
-      boom.position.set(0, deckY + cabH + 0.06, spec.length * 0.2 + spec.length * 0.12);
-      group.add(boom);
-      const port = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), harborPortMat);
-      port.position.set(-cabW * 0.42, wy, cz + cabL * 0.42);
-      port.layers.enable(BLOOM_LAYER);
-      group.add(port);
-      const stbd = new THREE.Mesh(new THREE.SphereGeometry(0.028, 8, 6), harborStbdMat);
-      stbd.position.set(cabW * 0.42, wy, cz + cabL * 0.42);
-      stbd.layers.enable(BLOOM_LAYER);
-      group.add(stbd);
-      const coil = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.016, 6, 10), harborRopeMat);
-      coil.rotation.x = Math.PI / 2;
-      coil.position.set(spec.beam * 0.16, deckY + 0.02, spec.length * 0.28);
-      group.add(coil);
-      const lamp = new THREE.PointLight(0xffc48a, 0.9, 3.2, 2);
-      lamp.position.set(0, deckY + cabH * 0.4, cz);
-      group.add(lamp);
-    }
-
-    if (spec.mark) {
-      const h = Math.max(0.24, spec.freeboard * 1.15);
-      const w = h * 1.15;
-      const mid = hull.sheerS[8];
-      for (const sign of [1, -1]) {
-        const plate = harborNamePlate(spec.atlasCol, w, h);
-        plate.position.set(sign * (Math.abs(mid.x) + 0.015), spec.freeboard * 0.62, mid.z * 0.2);
-        plate.rotation.y = sign > 0 ? Math.PI / 2 : -Math.PI / 2;
-        group.add(plate);
-      }
-    }
+    if (spec.kind === 'rib') harborFitRib(group, spec, hull, deckY);
+    else if (spec.kind === 'tender') harborFitTender(group, spec, hull, deckY);
+    else harborFitCabin(group, spec, hull, deckY);
 
     // Alongside mooring: bow and stern painters to coping cleats.
     // The quayward gunwale is local ±X, never a pile in the basin.
     const quaySign = Math.sin(spec.yaw) >= 0 ? 1 : -1;
-    const gunnelX = quaySign * spec.beam * 0.46;
-    const gunnelY = spec.freeboard * 0.55;
+    const gunnelX = quaySign * spec.beam * (spec.kind === 'rib' ? 0.42 : 0.46);
+    const gunnelY = spec.kind === 'rib' ? spec.freeboard * 0.92 : spec.freeboard * 0.7;
     const painters = [-0.42, 0.4].map((along) => {
       const local = new THREE.Vector3(gunnelX, gunnelY, spec.length * along);
       const worldX = spec.x + Math.sin(spec.yaw) * local.z + Math.cos(spec.yaw) * local.x;
@@ -892,46 +933,46 @@ export function installHarborCraft(deps) {
   const berthZ = (beam) => 8.05 + beam * 0.5;
   const HARBOR_BOAT_DEFS = [
     {
-      id: 'west-pram', kind: 'pram', mark: 'HARBOR', atlasCol: 4,
-      x: -8.7, z: berthZ(0.68), yaw: Math.PI / 2,
-      length: 1.32, beam: 0.68, draft: 0.08, freeboard: 0.11,
-      bilge: 0.34, transom: 0.92, bowRise: 0.06, bowPow: 0.38,
-      color: 0x3d4a46, stripe: 0xd2c6ae, clear: 1.15,
+      id: 'harbor-tender', kind: 'tender', mark: 'HARBOR', atlasCol: 0,
+      x: -8.2, z: berthZ(0.98), yaw: Math.PI / 2,
+      length: 2.2, beam: 0.98, draft: 0.14, freeboard: 0.22,
+      bilge: 0.58, transom: 0.9, bowRise: 0.08, bowPow: 0.62,
+      gel: 0xe4dcd0, clear: 1.35,
     },
     {
-      id: 'quay-skiff', kind: 'skiff', mark: 'QUAY', atlasCol: 2,
-      x: -5.85, z: berthZ(0.78), yaw: -Math.PI / 2,
-      length: 2.15, beam: 0.78, draft: 0.13, freeboard: 0.16,
-      bilge: 0.5, transom: 0.8, bowRise: 0.26, bowPow: 0.8,
-      color: 0x1c2a24, stripe: 0xcbbfa6, clear: 1.55,
+      id: 'quay-rib', kind: 'rib', mark: 'QUAY', atlasCol: 2,
+      x: -5.15, z: berthZ(1.22), yaw: -Math.PI / 2,
+      length: 2.9, beam: 1.22, draft: 0.16, freeboard: 0.24,
+      bilge: 0.72, transom: 0.92, bowRise: 0.1, bowPow: 0.5,
+      gel: 0xd4a15a, tube: 0.11, clear: 1.55,
     },
     {
-      id: 'basin-tender', kind: 'tender', mark: 'FENESTRA', atlasCol: 3,
-      x: -3.2, z: berthZ(0.6), yaw: Math.PI / 2,
-      length: 1.58, beam: 0.6, draft: 0.09, freeboard: 0.12,
-      bilge: 0.44, transom: 0.72, bowRise: 0.18, bowPow: 0.7,
-      color: 0x5c4332, stripe: 0xd5c6aa, clear: 1.25,
+      id: 'fenestra-tender', kind: 'tender', mark: 'FENESTRA', atlasCol: 3,
+      x: -2.0, z: berthZ(1.02), yaw: Math.PI / 2,
+      length: 2.4, beam: 1.02, draft: 0.14, freeboard: 0.22,
+      bilge: 0.56, transom: 0.88, bowRise: 0.07, bowPow: 0.58,
+      gel: 0xc8bfb6, clear: 1.4, console: true, crate: true,
     },
     {
-      id: 'signal-dory', kind: 'dory', mark: 'SIGNAL', atlasCol: 1,
-      x: 0.45, z: berthZ(0.64), yaw: -Math.PI / 2,
-      length: 4.15, beam: 0.64, draft: 0.12, freeboard: 0.18,
-      bilge: 0.95, transom: 0.38, bowRise: 0.62, bowPow: 1.45,
-      color: 0x243028, stripe: 0xc4b48a, clear: 2.35,
+      id: 'harbor-cabin', kind: 'cabin', mark: 'HARBOR', atlasCol: 0,
+      x: 1.55, z: berthZ(1.28), yaw: -Math.PI / 2,
+      length: 3.6, beam: 1.28, draft: 0.2, freeboard: 0.26,
+      bilge: 0.64, transom: 0.82, bowRise: 0.14, bowPow: 0.68,
+      gel: 0xe7e0d4, clear: 1.9,
     },
     {
-      id: 'harbor-launch', kind: 'launch', mark: 'HARBOR', atlasCol: 0, cabin: true,
-      x: 4.85, z: berthZ(1.12), yaw: Math.PI / 2,
-      length: 3.5, beam: 1.12, draft: 0.22, freeboard: 0.2,
-      bilge: 0.64, transom: 0.68, bowRise: 0.4, bowPow: 0.85,
-      color: 0x151a22, stripe: 0x7a3030, clear: 2.15,
+      id: 'signal-rib', kind: 'rib', mark: 'SIGNAL', atlasCol: 1,
+      x: 5.2, z: berthZ(1.16), yaw: Math.PI / 2,
+      length: 2.6, beam: 1.16, draft: 0.15, freeboard: 0.23,
+      bilge: 0.7, transom: 0.9, bowRise: 0.09, bowPow: 0.52,
+      gel: 0xc4b5a6, tube: 0.105, clear: 1.45,
     },
     {
-      id: 'harbor-scow', kind: 'scow', mark: 'HARBOR', atlasCol: 0,
-      x: 8.55, z: berthZ(1.42), yaw: -Math.PI / 2,
-      length: 2.6, beam: 1.42, draft: 0.18, freeboard: 0.15,
-      bilge: 0.2, transom: 0.98, bowRise: 0.05, bowPow: 0.28,
-      color: 0x2a2420, stripe: 0x8d7348, clear: 1.85,
+      id: 'quay-cabin', kind: 'cabin', mark: 'QUAY', atlasCol: 2,
+      x: 8.45, z: berthZ(1.18), yaw: -Math.PI / 2,
+      length: 2.8, beam: 1.18, draft: 0.18, freeboard: 0.24,
+      bilge: 0.62, transom: 0.84, bowRise: 0.12, bowPow: 0.66,
+      gel: 0xd7a45e, clear: 1.6, crate: true,
     },
   ];
 
@@ -1310,7 +1351,7 @@ export function installHarborCraft(deps) {
     waterPosts: 0,
     moor: 'quay-coping',
     rope: 'braid',
-    finish: 'quay-crate-atlas',
+    finish: 'harbor-gelcoat',
     marks: harborBoats.map((b) => b.spec.mark),
     waveY: (x, z) => harborWaveY(x, z, harborFishTime.value),
     fishNow() {
@@ -1381,11 +1422,11 @@ export function installHarborCraft(deps) {
       camera.position.set(p.x + 0.15, y, p.z + zOff);
       controls.target.set(p.x, 0.05, p.z);
     };
-    if (mode === 'launch') beside('harbor-launch', 3.4, 1.55);
-    else if (mode === 'skiff') beside('quay-skiff', 3.1, 1.35);
-    else if (mode === 'dory') beside('signal-dory', 3.6, 1.7);
-    else if (mode === 'scow') beside('harbor-scow', 3.8, 1.85);
-    else if (mode === 'pram') beside('west-pram', 2.6, 1.25);
+    if (mode === 'launch' || mode === 'cabin') beside('quay-cabin', 3.4, 1.55);
+    else if (mode === 'skiff' || mode === 'tender') beside('fenestra-tender', 3.1, 1.35);
+    else if (mode === 'dory' || mode === 'rib') beside('quay-rib', 3.6, 1.7);
+    else if (mode === 'scow') beside('quay-cabin', 3.8, 1.85);
+    else if (mode === 'pram') beside('harbor-tender', 2.6, 1.25);
     else if (mode === 'fish') {
       camera.position.set(-2.4, 2.6, 16.05);
       controls.target.set(-1.5, -0.32, 18.5);
@@ -1400,15 +1441,14 @@ export function installHarborCraft(deps) {
       camera.position.set(-12.6, 2.6, 12.4);
       controls.target.set(-2.2, 0.2, 7.4);
     } else if (mode === 'painter') {
-      // Scow, quayward painter, and coping cleat in one frame. Pulled back
-      // so a 3/8 in line still has the hull beside it for scale.
-      camera.position.set(11.2, 2.2, 5.6);
-      controls.target.set(9.15, 0.22, 7.05);
-    } else if (mode === 'skiff-top') top('quay-skiff', 4.6);
-    else if (mode === 'launch-top') top('harbor-launch', 6.4);
-    else if (mode === 'tender-top') top('basin-tender', 3.8);
-    else if (mode === 'dory-top') top('signal-dory', 7.2);
-    else if (mode === 'scow-top') top('harbor-scow', 5.4);
+      // East cabin, quayward painter, and coping cleat. Pulled back so a
+      // 3/8 in line still has the hull beside it for scale.
+      camera.position.set(11.0, 1.85, 6.15);
+      controls.target.set(8.55, 0.32, 7.55);
+    }     else if (mode === 'skiff-top' || mode === 'tender-top') top('fenestra-tender', 4.6);
+    else if (mode === 'launch-top' || mode === 'cabin-top') top('quay-cabin', 6.4);
+    else if (mode === 'dory-top' || mode === 'rib-top') top('quay-rib', 5.2);
+    else if (mode === 'scow-top') top('harbor-cabin', 6.2);
     else if (mode === 'match') {
       // Alongside the scow, looking quayward: hull planks and the east pile share the frame.
       camera.position.set(6.2, 1.85, 7.9);
