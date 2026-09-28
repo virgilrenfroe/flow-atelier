@@ -161,7 +161,7 @@ function blockRect(bx, bz, g) {
 }
 
 function resolveGrammar(options) {
-  const streetW = options.streetW ?? 1.65;
+  const streetW = options.streetW ?? 3.70;
   const blockW = options.blockW ?? 5;
   const blockD = options.blockD ?? 4.4;
   const cols = options.cols ?? 5;
@@ -565,6 +565,8 @@ export function planDistrict(options = {}) {
     seedLabel: g.seedLabel || (preset ? preset.label : String(g.seed >>> 0)),
     maskGap: MASK_GAP,
     podiumH: PODIUM_H,
+    streetW: g.streetW,
+    alleyW: g.alleyW,
     cols: g.cols,
     rows: g.rows,
     originalRows: g.originalRows,

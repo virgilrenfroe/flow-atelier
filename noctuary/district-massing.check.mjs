@@ -4,7 +4,8 @@
  */
 import { planDistrict, parseMassingSeed, SEED_PRESETS } from './district-massing.js';
 
-const STREET_W = 1.65;
+const STREET_W = 3.70;
+const SIDEWALK_W = 0.78;
 const BLOCK_W = 5;
 const BLOCK_D = 4.4;
 const SETBACK = 0.32;
@@ -130,6 +131,16 @@ expect(parseMassingSeed('').label === 'A04', 'default seed label');
 
 const plan = planDistrict(grammar(SEED_PRESETS[0].value, 'A04'));
 assertPlan(plan, 'A04');
+const carriageway = STREET_W - 2 * SIDEWALK_W;
+expect(plan.report.streetW === STREET_W, `street mask ${plan.report.streetW} != ${STREET_W}`);
+expect(
+  plan.report.streetW > plan.report.alleyW * 2.5,
+  `primary mask ${plan.report.streetW} is not clearly wider than alley ${plan.report.alleyW}`,
+);
+expect(
+  carriageway > plan.report.alleyW * 1.6,
+  `carriageway ${carriageway.toFixed(2)} still reads as an alley (${plan.report.alleyW})`,
+);
 expect(plan.report.heightMax - plan.report.heightMin > 3, 'skyline is flat');
 expect(plan.roads.some((r) => r.kind === 'street'), 'extension streets missing');
 const quayH = plan.instances.filter((i) => i.role === 'quay').map((i) => i.h);

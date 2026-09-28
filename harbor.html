@@ -624,8 +624,13 @@ float fbm(vec2 p){
 // ——— Urban grammar: streets → blocks → lots → buildings (pass 3 + irregular lots p4) ———
 // Hierarchy refs: CityEngine / StreetGen / Purdue procedural; Three.js CityGenerator + SidewalkGenerator;
 // arXiv:1801.05741; mysimulator procedural buildings. Negative space = asphalt corridors.
-const STREET_W = 1.65;
-const SIDEWALK_W = 0.50;
+// Main-street module. Sidewalks sit inside the street gap, so the lane you
+// see is STREET_W − 2×SIDEWALK_W (was 1.65 − 1.00 = 0.65, narrower than an alley).
+// Carriageway is now ~2.14; the quay-edge walk (north face of the first row) is wider still.
+// Atlas sheets are unchanged — these constants only scale the meshes.
+const STREET_W = 3.70;
+const SIDEWALK_W = 0.78;
+const QUAY_WALK_W = 1.25;
 const CURB_H = 0.09;
 const BLOCK_W = 5.0;   // lot area width (X) inside sidewalks
 const BLOCK_D = 4.4;   // lot area depth (Z)
@@ -942,7 +947,7 @@ for (let r = 0; r <= GRID_ROWS; r++) {
     if (roadN < ROAD_MAX) {
       dummyR.position.set(x, 0.028, z);
       dummyR.rotation.set(-Math.PI / 2, 0, Math.PI / 2);
-      dummyR.scale.set(2.15, STREET_W * 0.92, 1);
+      dummyR.scale.set(STREET_W * 0.92, STREET_W * 0.92, 1);
       dummyR.updateMatrix();
       roadKindAttr.setX(roadN, 1);
       roads.setMatrixAt(roadN++, dummyR.matrix);
@@ -961,14 +966,15 @@ for (let bz = 0; bz < GRID_ROWS; bz++) {
   for (let bx = 0; bx < GRID_COLS; bx++) {
     const b = blockRect(bx, bz);
     const sw = SIDEWALK_W;
+    const northWalk = bz === 0 ? QUAY_WALK_W : sw;
     // N (+Z, quay-ward), S (−Z), E (+X), W (−X) sidewalk strips outside lot rect
-    addSidewalk((b.x0 + b.x1) * 0.5, b.z1 + sw * 0.5, BLOCK_W + sw * 2, sw);
+    addSidewalk((b.x0 + b.x1) * 0.5, b.z1 + northWalk * 0.5, BLOCK_W + northWalk * 2, northWalk);
     addSidewalk((b.x0 + b.x1) * 0.5, b.z0 - sw * 0.5, BLOCK_W + sw * 2, sw);
     addSidewalk(b.x0 - sw * 0.5, (b.z0 + b.z1) * 0.5, sw, BLOCK_D);
     addSidewalk(b.x1 + sw * 0.5, (b.z0 + b.z1) * 0.5, sw, BLOCK_D);
     // granite curb drop at sidewalk outer edge (toward street)
     const cw = 0.08;
-    addCurb((b.x0 + b.x1) * 0.5, b.z1 + sw + cw * 0.5, BLOCK_W + sw * 2 + cw * 2, cw);
+    addCurb((b.x0 + b.x1) * 0.5, b.z1 + northWalk + cw * 0.5, BLOCK_W + northWalk * 2 + cw * 2, cw);
     addCurb((b.x0 + b.x1) * 0.5, b.z0 - sw - cw * 0.5, BLOCK_W + sw * 2 + cw * 2, cw);
     addCurb(b.x0 - sw - cw * 0.5, (b.z0 + b.z1) * 0.5, cw, BLOCK_D + sw * 2);
     addCurb(b.x1 + sw + cw * 0.5, (b.z0 + b.z1) * 0.5, cw, BLOCK_D + sw * 2);
@@ -8652,7 +8658,7 @@ function fillTourChecklist() {
     '• [x] Atlas path: skip edgeKill/edgeFade→wallCol (tan side-wall panes after cool127)',
     '• [x] Distance LOD impostor (lodFlat mix to flat back atlas 16–36u)',
     '• [x] Night-street gait: walk 0.50 / sprint 0.88 + head-bob',
-    '• [x] Street widths: SIDEWALK_W 0.50 · STREET_W 1.65',
+    '• [x] Street widths: carriageway ~2.14 · SIDEWALK_W 0.78 · QUAY_WALK_W 1.25 · STREET_W 3.70',
     '• [x] Collision chest = EYE_H*0.72 (was stale 1.15)',
     '• [x] Face-map default + V walk unchanged',
     '',
