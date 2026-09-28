@@ -1,14 +1,12 @@
 # Glass shards
 
-Shop-pane breaks and the fenestra vessel shatter were spawning `BoxGeometry` chunks: roughly cubic, mostly opaque, a few of them on the bloom layer. They read as blocks.
+Shop-pane breaks and the fenestra vessel shatter were `BoxGeometry` chunks. They are thin glass facets now (`noctuary/glass-shards.js`).
 
-`noctuary/glass-shards.js` builds each piece as a thin convex prism:
+Second pass, so the pile reads as broken glass from the quay rather than as acrylic prisms:
 
-- Irregular 3–6 sided outline, one vertex pulled into a tip, hull kept convex so the silhouette stays a shard.
-- Thickness is about 5–7% of the span (about 0.008–0.014 scene units). Flat face normals, so the rim stays sharp.
-- The cannon shape is that same prism (`ConvexPolyhedron`). Mass and the quay contact material are unchanged. `invInertia` is capped so a sheet does not spin apart on contact.
-- If a facet center steps through the quay slab, it is sat back on the deck. Shards that leave the slab (basin) are not pulled back. Buoyancy is off: a real sheet’s volume is far under a crate, and the crate “fully under, lift anyway” rescue would buzz a flake on the waterline.
-
-The material is a physical glass: cool or faint-violet tint, low roughness, clearcoat, a night-dock reflection map, and a Fresnel alpha (more transparent head-on, bright at the edge). Shards are not on the bloom layer.
+- Outlines are jagged convex splinters and flakes (long edge, needle tip). The hull stays sharp. There is no bevel.
+- Thickness is about 1.4–2.2% of the span (about 0.0024–0.005). The cannon body is that same outer prism, not a thicker stand-in.
+- The face is clear in the middle (low alpha, almost no emissive, no clearcoat). A narrow cool rim along the real boundary carries the highlight. Side faces are the glass edge, flat-shaded.
+- Mass and quay friction are unchanged. `invInertia` stays capped. A facet that steps through the quay slab is sat back on the deck. Basin shards are not pulled back. Buoyancy stays off.
 
 Prop-wear atlases and the street-ground sheet are untouched.

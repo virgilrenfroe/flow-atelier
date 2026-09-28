@@ -5755,7 +5755,7 @@ function shopMarkBroken(id, face, slot) {
 
 function shopSpawnShards(x, y, z, nx, ny, nz) {
   for (let i = 0; i < 5; i++) {
-    const span = 0.075 + Math.random() * 0.07;
+    const span = 0.1 + Math.random() * 0.08;
     const mass = 0.12 + Math.random() * 0.16;
     const entry = harborSpawnGlassShard({
       span,
@@ -7554,7 +7554,7 @@ function rubeShatter() {
 
   const origin = rubeVesselMesh.position;
   for (let i = 0; i < 9; i++) {
-    const span = 0.08 + Math.random() * 0.08;
+    const span = 0.12 + Math.random() * 0.09;
     const mass = 0.16 + Math.random() * 0.22;
     const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(
       Math.random() * Math.PI,
