@@ -1,4 +1,4 @@
-# A02 · Shade lights / night stilftone
+# A02 · Shade lights / night halftone
 
 Journey map: **Lights Shading** · **Halftone Shading**. Technique only — no lesson branding in the scene.
 
@@ -24,22 +24,22 @@ Where it lands:
 
 Streets, storefronts, prop wear, boats, pennants, fenestra, Rube, and physics are unchanged. Scene point lights still illuminate everything else.
 
-## Stilftone
+## Halftone
 
 Soft screen-space disks (smoothstep, not a hard halftone step). Radius follows fixture light, so open water and unlit iron stay continuous. It does not run as a full-frame pass.
 
 - Default: on, light (`0.42`).
-- Off: `?stilftone=0` or key `K` (toggles ink; if shade is off, `K` turns the equation back on).
-- Strength: `?stilftone=0.3` (0–1).
-- Prior bloom-only read: `?shade=0` (forces stilftone off).
+- Off: `?halftone=0` or key `K` (toggles ink; if shade is off, `K` turns the equation back on).
+- Strength: `?halftone=0.3` (0–1).
+- Prior bloom-only read: `?shade=0` (forces halftone off).
 - Hold motion for a still comparison without dropping bloom: `?hold=1`.
 
 Runtime:
 
 ```js
 window.__harborShade.setShade(false)   // bloom-only path
-window.__harborShade.setStilftone(0)    // equation, no ink
-window.__harborShade.setStilftone(0.42) // soft print-night
+window.__harborShade.setHalftone(0)    // equation, no ink
+window.__harborShade.setHalftone(0.42) // soft print-night
 ```
 
 HUD row `shade` (hidden in exhibit) reads `equation · ink`, `equation`, or `bloom`.
