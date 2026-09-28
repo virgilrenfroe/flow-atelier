@@ -673,6 +673,7 @@ function applyDedicatedPropWear() {
       : '';
     window.__harborCrates.extends = 'street-atlas row2 col1';
   }
+  if (live.syncBasinBatchWear) live.syncBasinBatchWear();
   if (stillMode && (iron || crate)) live.tick();
 }
 live.onStreetPropWear = applyDedicatedPropWear;
@@ -3547,6 +3548,9 @@ window.addEventListener('noctuary-springs-toggle', () => springSetOn(!physSpring
     signalChip, signalGroup, signalMat, signalWorld, tipGlow,
     pennantSyncCloth, physStep,
     ironMatStd, ironWarmStd, physCrates,
+    crateWearMat, ironWearMats, physWorld, physGroundMat,
+    stampIronCell, IRON_CELL, stampHarborCrateUVs,
+    CRATE_ATLAS_COLS, CRATE_ATLAS_ROWS, CRATE_FACE_ROW,
     disposePhysics,
   };
 }
