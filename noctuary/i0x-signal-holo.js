@@ -148,7 +148,7 @@ void main() {
   // Short bar tear. Small, so the face does not smear into the next pose.
   float slice = floor(cell.y * 14.0);
   float gate = step(0.86, holoHash(vec2(slice, floor(uTime * (0.5 + 1.6 * uLive)))));
-  cell.x += (holoHash(vec2(slice, 3.1)) - 0.5) * 0.02 * gate;
+  cell.x += (holoHash(vec2(slice, 3.1)) - 0.5) * 0.008 * gate;
   cell = clamp(cell, 0.0, 1.0);
 
   vec2 uv = vec2(
@@ -228,7 +228,7 @@ export function mountSignalHolo(opts) {
 
   // 4×2 walk cycle. flipY is on, so +V is the head — matches the box face UVs.
   const map = new THREE.TextureLoader().load(
-    new URL('./textures/signal-holo-cyber-man-walk.png', import.meta.url).href
+    new URL('./textures/signal-holo-cyber-man-walk.png?v=stride2', import.meta.url).href
   );
   map.colorSpace = THREE.SRGBColorSpace;
   map.flipY = true;
@@ -240,7 +240,7 @@ export function mountSignalHolo(opts) {
     uTime: { value: 0 },
     uPulse: { value: 1 },
     uLive: { value: 1 },
-    uGlitchScale: { value: 0.22 },
+    uGlitchScale: { value: 0.08 },
     uMap: { value: map },
     uGrid: { value: new THREE.Vector2(4, 2) },
     uFrames: { value: 8 },
