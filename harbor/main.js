@@ -9,6 +9,7 @@ import { createPerfMonitor, resolveFboTier } from './perf.js';
 import { createHarborLoad } from './load.js';
 import { installSwapGpu } from './swap-gpu.js';
 import { installCitizen } from './citizen.js';
+import { installBasinClutter } from './batch.js';
 import { mountSignalVolume } from '../noctuary/a03-signal-volume.js';
 import { mountSignalHolo } from '../noctuary/i0x-signal-holo.js';
 
@@ -3900,6 +3901,21 @@ const {
   signalChip, signalGroup, signalMat, signalWorld, tipGlow,
   pennantSyncCloth, physStep,
 } = harborPhysics;
+installBasinClutter({
+  renderer, scene, camera,
+  faceTop, SEAWALL_Z, FURN_COUNT, bollards, harborMerge,
+  ironMatStd: harborPhysics.ironMatStd,
+  crateWearMat: harborPhysics.crateWearMat,
+  ironWearMats: harborPhysics.ironWearMats,
+  physWorld: harborPhysics.physWorld,
+  physGroundMat: harborPhysics.physGroundMat,
+  stampIronCell: harborPhysics.stampIronCell,
+  IRON_CELL: harborPhysics.IRON_CELL,
+  stampHarborCrateUVs: harborPhysics.stampHarborCrateUVs,
+  CRATE_ATLAS_COLS: harborPhysics.CRATE_ATLAS_COLS,
+  CRATE_ATLAS_ROWS: harborPhysics.CRATE_ATLAS_ROWS,
+  CRATE_FACE_ROW: harborPhysics.CRATE_FACE_ROW,
+});
 
 const harborPost = createHarborPost({
   renderer, scene, camera, freezeMotion, bloomLayer, NOISE_GLSL,
@@ -3960,7 +3976,7 @@ citizen = installCitizen({
 });
 window.__harborModules = {
   scene: true, water: true, physics: true, post: true, perf: true,
-  load: true, swap: true, citizen: true,
+  load: true, swap: true, citizen: true, batch: true,
 };
 
 
@@ -4163,6 +4179,24 @@ if (params.get('shot') === 'holo') {
   // Sheath full height, plate to camera-right, beacon tip still in view.
   camera.position.set(-1.7, 4.05, 9.1);
   controls.target.set(-5.9, 2.05, 3.0);
+  controls.update();
+}
+// Basin BatchedMesh proof frames. Exhibit chrome stays off (?still=1).
+if (params.get('shot') === 'batch') {
+  // Basin side, just above the coping, so cleats and fenders fill the frame.
+  camera.position.set(4.8, 1.28, 7.35);
+  controls.target.set(7.15, 0.62, 5.4);
+  controls.update();
+}
+if (params.get('shot') === 'batchpile') {
+  // Promenade side of the east pile. The water-side camera hides it behind the parapet.
+  camera.position.set(6.35, 0.72, 2.85);
+  controls.target.set(8.4, 0.28, 4.42);
+  controls.update();
+}
+if (params.get('shot') === 'batchdeck') {
+  camera.position.set(2.4, 0.92, 3.15);
+  controls.target.set(6.8, 0.48, 5.05);
   controls.update();
 }
 
