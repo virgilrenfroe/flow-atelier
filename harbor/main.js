@@ -4000,6 +4000,7 @@ function updateDebugHud(fps) {
 let frames = 0;
 let fpsAcc = 0;
 let fpsShow = 0;
+let fpsReady = false;
 const fpsEl = document.getElementById('fps');
 const motifEl = document.getElementById('motif');
 const bloomModeEl = document.getElementById('bloom-mode');
@@ -4091,6 +4092,7 @@ function tick() {
   fpsAcc += dt;
   if (fpsAcc >= 0.5) {
     fpsShow = Math.round(frames / fpsAcc);
+    fpsReady = true;
     fpsEl.textContent = String(fpsShow);
     frames = 0;
     fpsAcc = 0;
@@ -4098,7 +4100,7 @@ function tick() {
 
   if (perfMonitor) {
     perfMonitor.sample({
-      fps: fpsShow,
+      fps: fpsReady ? fpsShow : null,
       mode: citizen ? citizen.mode() : 'orbit',
     });
   }

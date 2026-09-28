@@ -66,7 +66,8 @@ export function createPerfMonitor({ renderer, tier, post }) {
   const chapterEl = document.getElementById('perf-chapter');
 
   let chapter = null;
-  let lastSwap = 'hooks live';
+  let lastMode = '';
+  let lastChapter = '';
   const totals = { chapter: 0, mode: 0, page: 0 };
 
   if (tierEl) tierEl.textContent = tier.id;
@@ -80,7 +81,7 @@ export function createPerfMonitor({ renderer, tier, post }) {
     if (prev == null) return;
     const n = emitDispose('chapter', { from: prev, to: next });
     totals.chapter += n;
-    lastSwap = 'chapter ' + prev + ' → ' + next;
+    lastChapter = 'chapter ' + prev + ' → ' + next + ' · ' + totals.chapter;
     paintDispose();
   }
 
@@ -88,14 +89,17 @@ export function createPerfMonitor({ renderer, tier, post }) {
     if (!from || from === to) return;
     const n = emitDispose('mode', { from, to });
     totals.mode += n;
-    lastSwap = 'mode ' + from + ' → ' + to;
+    lastMode = 'mode ' + from + ' → ' + to + ' · ' + totals.mode;
     paintDispose();
   }
 
   function paintDispose() {
     if (!disposeEl) return;
-    const n = totals.chapter + totals.mode;
-    disposeEl.textContent = lastSwap === 'hooks live' ? lastSwap : (lastSwap + ' · ' + n);
+    if (!lastMode && !lastChapter) {
+      disposeEl.textContent = 'hooks live';
+      return;
+    }
+    disposeEl.textContent = [lastMode, lastChapter].filter(Boolean).join('\n');
   }
 
   function sample(frame) {
