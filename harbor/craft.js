@@ -453,8 +453,16 @@ export function installHarborCraft(deps) {
   const harborStbdMat = new THREE.MeshStandardMaterial({
     color: 0x3dff7a, emissive: 0x1ec85a, emissiveIntensity: 1.6, roughness: 0.35,
   });
-  // Dock-line gauge. Thick enough to read in the lineup, still a rope on a skiff.
-  const HARBOR_ROPE_R = 0.062;
+  // Painter gauge, metres. Every hull on this berth is under 14 ft LOA
+  // (pram 1.32, tender 1.58, skiff 2.15, scow 2.60, launch 3.50, dory 4.15).
+  // West Marine, Orion Cordage, Anchoring.com, and Better Boat all chart
+  // boats through 20–27 ft at 3/8 in (9.5 mm), and call 3/8 in the minimum
+  // even when the 1/8-in-per-9-ft rule would go thinner. RHADC Bermuda
+  // splits the same way: 3/8 in through 17 ft. One size for the fleet.
+  const HARBOR_ROPE_D = 0.009525;
+  const HARBOR_ROPE_R = HARBOR_ROPE_D * 0.5;
+  // One turn of a three-strand lay is a handful of diameters, not a long smear.
+  const HARBOR_ROPE_LAY = HARBOR_ROPE_D * 7.5;
   const HARBOR_ROPE_RINGS = 26;
   const HARBOR_ROPE_RADIAL = 9;
   // Paid-out tail past the straight berth span. A settled hull hangs this
@@ -693,7 +701,7 @@ export function installHarborCraft(deps) {
         pos[o + 1] = pts[i].y + (ny * c + by * s) * radius;
         pos[o + 2] = pts[i].z + (nz * c + bz * s) * radius;
         const uo = (i * radial + j) * 2;
-        uv[uo] = arc / 0.2;
+        uv[uo] = arc / HARBOR_ROPE_LAY;
         uv[uo + 1] = j / radial;
       }
     }
