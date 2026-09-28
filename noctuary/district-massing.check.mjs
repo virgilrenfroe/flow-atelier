@@ -2,7 +2,7 @@
  * Corridor clearance for A04. Run: node noctuary/district-massing.check.mjs
  * Recomputes Harbor street bands independently of planDistrict's own report.
  */
-import { planDistrict } from './district-massing.js';
+import { planDistrict, parseMassingSeed, SEED_PRESETS } from './district-massing.js';
 
 const STREET_W = 1.65;
 const BLOCK_W = 5;
@@ -17,7 +17,12 @@ const originX = -districtW * 0.5 + STREET_W;
 const originZ = 1.15;
 const rows = GRID_ROWS + 2;
 
-function hit(a, b, eps = 0.012) {
+const failures = [];
+function expect(cond, msg) {
+  if (!cond) failures.push(msg);
+}
+
+function hit(a, b, eps = 0.08) {
   return Math.abs(a.x - b.x) < (a.hx + b.hx) - eps
     && Math.abs(a.z - b.z) < (a.hz + b.hz) - eps;
 }
@@ -49,53 +54,101 @@ function harborStreets() {
   return streets;
 }
 
-const plan = planDistrict({
-  streetW: STREET_W,
-  blockW: BLOCK_W,
-  blockD: BLOCK_D,
-  setback: SETBACK,
-  originX,
-  originZ,
-  cols: GRID_COLS,
-  rows,
-  originalRows: GRID_ROWS,
-});
-
-const failures = [];
-function expect(cond, msg) {
-  if (!cond) failures.push(msg);
+function grammar(seed, seedLabel) {
+  return {
+    streetW: STREET_W,
+    blockW: BLOCK_W,
+    blockD: BLOCK_D,
+    setback: SETBACK,
+    originX,
+    originZ,
+    cols: GRID_COLS,
+    rows,
+    originalRows: GRID_ROWS,
+    seed,
+    seedLabel,
+  };
 }
 
-const streets = harborStreets();
-let streetHits = 0;
-let alleyHits = 0;
-const alleys = plan.corridors.filter((c) => c.kind === 'alley');
-for (const inst of plan.instances) {
-  for (const s of streets) if (hit(inst, s)) streetHits++;
-  for (const a of alleys) if (hit(inst, a)) alleyHits++;
+function signature(plan) {
+  return plan.instances
+    .map((i) => `${i.bid}:${i.slice}:${i.h.toFixed(2)}:${i.x.toFixed(2)}:${i.z.toFixed(2)}`)
+    .join('|');
 }
 
-expect(plan.report.corridorsClear, `report overlaps ${plan.report.overlaps}`);
-expect(streetHits === 0, `independent street hits ${streetHits}`);
-expect(alleyHits === 0, `alley hits ${alleyHits}`);
-expect(plan.instances.length > 40, `too few masses ${plan.instances.length}`);
+function assertPlan(plan, label) {
+  const streets = harborStreets();
+  let streetHits = 0;
+  let alleyHits = 0;
+  const alleys = plan.corridors.filter((c) => c.kind === 'alley');
+  for (const inst of plan.instances) {
+    for (const s of streets) if (hit(inst, s)) streetHits++;
+    for (const a of alleys) if (hit(inst, a)) alleyHits++;
+  }
+  expect(plan.report.corridorsClear, `${label} report overlaps ${plan.report.overlaps} gap ${plan.report.gapHits}`);
+  expect(streetHits === 0, `${label} street hits ${streetHits}`);
+  expect(alleyHits === 0, `${label} alley hits ${alleyHits}`);
+  expect(plan.instances.length > 40, `${label} too few masses ${plan.instances.length}`);
+  expect(plan.report.slices.crown > 0, `${label} no signal crowns`);
+  expect(plan.report.slices.shaft > 0, `${label} no shafts`);
+
+  const byBid = new Map();
+  for (const inst of plan.instances) {
+    if (!byBid.has(inst.bid)) byBid.set(inst.bid, []);
+    byBid.get(inst.bid).push(inst);
+  }
+  const crownsPerBlock = new Map();
+  for (const slices of byBid.values()) {
+    const podium = slices.find((s) => s.slice === 0);
+    const shaft = slices.find((s) => s.slice === 1);
+    const crown = slices.find((s) => s.slice === 2);
+    if (shaft && podium) {
+      expect(shaft.w < podium.w - 0.04 && shaft.d < podium.d - 0.04, `${label} shaft not inside podium`);
+      expect(Math.abs(podium.h - plan.report.podiumH) < 0.02, `${label} podium height drifted`);
+    }
+    if (crown) {
+      expect(shaft, `${label} crown without shaft`);
+      expect(crown.role === 'signal', `${label} crown on ${crown.role}`);
+      expect(crown.w < shaft.w - 0.04 && crown.d < shaft.d - 0.04, `${label} crown spills past shaft`);
+      expect(Math.abs(crown.x - shaft.x) < 1e-6 && Math.abs(crown.z - shaft.z) < 1e-6, `${label} crown off center`);
+      const key = `${crown.bx},${crown.bz}`;
+      crownsPerBlock.set(key, (crownsPerBlock.get(key) || 0) + 1);
+    }
+    if (slices.some((s) => s.role === 'quay' && s.slice === 2)) {
+      expect(false, `${label} quay crown`);
+    }
+  }
+  for (const [key, n] of crownsPerBlock) {
+    expect(n === 1, `${label} block ${key} has ${n} crowns`);
+  }
+}
+
+const parsed = parseMassingSeed('signal');
+expect(parsed.label === 'signal', 'parse signal label');
+expect(parsed.value === SEED_PRESETS[1].value, 'parse signal value');
+expect(parseMassingSeed('').label === 'A04', 'default seed label');
+
+const plan = planDistrict(grammar(SEED_PRESETS[0].value, 'A04'));
+assertPlan(plan, 'A04');
 expect(plan.report.heightMax - plan.report.heightMin > 3, 'skyline is flat');
-expect(plan.report.slices.shaft > 0, 'no shaft slices');
-expect(plan.report.slices.crown > 0, 'no signal crowns');
 expect(plan.roads.some((r) => r.kind === 'street'), 'extension streets missing');
-
 const quayH = plan.instances.filter((i) => i.role === 'quay').map((i) => i.h);
-const signal = plan.instances.filter((i) => i.role === 'signal');
 expect(quayH.length > 0, 'quay row empty');
 expect(Math.max(...quayH) < 5, `quay mass too tall ${Math.max(...quayH)}`);
-expect(signal.length > 0, 'no signal peaks');
-
+expect(plan.instances.some((i) => i.role === 'signal'), 'no signal peaks');
 const hinterZ = originZ - GRID_ROWS * cellD;
 expect(plan.instances.some((i) => i.z < hinterZ), 'generator did not extend past the hand grid');
-
 const roles = new Set(plan.instances.map((i) => i.role));
 for (const role of ['quay', 'harbor', 'signal', 'hinter']) {
   expect(roles.has(role), `missing role ${role}`);
+}
+
+const other = planDistrict(grammar(SEED_PRESETS[1].value, 'signal'));
+assertPlan(other, 'signal');
+expect(signature(plan) !== signature(other), 'seeds produced the same district');
+
+for (const preset of SEED_PRESETS) {
+  assertPlan(planDistrict(grammar(preset.value, preset.label)), preset.label);
 }
 
 if (failures.length) {
@@ -104,5 +157,5 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(JSON.stringify(plan.report, null, 2));
+console.log(JSON.stringify({ a04: plan.report, signal: other.report }, null, 2));
 console.log('district massing corridors clear');

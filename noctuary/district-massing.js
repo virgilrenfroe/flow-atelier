@@ -16,9 +16,44 @@
  */
 
 const BASE_Y = 0.06;
-const ALLEY_W = 0.7;
+const ALLEY_W = 1.16;
+const MASK_INSET = 0.52;
+const MASK_GAP = 0.14;
 const MIN_FACE = 0.72;
-const PODIUM_H = 1.42;
+const PODIUM_H = 1.48;
+const CROWN_H = 0.92;
+
+/** Default district seed. Presets are the HUD stepper. */
+export const DEFAULT_SEED = 0x413034;
+export const SEED_PRESETS = [
+  { label: 'A04', value: 0x413034 },
+  { label: 'signal', value: 0x51a7a1 },
+  { label: 'quay', value: 0x0c0a11 },
+  { label: 'fenestra', value: 0xf3e57a },
+];
+
+/**
+ * URL or typed seed. Digits are taken as a uint. Any other token is hashed
+ * so `?seed=signal` is stable and distinct from `?seed=quay`.
+ */
+export function parseMassingSeed(raw) {
+  if (raw == null || String(raw).trim() === '') {
+    return { value: DEFAULT_SEED, label: 'A04' };
+  }
+  const s = String(raw).trim().slice(0, 24);
+  const preset = SEED_PRESETS.find((p) => p.label.toLowerCase() === s.toLowerCase());
+  if (preset) return { value: preset.value, label: preset.label };
+  if (/^[0-9]+$/.test(s)) {
+    const n = Number(s);
+    if (Number.isFinite(n)) return { value: n >>> 0, label: String(n >>> 0) };
+  }
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return { value: h >>> 0, label: s };
+}
 
 const TINT = {
   warm: 0xc47a4a,
@@ -28,8 +63,10 @@ const TINT = {
   teal: 0x3a6e78,
 };
 
-function hash2(ix, iz) {
-  let n = Math.imul(ix | 0, 374761393) + Math.imul(iz | 0, 668265263);
+function hash2(ix, iz, seed = 0) {
+  let n = Math.imul(ix | 0, 374761393)
+    + Math.imul(iz | 0, 668265263)
+    + Math.imul(seed | 0, 1442695041);
   n = (n ^ (n >>> 13)) >>> 0;
   n = Math.imul(n, 1274126177);
   return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
@@ -40,26 +77,26 @@ function fade(t) {
 }
 
 /** Value noise in 0..1. Stable for negative district coordinates. */
-export function valueNoise(x, z) {
+export function valueNoise(x, z, seed = 0) {
   const ix = Math.floor(x);
   const iz = Math.floor(z);
   const fx = fade(x - ix);
   const fz = fade(z - iz);
-  const a = hash2(ix, iz);
-  const b = hash2(ix + 1, iz);
-  const c = hash2(ix, iz + 1);
-  const d = hash2(ix + 1, iz + 1);
+  const a = hash2(ix, iz, seed);
+  const b = hash2(ix + 1, iz, seed);
+  const c = hash2(ix, iz + 1, seed);
+  const d = hash2(ix + 1, iz + 1, seed);
   return a + (b - a) * fx + (c - a) * fz * (1 - fx) + (d - b) * fx * fz;
 }
 
-/** Fractional Brownian motion, normalized to 0..1. */
-export function fbm(x, z) {
+/** Fractional Brownian motion, normalized to 0..1. `seed` shifts the field. */
+export function fbm(x, z, seed = 0) {
   let v = 0;
   let a = 0.5;
   let f = 1;
   let sum = 0;
   for (let i = 0; i < 5; i++) {
-    v += a * valueNoise(x * f, z * f);
+    v += a * valueNoise(x * f, z * f, seed);
     sum += a;
     f *= 2.03;
     a *= 0.5;
@@ -141,8 +178,11 @@ function resolveGrammar(options) {
     rows,
     originalRows,
     alleyW: options.alleyW ?? ALLEY_W,
+    inset: Math.max(options.setback ?? 0.32, MASK_INSET),
     cellW: blockW + streetW,
     cellD: blockD + streetW,
+    seed: options.seed == null ? DEFAULT_SEED : (options.seed >>> 0),
+    seedLabel: options.seedLabel || null,
   };
 }
 
@@ -150,11 +190,47 @@ function heightFor(bz, rows, broad, lot) {
   const n = clamp01(broad * 0.58 + lot * 0.42);
   const quay = bz === 0;
   const hinter = bz >= rows - 2;
-  const peak = !quay && !hinter && broad > 0.62 && lot > 0.66;
-  if (quay) return { h: 1.35 + n * 2.5, n, peak: false, role: 'quay' };
-  if (peak) return { h: 7.4 + ((broad + lot) * 0.5 - 0.64) * 14, n, peak: true, role: 'signal' };
-  if (hinter) return { h: 1.85 + n * 4.8, n, peak: false, role: 'hinter' };
-  return { h: 2.15 + n * 5.6, n, peak: false, role: 'harbor' };
+  // A block ridge, not a lot coin-flip: neighbors in the ridge all rise,
+  // and only the tallest lot in the block is allowed a crown later.
+  const peak = !quay && !hinter && broad > 0.52;
+  if (quay) return { h: 1.45 + n * 2.15, n, peak: false, role: 'quay' };
+  if (peak) return { h: 7.7 + lot * 2.4, n, peak: true, role: 'signal' };
+  if (hinter) return { h: 1.9 + n * 4.1, n, peak: false, role: 'hinter' };
+  return { h: 2.3 + n * 4.8, n, peak: false, role: 'harbor' };
+}
+
+/** True when the footprint, grown by `gap`, still misses every corridor. */
+function clearsCorridors(inst, corridors, gap) {
+  const probe = {
+    x: inst.x,
+    z: inst.z,
+    hx: inst.w * 0.5 + gap,
+    hz: inst.d * 0.5 + gap,
+  };
+  for (const cor of corridors) {
+    if (aabbHit(probe, cor, 0)) return false;
+  }
+  return true;
+}
+
+/** Shrink toward center until the hard mask holds. Returns false if it cannot. */
+function clampFootprint(inst, corridors, gap) {
+  let w = inst.w;
+  let d = inst.d;
+  for (let i = 0; i < 7; i++) {
+    const trial = { x: inst.x, z: inst.z, w, d };
+    if (w >= 0.4 && d >= 0.4 && clearsCorridors(trial, corridors, gap)) {
+      inst.w = w;
+      inst.d = d;
+      inst.hx = w * 0.5;
+      inst.hz = d * 0.5;
+      return true;
+    }
+    w *= 0.9;
+    d *= 0.9;
+    if (w < 0.4 || d < 0.4) return false;
+  }
+  return false;
 }
 
 function tintFor(role, slice, n) {
@@ -187,6 +263,9 @@ function pushSlice(instances, spec) {
     seed: spec.seed,
     color: spec.color,
     role: spec.role,
+    bx: spec.bx,
+    bz: spec.bz,
+    bid: spec.bid,
     hx: spec.w * 0.5,
     hz: spec.d * 0.5,
   });
@@ -269,8 +348,11 @@ export function planDistrict(options = {}) {
       const b = blockRect(bx, bz, g);
       const midX = (b.x0 + b.x1) * 0.5;
       const midZ = (b.z0 + b.z1) * 0.5;
-      const broad = fbm(midX * 0.045 + 1.7, midZ * 0.05 - 0.8);
-      const crossAlley = bz === 0 ? broad > 0.8 : broad > 0.56;
+      const seed = g.seed;
+      const broad = fbm(midX * 0.045 + 1.7, midZ * 0.05 - 0.8, seed);
+      // Quay row keeps one deep shed each side of the north–south alley.
+      // Every other block is cut both ways so the cross stays readable.
+      const crossAlley = bz !== 0;
       corridors.push({
         kind: 'alley',
         axis: 'z',
@@ -280,17 +362,15 @@ export function planDistrict(options = {}) {
         hz: (b.z1 - b.z0) * 0.5,
       });
       alleys++;
-      if (bz >= g.originalRows) {
-        roads.push({
-          kind: 'alley',
-          x: midX,
-          z: midZ,
-          len: b.z1 - b.z0 - 0.04,
-          width: g.alleyW,
-          rotY: Math.PI / 2,
-          y: 0.014,
-        });
-      }
+      roads.push({
+        kind: 'alley',
+        x: midX,
+        z: midZ,
+        len: (b.z1 - b.z0) - 0.16,
+        width: g.alleyW,
+        rotY: Math.PI / 2,
+        y: 0.078,
+      });
       if (crossAlley) {
         corridors.push({
           kind: 'alley',
@@ -301,29 +381,27 @@ export function planDistrict(options = {}) {
           hz: g.alleyW * 0.5,
         });
         alleys++;
-        if (bz >= g.originalRows) {
-          roads.push({
-            kind: 'alley',
-            x: midX,
-            z: midZ,
-            len: b.x1 - b.x0 - 0.04,
-            width: g.alleyW,
-            rotY: 0,
-            y: 0.015,
-          });
-        }
+        roads.push({
+          kind: 'alley',
+          x: midX,
+          z: midZ,
+          len: (b.x1 - b.x0) - 0.16,
+          width: g.alleyW,
+          rotY: 0,
+          y: 0.086,
+        });
       }
 
       const xSpans = [
-        [b.x0 + g.setback, midX - g.alleyW * 0.5],
-        [midX + g.alleyW * 0.5, b.x1 - g.setback],
+        [b.x0 + g.inset, midX - g.alleyW * 0.5],
+        [midX + g.alleyW * 0.5, b.x1 - g.inset],
       ];
       const zSpans = crossAlley
         ? [
-          [b.z0 + g.setback, midZ - g.alleyW * 0.5],
-          [midZ + g.alleyW * 0.5, b.z1 - g.setback],
+          [b.z0 + g.inset, midZ - g.alleyW * 0.5],
+          [midZ + g.alleyW * 0.5, b.z1 - g.inset],
         ]
-        : [[b.z0 + g.setback, b.z1 - g.setback]];
+        : [[b.z0 + g.inset, b.z1 - g.inset]];
 
       const parcels = [];
       for (let iz = 0; iz < zSpans.length; iz++) {
@@ -335,8 +413,8 @@ export function planDistrict(options = {}) {
           if (w < 0.7 || d < 0.7) continue;
           const cx = (xs[0] + xs[1]) * 0.5;
           const cz = (zs[0] + zs[1]) * 0.5;
-          const lot = fbm(cx * 0.19 + 8.2, cz * 0.17 + 3.4);
-          const occ = fbm(cx * 0.27 + 40, cz * 0.23 - 6);
+          const lot = fbm(cx * 0.19 + 8.2, cz * 0.17 + 3.4, seed);
+          const occ = fbm(cx * 0.27 + 40, cz * 0.23 - 6, seed);
           parcels.push({ x0: xs[0], x1: xs[1], z0: zs[0], z1: zs[1], w, d, cx, cz, lot, occ });
         }
       }
@@ -360,81 +438,102 @@ export function planDistrict(options = {}) {
           courts++;
           continue;
         }
-        const foot = fbm(parcel.cx * 0.31 - 2.2, parcel.cz * 0.29 + 5.5);
+        const foot = fbm(parcel.cx * 0.31 - 2.2, parcel.cz * 0.29 + 5.5, seed);
         const sized = fitFootprint(
           parcel,
-          parcel.w * (0.76 + 0.2 * foot),
-          parcel.d * (0.74 + 0.22 * (1 - foot)),
+          parcel.w * (0.8 + 0.12 * foot),
+          parcel.d * (0.78 + 0.14 * (1 - foot)),
         );
         const sample = heightFor(bz, g.rows, broad, parcel.lot);
-        const h = Math.max(1.2, sample.h);
-        const seed = fbm(parcel.cx * 0.07 + 2, parcel.cz * 0.07);
+        const h = Math.max(1.25, sample.h);
+        const paneSeed = fbm(parcel.cx * 0.07 + 2, parcel.cz * 0.07, seed);
+        parcel.sample = sample;
+        parcel.sized = sized;
+        parcel.h = h;
+        parcel.paneSeed = paneSeed;
+      }
+
+      // One Signal crown per block: the tallest peak only.
+      let crownParcel = null;
+      for (const parcel of parcels) {
+        if (!parcel.sample || !parcel.sample.peak) continue;
+        if (!crownParcel || parcel.h > crownParcel.h) crownParcel = parcel;
+      }
+
+      let bid = buildings;
+      for (const parcel of parcels) {
+        if (!parcel.sample) continue;
+        const { sample, sized, paneSeed } = parcel;
+        const h = parcel.h;
         const role = sample.role;
+        bid += 1;
+        const common = {
+          x: parcel.cx,
+          z: parcel.cz,
+          seed: paneSeed,
+          role,
+          bx,
+          bz,
+          bid,
+        };
+        const slices = [];
+        const canStack = h >= PODIUM_H + 2.2 && role !== 'quay';
+        if (!canStack) {
+          slices.push({ ...common, y: BASE_Y, w: sized.fw, h, d: sized.fd, slice: 0, color: tintFor(role, 0, sample.n) });
+        } else {
+          const wantCrown = parcel === crownParcel && h >= PODIUM_H + 2.4 + CROWN_H;
+          const crownH = wantCrown ? CROWN_H : 0;
+          const shaftH = h - PODIUM_H - crownH;
+          if (shaftH < 2.2) {
+            slices.push({ ...common, y: BASE_Y, w: sized.fw, h, d: sized.fd, slice: 0, color: tintFor(role, 0, sample.n) });
+          } else {
+            slices.push({
+              ...common,
+              y: BASE_Y,
+              w: sized.fw,
+              h: PODIUM_H,
+              d: sized.fd,
+              slice: 0,
+              color: tintFor(role, 0, sample.n),
+            });
+            const shaft = fitFootprint(parcel, sized.fw * 0.7, sized.fd * 0.7);
+            const shaftW = Math.min(shaft.fw, sized.fw * 0.7);
+            const shaftD = Math.min(shaft.fd, sized.fd * 0.7);
+            slices.push({
+              ...common,
+              y: BASE_Y + PODIUM_H,
+              w: shaftW,
+              h: shaftH,
+              d: shaftD,
+              slice: 1,
+              color: tintFor(role, 1, sample.n),
+            });
+            if (wantCrown && shaftW > 0.64 && shaftD > 0.64) {
+              const crownW = shaftW * 0.72;
+              const crownD = shaftD * 0.72;
+              slices.push({
+                ...common,
+                y: BASE_Y + PODIUM_H + shaftH,
+                w: crownW,
+                h: crownH,
+                d: crownD,
+                slice: 2,
+                color: tintFor(role, 2, sample.n),
+              });
+            }
+          }
+        }
+
+        let kept = 0;
+        for (const slice of slices) {
+          if (!clampFootprint(slice, corridors, MASK_GAP)) continue;
+          pushSlice(instances, slice);
+          kept++;
+        }
+        if (!kept) continue;
         buildings++;
         heightMin = Math.min(heightMin, h);
         heightMax = Math.max(heightMax, h);
-
-        const sliced = h >= 3.6;
-        const crowned = sample.peak && h >= 7.2;
-        if (!sliced) {
-          pushSlice(instances, {
-            x: parcel.cx,
-            y: BASE_Y,
-            z: parcel.cz,
-            w: sized.fw,
-            h,
-            d: sized.fd,
-            slice: 0,
-            seed,
-            color: tintFor(role, 0, sample.n),
-            role,
-          });
-          continue;
-        }
-        const podiumH = Math.min(PODIUM_H, h * 0.42);
-        pushSlice(instances, {
-          x: parcel.cx,
-          y: BASE_Y,
-          z: parcel.cz,
-          w: sized.fw,
-          h: podiumH,
-          d: sized.fd,
-          slice: 0,
-          seed,
-          color: tintFor(role, 0, sample.n),
-          role,
-        });
-        let remain = h - podiumH;
-        const crownH = crowned ? Math.min(1.05, remain * 0.24) : 0;
-        const shaftH = Math.max(0.8, remain - crownH);
-        const shaft = fitFootprint(parcel, sized.fw * 0.74, sized.fd * 0.74);
-        pushSlice(instances, {
-          x: parcel.cx,
-          y: BASE_Y + podiumH,
-          z: parcel.cz,
-          w: shaft.fw,
-          h: shaftH,
-          d: shaft.fd,
-          slice: 1,
-          seed,
-          color: tintFor(role, 1, sample.n),
-          role,
-        });
-        if (crownH > 0.45) {
-          const crown = fitFootprint(parcel, sized.fw * 0.48, sized.fd * 0.48);
-          pushSlice(instances, {
-            x: parcel.cx,
-            y: BASE_Y + podiumH + shaftH,
-            z: parcel.cz,
-            w: crown.fw,
-            h: crownH,
-            d: crown.fd,
-            slice: 2,
-            seed,
-            color: tintFor(role, 2, sample.n),
-            role,
-          });
-        }
       }
     }
   }
@@ -455,8 +554,17 @@ export function planDistrict(options = {}) {
     }
   }
 
+  let gapHits = 0;
+  for (const inst of instances) {
+    if (!clearsCorridors(inst, corridors, MASK_GAP)) gapHits++;
+  }
+
+  const preset = SEED_PRESETS.find((p) => p.value === g.seed);
   const report = {
-    seed: 'A04-harbor',
+    seed: g.seed,
+    seedLabel: g.seedLabel || (preset ? preset.label : String(g.seed >>> 0)),
+    maskGap: MASK_GAP,
+    podiumH: PODIUM_H,
     cols: g.cols,
     rows: g.rows,
     originalRows: g.originalRows,
@@ -466,8 +574,9 @@ export function planDistrict(options = {}) {
     alleys,
     streets: streets.length,
     extensionSurfaces: roads.length,
-    corridorsClear: overlaps === 0,
+    corridorsClear: overlaps === 0 && gapHits === 0,
     overlaps,
+    gapHits,
     overlapSamples,
     heightMin: Number.isFinite(heightMin) ? heightMin : 0,
     heightMax,
@@ -610,125 +719,185 @@ const MASS_FRAG = /* glsl */`
 /**
  * Build the InstancedMesh district. `THREE` is passed in so this module
  * stays free of a hard import (Harbor's import map owns the three build).
+ * Meshes and materials are created on enable and disposed on disable or reseed.
  */
 export function createDistrictMassing(THREE, options = {}) {
-  const plan = planDistrict(options);
   const group = new THREE.Group();
   group.name = 'harbor-district-massing';
   group.visible = false;
 
-  const asphalt = new THREE.MeshBasicMaterial({ color: 0x0a0c12 });
-  const dashMat = new THREE.MeshBasicMaterial({ color: 0x6a6244 });
-  const alleyMat = new THREE.MeshBasicMaterial({ color: 0x10131a });
-  const padMat = new THREE.MeshBasicMaterial({ color: 0x14171e });
-  const courtMat = new THREE.MeshBasicMaterial({ color: 0x0c0e14 });
+  const opts = { ...options };
+  if (opts.seed == null) opts.seed = DEFAULT_SEED;
+  let plan = null;
+  let mat = null;
+  let builds = 0;
+  const ownedGeo = new Set();
+  const ownedMat = new Set();
 
-  const roadList = plan.roads.filter((r) => r.kind === 'street');
-  const dashList = plan.roads.filter((r) => r.kind === 'dash');
-  const alleyList = plan.roads.filter((r) => r.kind === 'alley');
-  const dummy = new THREE.Object3D();
-
-  function fillPlanes(list, material) {
-    if (!list.length) return null;
-    const geo = new THREE.PlaneGeometry(1, 1);
-    const mesh = new THREE.InstancedMesh(geo, material, list.length);
-    mesh.frustumCulled = false;
-    list.forEach((r, i) => {
-      dummy.position.set(r.x, r.y, r.z);
-      dummy.rotation.set(-Math.PI / 2, 0, r.rotY);
-      dummy.scale.set(r.len, r.width, 1);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.count = list.length;
-    group.add(mesh);
-    return mesh;
+  function trackGeo(geo) {
+    ownedGeo.add(geo);
+    return geo;
   }
 
-  fillPlanes(roadList, asphalt);
-  fillPlanes(dashList, dashMat);
-  fillPlanes(alleyList, alleyMat);
+  function trackMat(material) {
+    ownedMat.add(material);
+    return material;
+  }
 
-  if (plan.pads.length) {
-    const courts = plan.pads.filter((p) => p.court);
-    const lots = plan.pads.filter((p) => !p.court);
-    const geo = new THREE.BoxGeometry(1, 1, 1);
-    geo.translate(0, 0.5, 0);
-    const addPads = (list, material) => {
+  function destroyGpu() {
+    for (const child of group.children.slice()) {
+      group.remove(child);
+    }
+    for (const geo of ownedGeo) geo.dispose();
+    ownedGeo.clear();
+    for (const material of ownedMat) material.dispose();
+    ownedMat.clear();
+    mat = null;
+    plan = null;
+  }
+
+  function build() {
+    destroyGpu();
+    plan = planDistrict(opts);
+    builds += 1;
+    const asphalt = trackMat(new THREE.MeshBasicMaterial({ color: 0x0a0c12 }));
+    const dashMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x6a6244 }));
+    const alleyMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x07080e }));
+    const padMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x14171e }));
+    const courtMat = trackMat(new THREE.MeshBasicMaterial({ color: 0x0c0e14 }));
+    const dummy = new THREE.Object3D();
+
+    function fillPlanes(list, material) {
       if (!list.length) return;
+      const geo = trackGeo(new THREE.PlaneGeometry(1, 1));
       const mesh = new THREE.InstancedMesh(geo, material, list.length);
       mesh.frustumCulled = false;
-      list.forEach((p, i) => {
-        dummy.position.set(p.x, 0.02, p.z);
-        dummy.rotation.set(0, 0, 0);
-        dummy.scale.set(p.w, 0.04, p.d);
+      list.forEach((r, i) => {
+        dummy.position.set(r.x, r.y, r.z);
+        dummy.rotation.set(-Math.PI / 2, 0, r.rotY);
+        dummy.scale.set(r.len, r.width, 1);
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
       });
       mesh.instanceMatrix.needsUpdate = true;
       mesh.count = list.length;
       group.add(mesh);
-    };
-    addPads(lots, padMat);
-    addPads(courts, courtMat);
-  }
+    }
 
-  const n = plan.instances.length;
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  geo.translate(0, 0.5, 0);
-  const sliceAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
-  const seedAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
-  geo.setAttribute('aSlice', sliceAttr);
-  geo.setAttribute('aSeed', seedAttr);
+    fillPlanes(plan.roads.filter((r) => r.kind === 'street'), asphalt);
+    fillPlanes(plan.roads.filter((r) => r.kind === 'dash'), dashMat);
+    fillPlanes(plan.roads.filter((r) => r.kind === 'alley'), alleyMat);
 
-  const mat = new THREE.ShaderMaterial({
-    uniforms: {
-      uTime: { value: 0 },
-      uLive: { value: options.live === 0 ? 0 : 1 },
-      uFogColor: { value: new THREE.Color(0x05060a) },
-      uFogDensity: { value: 0.018 },
-    },
-    vertexShader: MASS_VERT,
-    fragmentShader: MASS_FRAG,
-  });
+    if (plan.pads.length) {
+      const addPads = (list, material) => {
+        if (!list.length) return;
+        const geo = trackGeo(new THREE.BoxGeometry(1, 1, 1));
+        geo.translate(0, 0.5, 0);
+        const mesh = new THREE.InstancedMesh(geo, material, list.length);
+        mesh.frustumCulled = false;
+        list.forEach((p, i) => {
+          dummy.position.set(p.x, 0.02, p.z);
+          dummy.rotation.set(0, 0, 0);
+          dummy.scale.set(p.w, 0.04, p.d);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.count = list.length;
+        group.add(mesh);
+      };
+      addPads(plan.pads.filter((p) => !p.court), padMat);
+      addPads(plan.pads.filter((p) => p.court), courtMat);
+    }
 
-  const mesh = new THREE.InstancedMesh(geo, mat, Math.max(1, n));
-  mesh.name = 'harbor-district-mass';
-  mesh.frustumCulled = false;
-  mesh.count = n;
-  const color = new THREE.Color();
-  plan.instances.forEach((inst, i) => {
-    dummy.position.set(inst.x, inst.y, inst.z);
-    dummy.rotation.set(0, 0, 0);
-    dummy.scale.set(inst.w, inst.h, inst.d);
-    dummy.updateMatrix();
-    mesh.setMatrixAt(i, dummy.matrix);
-    color.setHex(inst.color);
-    mesh.setColorAt(i, color);
-    sliceAttr.setX(i, inst.slice);
-    seedAttr.setX(i, inst.seed);
-  });
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-  sliceAttr.needsUpdate = true;
-  seedAttr.needsUpdate = true;
-  group.add(mesh);
+    const n = Math.max(1, plan.instances.length);
+    const geo = trackGeo(new THREE.BoxGeometry(1, 1, 1));
+    geo.translate(0, 0.5, 0);
+    const sliceAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+    const seedAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+    geo.setAttribute('aSlice', sliceAttr);
+    geo.setAttribute('aSeed', seedAttr);
 
-  if (!plan.report.corridorsClear) {
-    console.warn('Harbor district massing overlaps a corridor', plan.report.overlapSamples);
+    mat = trackMat(new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uLive: { value: opts.live === 0 ? 0 : 1 },
+        uFogColor: { value: new THREE.Color(0x05060a) },
+        uFogDensity: { value: 0.018 },
+      },
+      vertexShader: MASS_VERT,
+      fragmentShader: MASS_FRAG,
+    }));
+
+    const mesh = new THREE.InstancedMesh(geo, mat, n);
+    mesh.name = 'harbor-district-mass';
+    mesh.frustumCulled = false;
+    mesh.count = plan.instances.length;
+    const color = new THREE.Color();
+    plan.instances.forEach((inst, i) => {
+      dummy.position.set(inst.x, inst.y, inst.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.set(inst.w, inst.h, inst.d);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      color.setHex(inst.color);
+      mesh.setColorAt(i, color);
+      sliceAttr.setX(i, inst.slice);
+      seedAttr.setX(i, inst.seed);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    sliceAttr.needsUpdate = true;
+    seedAttr.needsUpdate = true;
+    group.add(mesh);
+
+    if (plan.report && !plan.report.corridorsClear) {
+      console.warn('Harbor district massing overlaps a corridor', plan.report.overlapSamples);
+    }
   }
 
   return {
     group,
-    mesh,
-    plan,
-    report: plan.report,
+    get plan() { return plan; },
+    get report() {
+      if (!plan) {
+        return {
+          seed: opts.seed,
+          seedLabel: opts.seedLabel || String(opts.seed >>> 0),
+          disposed: true,
+          builds,
+          instances: 0,
+          corridorsClear: true,
+        };
+      }
+      return { ...plan.report, builds, disposed: false };
+    },
+    get builds() { return builds; },
     setEnabled(on) {
-      group.visible = !!on;
+      if (on) {
+        if (!plan) build();
+        group.visible = true;
+      } else {
+        group.visible = false;
+        destroyGpu();
+      }
+    },
+    setSeed(seed, label) {
+      const next = seed >>> 0;
+      opts.seed = next;
+      opts.seedLabel = label || null;
+      if (group.visible || plan) {
+        const show = group.visible;
+        build();
+        group.visible = show;
+      }
+    },
+    dispose() {
+      group.visible = false;
+      destroyGpu();
     },
     update(t) {
-      mat.uniforms.uTime.value = t;
+      if (mat) mat.uniforms.uTime.value = t;
     },
   };
 }

@@ -125,6 +125,43 @@
   }
   #props-actions .pill:hover { border-color: rgba(240,194,75,0.45); color: var(--accent); }
   #props-actions .pill.on { border-color: rgba(240,194,75,0.5); color: var(--accent); }
+  /* A04 seed — only while procedural massing is on. Outside .layer so exhibit can still reach it. */
+  #massing-seed {
+    position: fixed;
+    left: 50%;
+    bottom: 18px;
+    transform: translateX(-50%);
+    z-index: 24;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    pointer-events: auto;
+  }
+  #massing-seed.show { display: flex; }
+  #massing-seed button,
+  #massing-seed input {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--paper);
+    background: rgba(5,6,10,0.72);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 8px 12px;
+    backdrop-filter: blur(12px);
+  }
+  #massing-seed button { cursor: pointer; }
+  #massing-seed button:hover,
+  #massing-seed input:focus {
+    border-color: rgba(240,194,75,0.55);
+    color: var(--accent);
+    outline: none;
+  }
+  #massing-seed input {
+    width: 11ch;
+    text-align: center;
+  }
   /* Touch strip extras (Hud, Walk, Tour, wind dir/strength). Desktop keeps keys. */
   #props-actions .touch-only { display: none; }
   #walk-pad {
@@ -275,6 +312,11 @@
     <button class="pill on" id="props-springs" type="button" title="Toggle soft springs (G)" aria-pressed="true">Springs</button>
     <button class="pill" id="props-blast" type="button" title="Basin blast impulse (B)">Blast</button>
   </div>
+  <div id="massing-seed" aria-label="District seed">
+    <button type="button" id="massing-seed-prev" title="Previous seed (J)">−</button>
+    <input id="massing-seed-input" type="text" maxlength="24" spellcheck="false" autocomplete="off" aria-label="District seed" value="A04" />
+    <button type="button" id="massing-seed-next" title="Next seed (K)">+</button>
+  </div>
   <div id="walk-pad" aria-label="Citizen move">
     <button type="button" data-move="f" aria-label="Forward">▲</button>
     <button type="button" data-move="l" aria-label="Strafe left">◀</button>
@@ -299,7 +341,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as CANNON from 'cannon-es';
-import { createDistrictMassing } from './noctuary/district-massing.js';
+import { createDistrictMassing, parseMassingSeed, SEED_PRESETS } from './noctuary/district-massing.js';
 
 const params = new URLSearchParams(location.search);
 let debugMode = params.has('debug'); // ?debug or ?debug=1; D toggles
@@ -469,6 +511,12 @@ window.addEventListener('keydown', (e) => {
   }
   if ((e.key === 'p' || e.key === 'P') && !e.repeat) {
     window.dispatchEvent(new CustomEvent('noctuary-massing-toggle'));
+  }
+  if ((e.key === 'j' || e.key === 'J') && !e.repeat) {
+    window.dispatchEvent(new CustomEvent('noctuary-massing-seed', { detail: -1 }));
+  }
+  if ((e.key === 'k' || e.key === 'K') && !e.repeat) {
+    window.dispatchEvent(new CustomEvent('noctuary-massing-seed', { detail: 1 }));
   }
   if (e.key === ',' || e.key === '<') {
     window.dispatchEvent(new CustomEvent('noctuary-wind-dir', { detail: -1 }));
@@ -2482,8 +2530,9 @@ window.__harborStrands = {
 };
 
 // A04 · procedural district massing. Off unless ?generate=1 / ?massing=1 or P.
-// Hides the hand-placed building mesh while on so the two masses do not stack.
-// Street atlas, prop wear, and cannon bodies are left alone.
+// Hand-placed mesh hides only while the generator is on. Turning it off
+// disposes the generated meshes. Street atlas, prop wear, and cannon stay put.
+const massingSeed0 = parseMassingSeed(params.get('seed'));
 const districtMassing = createDistrictMassing(THREE, {
   streetW: STREET_W,
   blockW: BLOCK_W,
@@ -2495,22 +2544,105 @@ const districtMassing = createDistrictMassing(THREE, {
   rows: GRID_ROWS + 2,
   originalRows: GRID_ROWS,
   live: freezeMotion ? 0 : 1,
+  seed: massingSeed0.value,
+  seedLabel: massingSeed0.label,
 });
 scene.add(districtMassing.group);
 let massingOn = params.get('generate') === '1' || params.get('massing') === '1';
+const massingSeedInput = document.getElementById('massing-seed-input');
+const massingSeedBar = document.getElementById('massing-seed');
+if (massingSeedInput) massingSeedInput.value = massingSeed0.label;
+
+function publishMassing() {
+  if (massingSeedBar) massingSeedBar.classList.toggle('show', massingOn);
+  if (massingSeedInput && document.activeElement !== massingSeedInput) {
+    const label = districtMassing.report && districtMassing.report.seedLabel;
+    if (label) massingSeedInput.value = label;
+  }
+  window.__harborMassing = {
+    on: massingOn,
+    handHidden: !mesh.visible,
+    generatedVisible: districtMassing.group.visible,
+    childCount: districtMassing.group.children.length,
+    ...districtMassing.report,
+  };
+}
+
+function rememberMassingQuery() {
+  try {
+    const url = new URL(location.href);
+    if (massingOn) {
+      url.searchParams.set('generate', '1');
+      url.searchParams.delete('massing');
+      const label = massingSeedInput ? massingSeedInput.value.trim() : '';
+      if (label) url.searchParams.set('seed', label);
+    } else {
+      url.searchParams.delete('generate');
+      url.searchParams.delete('massing');
+    }
+    history.replaceState(null, '', url);
+  } catch (_) {}
+}
+
 function applyDistrictMassing(on) {
   massingOn = !!on;
-  districtMassing.setEnabled(massingOn);
-  mesh.visible = !massingOn;
-  scars.visible = !massingOn;
-  strandGroup.visible = !massingOn;
-  strandBulbs.visible = !massingOn;
-  window.__harborMassing = { on: massingOn, ...districtMassing.report };
+  if (massingOn) {
+    districtMassing.setEnabled(true);
+    mesh.visible = false;
+    scars.visible = false;
+    strandGroup.visible = false;
+    strandBulbs.visible = false;
+  } else {
+    mesh.visible = true;
+    scars.visible = true;
+    strandGroup.visible = true;
+    strandBulbs.visible = true;
+    districtMassing.setEnabled(false);
+  }
+  publishMassing();
+  rememberMassingQuery();
 }
+
+function applyMassingSeed(raw) {
+  const parsed = parseMassingSeed(raw);
+  if (massingSeedInput) massingSeedInput.value = parsed.label;
+  districtMassing.setSeed(parsed.value, parsed.label);
+  publishMassing();
+  rememberMassingQuery();
+}
+
+function stepMassingSeed(dir) {
+  if (!massingOn) return;
+  const cur = (massingSeedInput && massingSeedInput.value || '').trim().toLowerCase();
+  let i = SEED_PRESETS.findIndex((p) => p.label.toLowerCase() === cur);
+  if (i < 0) i = dir > 0 ? -1 : 0;
+  i = (i + dir + SEED_PRESETS.length) % SEED_PRESETS.length;
+  applyMassingSeed(SEED_PRESETS[i].label);
+}
+
 applyDistrictMassing(massingOn);
 window.addEventListener('noctuary-massing-toggle', () => {
   applyDistrictMassing(!massingOn);
 });
+window.addEventListener('noctuary-massing-seed', (ev) => {
+  stepMassingSeed(ev.detail < 0 ? -1 : 1);
+});
+const massingSeedPrev = document.getElementById('massing-seed-prev');
+const massingSeedNext = document.getElementById('massing-seed-next');
+if (massingSeedPrev) massingSeedPrev.addEventListener('click', () => stepMassingSeed(-1));
+if (massingSeedNext) massingSeedNext.addEventListener('click', () => stepMassingSeed(1));
+if (massingSeedInput) {
+  massingSeedInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      applyMassingSeed(massingSeedInput.value);
+      massingSeedInput.blur();
+    }
+  });
+  massingSeedInput.addEventListener('change', () => {
+    applyMassingSeed(massingSeedInput.value);
+  });
+}
 
 function swayStrandBulbs(t) {
   if (!strandBulbs.count) return;
