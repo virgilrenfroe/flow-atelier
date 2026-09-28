@@ -141,11 +141,21 @@ def paint_hull(albedo, height, rough, emit, u, v, spec):
     rgb *= 1.0 - rail[:, :, None] * 0.1
     rgb = rgb + lip[:, :, None] * 9.0
     h = h - rail * 0.22 + lip * 0.1
+    # Waterline grime just above the boot, and a darkened sheer edge.
+    # Both stay soft so the topside still reads as gelcoat, not a graphic.
+    grime_n = np.clip(noise(spec["seed"] + 9, 5.0) * 0.5 + 0.5, 0.0, 1.0)
+    grime = smooth(np.clip((spec["boot_h"] + 0.09 - v) / 0.09, 0.0, 1.0)) * (1.0 - boot)
+    grime = grime * (0.45 + 0.55 * grime_n)
+    dirt = np.array([88, 74, 58], np.float32)
+    rgb = rgb * (1.0 - grime[:, :, None] * 0.34) + dirt * (grime[:, :, None] * 0.34)
+    edge = smooth(np.clip((v - 0.84) / 0.12, 0.0, 1.0))
+    rgb *= 1.0 - edge[:, :, None] * 0.16
+    h = h - edge * 0.03 - grime * 0.04
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = h
-    r = spec["hull_rough"] + boot * 0.18 + rub * 0.22 + np.abs(peel) * 0.05
+    r = spec["hull_rough"] + boot * 0.18 + rub * 0.22 + grime * 0.16 + np.abs(peel) * 0.05
     rough[:] = np.clip(r, 0.0, 1.0)
-    glow = 0.78 - boot * 0.55 - rub * 0.35
+    glow = 0.2 - boot * 0.1 - rub * 0.06 - grime * 0.06
     emit[:] = np.clip(rgb / 255.0 * glow[:, :, None], 0, 1)
 
 
@@ -183,7 +193,7 @@ def paint_tube(albedo, height, rough, emit, u, v, spec):
         rough[:] = np.clip(0.78 - insert * 0.2, 0, 1)
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = h
-    emit[:] = np.clip(rgb / 255.0 * 0.28, 0, 1)
+    emit[:] = np.clip(rgb / 255.0 * 0.14, 0, 1)
 
 
 def paint_trim(albedo, height, rough, emit, u, v, spec):
@@ -219,7 +229,7 @@ def paint_deck(albedo, height, rough, emit, u, v, spec):
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = peak * 0.26
     rough[:] = np.clip(0.9 - peak * 0.08, 0, 1)
-    emit[:] = np.clip(rgb / 255.0 * 0.42, 0, 1)
+    emit[:] = np.clip(rgb / 255.0 * 0.2, 0, 1)
 
 
 def paint_seat(albedo, height, rough, emit, u, v, spec):
@@ -234,7 +244,7 @@ def paint_seat(albedo, height, rough, emit, u, v, spec):
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = grain * 0.03 + welt * 0.05 - stitch * 0.06
     rough[:] = np.clip(0.58 + np.abs(grain) * 0.08, 0, 1)
-    emit[:] = np.clip(rgb / 255.0 * 0.34, 0, 1)
+    emit[:] = np.clip(rgb / 255.0 * 0.18, 0, 1)
 
 
 def paint_console(albedo, height, rough, emit, u, v, spec):
@@ -254,7 +264,7 @@ def paint_console(albedo, height, rough, emit, u, v, spec):
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = h
     rough[:] = np.clip(0.4 - recess * 0.15, 0.12, 1)
-    emit[:] = np.clip(rgb / 255.0 * (0.55 + recess[:, :, None] * 0.2), 0, 1)
+    emit[:] = np.clip(rgb / 255.0 * (0.28 + recess[:, :, None] * 0.12), 0, 1)
 
 
 def paint_roof(albedo, height, rough, emit, u, v, spec):
@@ -271,7 +281,7 @@ def paint_roof(albedo, height, rough, emit, u, v, spec):
     albedo[:] = np.clip(rgb, 0, 255)
     height[:] = edge * 0.1 - center * 0.07
     rough[:] = np.clip(0.4 + edge * 0.25, 0, 1)
-    emit[:] = np.clip(rgb / 255.0 * 0.5, 0, 1)
+    emit[:] = np.clip(rgb / 255.0 * 0.24, 0, 1)
 
 
 def paint_glass(albedo, height, rough, emit, u, v, spec):
