@@ -239,9 +239,6 @@ export function installHarborCraft(deps) {
   // Coping horn, same station as the BatchedMesh cleats (batch.js).
   const QUAY_CLEAT_Y = faceTop + 0.1 + 0.09;
   const QUAY_CLEAT_Z = SEAWALL_Z + 0.04;
-  // Water edge of the coping stone. Painters rise to this lip, then to the horn,
-  // so the line meets the pier edge instead of passing through the wall.
-  const QUAY_COPE_EDGE_Z = QUAY_CLEAT_Z + 0.19;
   const QUAY_CLEATS = [];
   for (let i = 0; i < 13; i++) QUAY_CLEATS.push(-9.6 + i * 1.6);
   const quayCleatUsed = new Set();
@@ -542,8 +539,9 @@ export function installHarborCraft(deps) {
     };
   }
 
-  // Berth so the inboard gunwale sits just off the seawall toe, in the water.
-  const berthZ = (beam) => 6.18 + beam * 0.5;
+  // Alongside, a couple of metres off the coping, so the painter runs
+  // across the water to the cleat instead of standing up like a pile.
+  const berthZ = (beam) => 8.05 + beam * 0.5;
   const HARBOR_BOAT_DEFS = [
     {
       id: 'west-pram', kind: 'pram', mark: '',
@@ -708,13 +706,13 @@ export function installHarborCraft(deps) {
     // One loose school in the deeper basin, clear of the quay berths.
     ...harborRibbon({
       cx: -1.6, cz: 18.4, rx: 2.15, rz: 0.82, speed: 0.16,
-      phase: 0.5, count: 4, spread: 0.52, lag: 0.7, scale: 0.62,
+      phase: 0.5, count: 4, spread: 0.62, lag: 0.7, scale: 0.92,
       depth: 0.016, skin0: 0,
     }),
     // A second, smaller school farther out and a little deeper.
     ...harborRibbon({
       cx: 5.2, cz: 23.2, rx: 1.65, rz: 0.95, speed: 0.11,
-      phase: 1.9, count: 3, spread: 0.58, lag: 0.85, scale: 0.74,
+      phase: 1.9, count: 3, spread: 0.7, lag: 0.85, scale: 1.05,
       depth: 0.024, skin0: 2, nose: -0.04,
     }),
   ];
@@ -736,8 +734,8 @@ export function installHarborCraft(deps) {
     map: fishPlaceholder,
     roughness: 0.58,
     metalness: 0.16,
-    emissive: 0x0c1218,
-    emissiveIntensity: 0.12,
+    emissive: 0x1a2834,
+    emissiveIntensity: 0.28,
     vertexColors: true,
     side: THREE.DoubleSide,
   });
@@ -777,7 +775,7 @@ export function installHarborCraft(deps) {
   if (harborFishMesh.instanceColor) harborFishMesh.instanceColor.needsUpdate = true;
   harborCraftRoot.add(harborFishMesh);
   if (atlasLoader && atlasBase) {
-    atlasLoader.load(new URL('fish-atlas.png', atlasBase).href, (tex) => {
+    atlasLoader.load(new URL('fish-atlas.png?craft=2', atlasBase).href, (tex) => {
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.anisotropy = 8;
       tex.wrapS = THREE.ClampToEdgeWrapping;
@@ -852,10 +850,11 @@ export function installHarborCraft(deps) {
       for (let p = 0; p < boat.painters.length; p++) {
         const painter = boat.painters[p];
         harborA.copy(painter.local).applyMatrix4(boat.group.matrixWorld);
-        harborB.set(painter.cleat.x, painter.cleat.y, QUAY_COPE_EDGE_Z + 0.03);
-        harborC.copy(painter.cleat);
-        harborSpan(painter.ropeA, harborA, harborB, 0.016);
-        harborSpan(painter.ropeB, harborB, harborC, 0.016);
+        harborB.copy(painter.cleat);
+        harborC.copy(harborA).lerp(harborB, 0.55);
+        harborC.y = Math.max(-0.08, Math.min(harborA.y, harborB.y) - 0.02);
+        harborSpan(painter.ropeA, harborA, harborC, 0.016);
+        harborSpan(painter.ropeB, harborC, harborB, 0.016);
       }
     }
   }
@@ -927,8 +926,8 @@ export function installHarborCraft(deps) {
       const ahead = harborClearCraft(harborFishAt(f, t + 0.12).x, harborFishAt(f, t + 0.12).z);
       const x = now.x;
       const z = now.z;
-      // Fewer schools, out in the basin. The belly tucks under; the back stays readable.
-      const y = harborWaveY(x, z, t) + 0.02 - f.depth * 0.35 + Math.sin(t * 0.55 + f.phase) * 0.004;
+      // Fewer schools, farther out. High enough that the back and atlas read above the sheet.
+      const y = harborWaveY(x, z, t) + 0.07 - f.depth * 0.25 + Math.sin(t * 0.55 + f.phase) * 0.004;
       const fwd = harborA.set(ahead.x - x, 0, ahead.z - z);
       if (fwd.lengthSq() < 1e-8) fwd.set(Math.cos(f.phase), 0, Math.sin(f.phase));
       else fwd.normalize();
@@ -973,7 +972,7 @@ export function installHarborCraft(deps) {
         return {
           x: +p.x.toFixed(2),
           z: +p.z.toFixed(2),
-          y: +(harborWaveY(p.x, p.z, t) + 0.02 - f.depth * 0.35).toFixed(3),
+          y: +(harborWaveY(p.x, p.z, t) + 0.07 - f.depth * 0.25).toFixed(3),
           skin: f.skin,
         };
       });
@@ -1037,15 +1036,15 @@ export function installHarborCraft(deps) {
       camera.position.set(-2.4, 2.6, 16.05);
       controls.target.set(-1.5, -0.32, 18.5);
     } else if (mode === 'fish-top') {
-      camera.position.set(-1.6, 5.2, 18.44);
-      controls.target.set(-1.6, -0.4, 18.4);
+      camera.position.set(-1.5, 3.4, 18.46);
+      controls.target.set(-1.5, -0.36, 18.35);
     } else if (mode === 'above' || mode === 'lineup') {
-      camera.position.set(-0.4, 8.2, 16.8);
-      controls.target.set(0.2, 0.05, 6.5);
+      camera.position.set(-0.6, 10.4, 19.2);
+      controls.target.set(0.3, 0.0, 8.2);
     } else if (mode === 'moor') {
-      // Along the berth, so painters read between the hulls and the coping.
-      camera.position.set(-12.4, 2.15, 8.6);
-      controls.target.set(-3.2, 0.42, 6.15);
+      // Along the berth, so painters read across the water to the coping.
+      camera.position.set(-12.6, 2.6, 12.4);
+      controls.target.set(-2.2, 0.2, 7.4);
     } else if (mode === 'skiff-top') top('quay-skiff', 4.6);
     else if (mode === 'launch-top') top('harbor-launch', 6.4);
     else if (mode === 'tender-top') top('basin-tender', 3.8);
