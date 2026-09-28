@@ -10,6 +10,7 @@ import { createHarborLoad } from './load.js';
 import { installSwapGpu } from './swap-gpu.js';
 import { installCitizen } from './citizen.js';
 import { installBasinClutter } from './batch.js';
+import { installHarborCraft } from './craft.js';
 import { mountSignalVolume } from '../noctuary/a03-signal-volume.js';
 import { mountSignalHolo } from '../noctuary/i0x-signal-holo.js';
 
@@ -1505,7 +1506,10 @@ function applyStreetPropWear(packed) {
     ironWarmStd.color.set(0xe6d5c4);
     ironWarmStd.needsUpdate = true;
     for (let i = 0; i < physCrates.length; i++) {
-      const mat = physCrates[i].mesh.material;
+      const entry = physCrates[i];
+      // Hulls share physCrates for buoyancy. Their anchors are not crate sheets.
+      if (!entry || entry.craft || !entry.mesh || !entry.mesh.material) continue;
+      const mat = entry.mesh.material;
       mat.map = crateTex;
       mat.needsUpdate = true;
     }
@@ -3239,6 +3243,7 @@ window.__grafCanvas = grafCanvas;
 
 // Debug probe (harbor water/seawall layout)
 window.__harborWater = water;
+window.__harborScene = scene;
 window.__harborQuay = quay;
 window.__harborSeawall = seawallFace;
 water.frustumCulled = false;
@@ -3916,6 +3921,17 @@ installBasinClutter({
   CRATE_ATLAS_ROWS: harborPhysics.CRATE_ATLAS_ROWS,
   CRATE_FACE_ROW: harborPhysics.CRATE_FACE_ROW,
 });
+const harborCraft = installHarborCraft({
+  scene, camera, controls, params, BLOOM_LAYER,
+  ORBIT_FOV, WATER_NEAR_Z, WATER_D, WATER_AMP, WATER_Y, waterMat, freezeMotion,
+  basinBuoy: harborPhysics.basinBuoy,
+  physFreeze: harborPhysics.physFreeze,
+  physCrateMat: harborPhysics.physCrateMat,
+  physAdd: harborPhysics.physAdd,
+  physHooks: harborPhysics.physHooks,
+  physCrates: harborPhysics.physCrates,
+  crateInBasinXZ: harborPhysics.crateInBasinXZ,
+});
 
 const harborPost = createHarborPost({
   renderer, scene, camera, freezeMotion, bloomLayer, NOISE_GLSL,
@@ -3976,7 +3992,7 @@ citizen = installCitizen({
 });
 window.__harborModules = {
   scene: true, water: true, physics: true, post: true, perf: true,
-  load: true, swap: true, citizen: true, batch: true,
+  load: true, swap: true, citizen: true, batch: true, craft: true,
 };
 
 
@@ -4087,6 +4103,7 @@ function tick() {
   // Quay lantern specular anchors (row at z≈3.85) — refresh if phys lanterns move later
   waterMat.uniforms.uLampA.value.set(-4.8, 1.55, 3.85);
   waterMat.uniforms.uLampB.value.set(4.8, 1.55, 3.85);
+  if (harborCraft) harborCraft.update(t);
   quayMat.uniforms.uPointer.value.copy(pointerSmooth);
   harborPost.mistMat.uniforms.uTime.value = t;
   if (signalVolume) signalVolume.update(t, pulse, typeof harborWind !== 'undefined' ? harborWind : null);
@@ -4199,6 +4216,8 @@ if (params.get('shot') === 'batchdeck') {
   controls.target.set(6.8, 0.48, 5.05);
   controls.update();
 }
+
+window.__harborRender = () => harborPost.renderFrame();
 
 if (stillMode) {
   let n = 0;
