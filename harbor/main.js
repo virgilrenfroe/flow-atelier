@@ -14,6 +14,7 @@ import { installBasinClutter } from './batch.js';
 import { installHarborCraft } from './craft.js';
 import { mountSignalVolume } from '../noctuary/a03-signal-volume.js';
 import { mountSignalHolo } from '../noctuary/i0x-signal-holo.js';
+import { mountStreetWalker } from '../noctuary/street-walker.js';
 import { mountStreetClutter } from '../noctuary/street-clutter.js';
 
 const harborLoad = createHarborLoad();
@@ -4023,6 +4024,16 @@ window.__signalHolo = signalHolo;
   if (holoEl) holoEl.textContent = signalHolo.enabled ? 'sheath' : 'off';
 }
 
+// Street passer. Same walk atlas as the plate; the plate stays on the mast.
+// ?walker=0 / ?walker=off hides him. ?shot=walker frames the quay → street turn.
+const walkerParam = params.get('walker');
+const streetWalker = mountStreetWalker({
+  parent: scene,
+  enabled: walkerParam !== '0' && walkerParam !== 'off',
+  anisotropy: renderer.capabilities.getMaxAnisotropy(),
+});
+window.__streetWalker = streetWalker;
+
 // ——— A03 · Signal volume air ———
 // Raymarched umber shafts on the beacon. Separate pass: does not rewrite
 // sheath, asphalt, quay, water, lanterns, pennants, or the ember Points.
@@ -4179,6 +4190,7 @@ function tick() {
   harborPost.mistMat.uniforms.uTime.value = t;
   if (signalVolume) signalVolume.update(t, pulse, typeof harborWind !== 'undefined' ? harborWind : null);
   if (signalHolo) signalHolo.update(t, pulse, freezeMotion ? 0 : 1);
+  if (streetWalker) streetWalker.update(dt, pulse, freezeMotion ? 0 : 1);
   lanternTime.value = t;
   lanternPulse.value = freezeMotion ? 0.35 : 1.0;
   for (let li = 0; li < lanternPointLights.length; li++) {
@@ -4268,6 +4280,10 @@ if (params.get('shot') === 'holo') {
   camera.position.set(-1.7, 4.05, 9.1);
   controls.target.set(-5.9, 2.05, 3.0);
   controls.update();
+}
+if (params.get('shot') === 'walker' && streetWalker) {
+  streetWalker.frame(camera, controls);
+  streetWalker.seek(streetWalker.corner);
 }
 // Basin BatchedMesh proof frames. Exhibit chrome stays off (?still=1).
 if (params.get('shot') === 'batch') {
