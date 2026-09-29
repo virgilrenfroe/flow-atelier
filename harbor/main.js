@@ -12,7 +12,7 @@ import { installSwapGpu } from './swap-gpu.js';
 import { installCitizen } from './citizen.js';
 import { installBasinClutter } from './batch.js';
 import { installHarborCraft } from './craft.js';
-import { installHarborCutaway } from './cutaway.js';
+import { installHarborBasin } from './basin.js';
 import { mountSignalVolume } from '../noctuary/a03-signal-volume.js';
 import { mountSignalHolo } from '../noctuary/i0x-signal-holo.js';
 import { mountStreetWalker } from '../noctuary/street-walker.js';
@@ -2602,6 +2602,7 @@ scene.add(quay);
 
 const {
   water, waterMat, WATER_W, WATER_D, WATER_NEAR_Z, WATER_Y, WATER_WALL_Z, WATER_AMP,
+  updateRefraction: updateWaterRefraction,
 } = createHarborWater({ scene, freezeMotion });
 
 
@@ -2657,13 +2658,12 @@ seawallToe.position.set(
 );
 scene.add(seawallToe);
 
-// Under-water section. Sheet, buoyancy, and the seawall meshes stay as they are.
-const harborCutaway = installHarborCutaway({
-  scene, camera, controls, waterMat,
+// Basin under the sheet — seen through refraction, not a side cut.
+const harborBasin = installHarborBasin({
+  scene,
   WATER_D, WATER_NEAR_Z, WATER_Y, WATER_WALL_Z,
   SEAWALL_W,
   freezeMotion,
-  sectionEnabled: params.get('cut') !== '0',
 });
 
 // ——— Seawall graffiti (freight band, both faces) ———
@@ -4279,7 +4279,8 @@ function tick() {
   if (typeof physStep === 'function') physStep();
 
   if (!(citizen && (citizen.walking() || citizen.touring()))) controls.update();
-  if (harborCutaway) harborCutaway.update(t);
+  if (harborBasin) harborBasin.update(t);
+  if (updateWaterRefraction) updateWaterRefraction(renderer, camera);
   harborPost.renderFrame();
 
   frames++;
@@ -4336,10 +4337,18 @@ if (params.get('shot') === 'batchdeck') {
   controls.target.set(6.8, 0.48, 5.05);
   controls.update();
 }
-// Low outboard elevation — the vivisection Virgil framed under the waterline.
-if (params.get('shot') === 'cutaway' || params.get('shot') === 'cutaway-side' || params.get('shot') === 'cutaway-below') {
-  const mode = params.get('shot') === 'cutaway' ? 'virgil' : params.get('shot').replace('cutaway-', '');
-  window.__frameHarborCutaway(mode === 'virgil' ? 'outboard' : mode);
+// High orbit over the basin — floor and fish through the sheet.
+if (params.get('shot') === 'through') {
+  camera.position.set(0.6, 13.6, 19.4);
+  controls.target.set(0.4, -1.4, 17.2);
+  controls.update();
+}
+// Oblique orbit just above the surface, beside the launch, so the keel
+// reads through the sheet. Still above the waterline — not a side cut.
+if (params.get('shot') === 'through-close') {
+  camera.position.set(7.55, 1.05, 18.55);
+  controls.target.set(4.7, -0.58, 16.7);
+  controls.update();
 }
 
 window.__harborRender = () => harborPost.renderFrame();
