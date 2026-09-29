@@ -12,6 +12,7 @@ import { installSwapGpu } from './swap-gpu.js';
 import { installCitizen } from './citizen.js';
 import { installBasinClutter } from './batch.js';
 import { installHarborCraft } from './craft.js';
+import { installHarborCutaway } from './cutaway.js';
 import { mountSignalVolume } from '../noctuary/a03-signal-volume.js';
 import { mountSignalHolo } from '../noctuary/i0x-signal-holo.js';
 import { mountStreetWalker } from '../noctuary/street-walker.js';
@@ -2656,6 +2657,15 @@ seawallToe.position.set(
 );
 scene.add(seawallToe);
 
+// Under-water section. Sheet, buoyancy, and the seawall meshes stay as they are.
+const harborCutaway = installHarborCutaway({
+  scene, camera, controls, waterMat,
+  WATER_D, WATER_NEAR_Z, WATER_Y, WATER_WALL_Z,
+  SEAWALL_W,
+  freezeMotion,
+  sectionEnabled: params.get('cut') !== '0',
+});
+
 // ——— Seawall graffiti (freight band, both faces) ———
 // Original throw-ups only — bubble letters with fill, hard outline, and a 3D
 // block, layered like railroad boxcar paint. No stencils, no figures, no
@@ -4269,6 +4279,7 @@ function tick() {
   if (typeof physStep === 'function') physStep();
 
   if (!(citizen && (citizen.walking() || citizen.touring()))) controls.update();
+  if (harborCutaway) harborCutaway.update(t);
   harborPost.renderFrame();
 
   frames++;
@@ -4324,6 +4335,11 @@ if (params.get('shot') === 'batchdeck') {
   camera.position.set(2.4, 0.92, 3.15);
   controls.target.set(6.8, 0.48, 5.05);
   controls.update();
+}
+// Low outboard elevation — the vivisection Virgil framed under the waterline.
+if (params.get('shot') === 'cutaway' || params.get('shot') === 'cutaway-side' || params.get('shot') === 'cutaway-below') {
+  const mode = params.get('shot') === 'cutaway' ? 'virgil' : params.get('shot').replace('cutaway-', '');
+  window.__frameHarborCutaway(mode === 'virgil' ? 'outboard' : mode);
 }
 
 window.__harborRender = () => harborPost.renderFrame();

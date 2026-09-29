@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { trackDisposable } from './dispose.js';
 
-// Gerstner basin. Shader body is the Harbor water lesson, unchanged.
+// Gerstner basin. Shader body is the Harbor water lesson.
+// uSection* is the low-camera vivisection cut (harbor/cutaway.js). High orbit leaves it off.
 export function createHarborWater({ scene, freezeMotion }) {
 // ——— Water — Gerstner + Beer-Lambert + Schlick + lantern specular (from water lesson) ———
 // Placement locks unchanged: WATER_NEAR_Z outboard of seawall, Y below deck, dry quay.
@@ -15,6 +16,10 @@ const WATER_AMP = freezeMotion ? 0.0 : 0.045;
 const waterMat = new THREE.ShaderMaterial({
   lights: false,
   uniforms: {
+    // Vivisection cut. cutaway.js moves the plane; orbit keeps the sheet whole.
+    uSectionOn: { value: 0 },
+    uSectionN: { value: new THREE.Vector2(0, 1) },
+    uSectionP: { value: new THREE.Vector2(0, 80) },
     uTime: { value: 0 },
     uDepth: { value: 1 },
     uFresnel: { value: 1 },
@@ -111,6 +116,10 @@ const waterMat = new THREE.ShaderMaterial({
     varying vec3 vWorldN;
     varying float vCrest;
     varying float vDepthHint;
+    // Cut plane in world xz. cutaway.js writes these; orbit leaves uSectionOn at 0.
+    uniform float uSectionOn;
+    uniform vec2 uSectionN;
+    uniform vec2 uSectionP;
 
     float hash(vec2 p){
       return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -248,12 +257,22 @@ const waterMat = new THREE.ShaderMaterial({
       float fogF = 1.0 - exp(-0.018 * length(uCamPos - vWorldPos));
       col = mix(col, vec3(0.02, 0.023, 0.035), fogF * 0.55);
 
+      // Vivisection: drop the camera-side sheet so the basin below reads.
+      // Stays after the hull discards. Orbit leaves uSectionOn at 0.
+      if (uSectionOn > 0.5) {
+        vec2 sec = vWorldPos.xz - uSectionP;
+        if (dot(sec, uSectionN) > 0.0) discard;
+      }
+
       gl_FragColor = vec4(col, 1.0);
     }
   `,
 });
 waterMat.transparent = false;
 waterMat.depthWrite = true;
+// Underside of the same sheet, so a camera under the line still has a waterline.
+// Winding and the Gerstner body are unchanged; above-water orbit sees the front face.
+waterMat.side = THREE.DoubleSide;
 // Dense mesh for Gerstner (Harbor basin wider than lesson — 128×96 keeps cost sane)
 const water = new THREE.Mesh(new THREE.PlaneGeometry(WATER_W, WATER_D, 128, 96), waterMat);
 water.rotation.x = -Math.PI / 2;
