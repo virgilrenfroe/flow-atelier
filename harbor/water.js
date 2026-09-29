@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { trackDisposable } from './dispose.js';
 
-// Gerstner basin. Shader body is the Harbor water lesson, unchanged.
+// Gerstner basin. Shader body is the Harbor water lesson.
+// uRefract is a same-camera view of the basin with the sheet hidden, bent by
+// the wave normal so overhead orbit sees the floor through the surface.
 export function createHarborWater({ scene, freezeMotion }) {
 // ——— Water — Gerstner + Beer-Lambert + Schlick + lantern specular (from water lesson) ———
 // Placement locks unchanged: WATER_NEAR_Z outboard of seawall, Y below deck, dry quay.
@@ -15,6 +17,10 @@ const WATER_AMP = freezeMotion ? 0.0 : 0.045;
 const waterMat = new THREE.ShaderMaterial({
   lights: false,
   uniforms: {
+    // Same-camera basin grab. updateRefraction() fills this before the beauty pass.
+    uRefract: { value: null },
+    uRefractOn: { value: 0 },
+    uResolution: { value: new THREE.Vector2(1, 1) },
     uTime: { value: 0 },
     uDepth: { value: 1 },
     uFresnel: { value: 1 },
@@ -111,6 +117,9 @@ const waterMat = new THREE.ShaderMaterial({
     varying vec3 vWorldN;
     varying float vCrest;
     varying float vDepthHint;
+    uniform sampler2D uRefract;
+    uniform float uRefractOn;
+    uniform vec2 uResolution;
 
     float hash(vec2 p){
       return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -248,6 +257,20 @@ const waterMat = new THREE.ShaderMaterial({
       float fogF = 1.0 - exp(-0.018 * length(uCamPos - vWorldPos));
       col = mix(col, vec3(0.02, 0.023, 0.035), fogF * 0.55);
 
+      // Refract the basin already drawn behind the sheet. Overhead (low Fresnel)
+      // stays clear; grazing angles keep the reflective night water.
+      // Hull discards above are unchanged — #44's extra slots land there.
+      vec2 bend = vec2(N.x, N.z) * 0.011;
+      vec2 suv = gl_FragCoord.xy / max(uResolution, vec2(1.0));
+      vec3 refr = texture2D(uRefract, clamp(suv + bend, 0.001, 0.999)).rgb;
+      refr.r = texture2D(uRefract, clamp(suv + bend * 1.4, 0.001, 0.999)).r;
+      refr.b = texture2D(uRefract, clamp(suv + bend * 0.65, 0.001, 0.999)).b;
+      float veil = mix(0.05, 0.18, depthM);
+      refr = mix(refr, refr * vec3(0.74, 0.86, 0.98) + vec3(0.01, 0.018, 0.028), veil);
+      float through = (1.0 - fresW) * 0.92 * step(0.5, uRefractOn);
+      col = mix(col, refr, through);
+      col = mix(col, foamCol, foam * through * 0.55);
+
       gl_FragColor = vec4(col, 1.0);
     }
   `,
@@ -261,10 +284,48 @@ water.position.set(0, WATER_Y, WATER_NEAR_Z + WATER_D * 0.5);
 water.renderOrder = -1;
 scene.add(water);
 
+// Linear grab of the basin. Rendering into a target skips tone-mapping, matching
+// the water shader, which is tone-mapped later by the composer OutputPass.
+const refractRT = new THREE.WebGLRenderTarget(1, 1, {
+  minFilter: THREE.LinearFilter,
+  magFilter: THREE.LinearFilter,
+  format: THREE.RGBAFormat,
+  depthBuffer: true,
+  stencilBuffer: false,
+});
+refractRT.texture.colorSpace = THREE.LinearSRGBColorSpace;
+waterMat.uniforms.uRefract.value = refractRT.texture;
+const refractSize = new THREE.Vector2();
+
+// Camera is the one the beauty pass will use.
+function updateRefractionWithCamera(renderer, camera) {
+  renderer.getDrawingBufferSize(refractSize);
+  const w = Math.max(1, refractSize.x);
+  const h = Math.max(1, refractSize.y);
+  if (refractRT.width !== w || refractRT.height !== h) refractRT.setSize(w, h);
+  waterMat.uniforms.uResolution.value.set(w, h);
+  const hidden = [];
+  water.visible = false;
+  scene.traverse((obj) => {
+    if (obj.isPoints && obj.visible) {
+      hidden.push(obj);
+      obj.visible = false;
+    }
+  });
+  const prevTarget = renderer.getRenderTarget();
+  renderer.setRenderTarget(refractRT);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(prevTarget);
+  for (let i = 0; i < hidden.length; i++) hidden[i].visible = true;
+  water.visible = true;
+  waterMat.uniforms.uRefractOn.value = 1;
+}
+
   function disposeWater() {
     scene.remove(water);
     water.geometry.dispose();
     waterMat.dispose();
+    refractRT.dispose();
     return 1;
   }
   trackDisposable('page', disposeWater);
@@ -272,6 +333,7 @@ scene.add(water);
   return {
     water, waterMat,
     WATER_W, WATER_D, WATER_NEAR_Z, WATER_Y, WATER_WALL_Z, WATER_AMP,
+    updateRefraction: updateRefractionWithCamera,
     disposeWater,
   };
 }
