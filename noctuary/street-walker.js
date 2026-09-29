@@ -154,14 +154,21 @@ void main() {
     vec3 rawB = texture2D(uMap, uvB).rgb;
     float peakB = max(rawB.r, max(rawB.g, rawB.b));
     float k = clamp(uFlip, 0.0, 1.0);
-    float aA = smoothstep(0.018, 0.032, peakA) * (1.0 - k);
-    float aB = smoothstep(0.018, 0.032, peakB) * k;
-    float outA = aB + aA * (1.0 - aB);
+    // The mirror sits in the middle of the turn. Whichever cell is up
+    // stays as solid as the walk, so the body does not wash out.
+    float pA = smoothstep(0.018, 0.032, peakA);
+    float pB = smoothstep(0.018, 0.032, peakB);
+    float inB = smoothstep(0.32, 0.68, k);
+    float aA = pA * (1.0 - inB);
+    float aB = pB * inB;
+    float win = max(aA, aB);
+    if (win < 0.004) discard;
+    float cover = max(pA, pB);
+    float boost = min(8.0, cover / win);
     vec3 colA = srgbToLinear(rawA);
     vec3 colB = srgbToLinear(rawB);
-    if (outA < 0.004) discard;
-    tex = (colB * aB + colA * aA * (1.0 - aB)) / max(outA, 1.0e-4);
-    presence = clamp(outA, 0.0, 1.0);
+    tex = (colA * aA + colB * aB) / max(aA + aB, 1.0e-4);
+    presence = clamp(win * boost, 0.0, 1.0);
   }
   float luma = dot(tex, vec3(0.2126, 0.7152, 0.0722));
   // Dark cloth only. Same hue as the cell; trim and skin stay near 1.
@@ -663,9 +670,10 @@ export function mountStreetWalker(opts) {
       // Two headings. Each card stays put, so neither passes the edge.
       uniforms.uFlip.value = 0;
       figure.rotation.y = turnPlan.startShown;
-      uniforms.uAlpha.value = 1 - turnFade;
       ghost.rotation.y = turnPlan.endShown;
-      ghostUniforms.uAlpha.value = turnFade;
+      // One of the two cards stays solid for the whole sweep.
+      uniforms.uAlpha.value = turnFade < 0.5 ? 1 : (1 - turnFade) * 2;
+      ghostUniforms.uAlpha.value = turnFade < 0.5 ? turnFade * 2 : 1;
       ghost.visible = turnFade > 0.004;
     } else {
       const v = viewXZ();
@@ -1003,16 +1011,6 @@ export function mountStreetWalker(opts) {
       cam.position.set(5.85, 1.72, 4.35);
       ctrl.target.set(1.85, 0.38, 1.55);
       if (ctrl.update) ctrl.update();
-    },
-    focus() {
-      if (!camera || !controls) return null;
-      const x = root.position.x;
-      const y = root.position.y;
-      const z = root.position.z;
-      camera.position.set(x + 3.05, y + 0.85, z + 2.2);
-      controls.target.set(x, y * 0.42, z);
-      if (controls.update) controls.update();
-      return { x, y, z };
     },
     update(dt, pulse, live) {
       if (!api.enabled) return;
