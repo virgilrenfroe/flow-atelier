@@ -3945,6 +3945,7 @@ installBasinClutter({
 const harborCraft = installHarborCraft({
   scene, camera, controls, params, BLOOM_LAYER,
   ORBIT_FOV, WATER_NEAR_Z, WATER_D, WATER_AMP, WATER_Y, waterMat, freezeMotion,
+  SEAWALL_Z, faceTop, atlasBase, atlasLoader,
   basinBuoy: harborPhysics.basinBuoy,
   physFreeze: harborPhysics.physFreeze,
   physCrateMat: harborPhysics.physCrateMat,
@@ -3952,6 +3953,9 @@ const harborCraft = installHarborCraft({
   physHooks: harborPhysics.physHooks,
   physCrates: harborPhysics.physCrates,
   crateInBasinXZ: harborPhysics.crateInBasinXZ,
+  crateWearMat: harborPhysics.crateWearMat,
+  stampHarborCrateUVs: harborPhysics.stampHarborCrateUVs,
+  CRATE_FACE_ROW: harborPhysics.CRATE_FACE_ROW,
 });
 
 // Street clutter — shared photo atlas, props only. Anchored to the live

@@ -546,6 +546,7 @@ export function installBasinClutter(deps) {
       basinStaticBox(pile.x, BASIN_DECK_Y + 0.2, pile.z + 0.04, 0.46, 0.2, 0.28);
     });
 
+    // Promenade only — landward of the seawall. No piles in the basin.
     const bittSpots = [
       { x: -9.55, z: 4.78 },
       { x: -7.15, z: 4.86 },
