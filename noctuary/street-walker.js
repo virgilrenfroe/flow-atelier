@@ -10,6 +10,12 @@
  * He reverses in place at each end and walks back. Feet sit on the deck,
  * then step up onto the sidewalk.
  *
+ * The body is one double-sided card. A yaw sweep that would show the
+ * camera the edge (the about-face at a path end, or a heading change
+ * after a drop) holds the start cell and the end cell and crossfades.
+ * The silhouette stays the walk width instead of collapsing to a line.
+ * A short yaw that never nears the edge still spins on the planted boot.
+ *
  * Drag (same grab as a quay crate): pointer-down on the body, slide on the
  * deck / sidewalk plane, feet preview the drop. Release sets that XZ as the
  * new start. The route is the drop, then the closest point on this L, then
@@ -20,6 +26,7 @@
  * ?walker=0 / ?walker=off hides him. ?shot=walker frames the turn.
  */
 import * as THREE from 'three';
+import { crossStyle, planCardTurn, presentYaw } from './street-walker-turn.js';
 
 const FPS = 6;
 const FRAMES = 16;
@@ -104,6 +111,8 @@ uniform float uFrame;
 uniform sampler2D uMap;
 uniform vec2 uGrid;
 uniform float uFrames;
+uniform float uAlpha;
+uniform float uFlip;
 varying vec2 vUv;
 varying vec3 vWorld;
 varying vec3 vNormalW;
@@ -122,15 +131,38 @@ void main() {
   float colI = mod(frame, uGrid.x);
   float rowI = floor(frame / uGrid.x);
   vec2 cell = clamp(vUv, 0.0, 1.0);
-  vec2 uv = vec2(
+  vec2 uvA = vec2(
     (colI + cell.x) / uGrid.x,
     1.0 - (rowI + (1.0 - cell.y)) / uGrid.y
   );
-  vec3 raw = texture2D(uMap, uv).rgb;
-  float peak = max(raw.r, max(raw.g, raw.b));
-  float presence = smoothstep(0.018, 0.032, peak);
-  if (peak < 0.016) discard;
-  vec3 tex = srgbToLinear(raw);
+  vec3 rawA = texture2D(uMap, uvA).rgb;
+  float peakA = max(rawA.r, max(rawA.g, rawA.b));
+  vec3 tex = vec3(0.0);
+  float presence = 0.0;
+  // uFlip 0 is the authored cell, unchanged. A half-turn mirrors across
+  // the same card so the body never rotates through its edge.
+  if (uFlip <= 0.001) {
+    if (peakA < 0.016) discard;
+    tex = srgbToLinear(rawA);
+    presence = smoothstep(0.018, 0.032, peakA);
+  } else {
+    vec2 cellB = vec2(1.0 - cell.x, cell.y);
+    vec2 uvB = vec2(
+      (colI + cellB.x) / uGrid.x,
+      1.0 - (rowI + (1.0 - cellB.y)) / uGrid.y
+    );
+    vec3 rawB = texture2D(uMap, uvB).rgb;
+    float peakB = max(rawB.r, max(rawB.g, rawB.b));
+    float k = clamp(uFlip, 0.0, 1.0);
+    float aA = smoothstep(0.018, 0.032, peakA) * (1.0 - k);
+    float aB = smoothstep(0.018, 0.032, peakB) * k;
+    float outA = aB + aA * (1.0 - aB);
+    vec3 colA = srgbToLinear(rawA);
+    vec3 colB = srgbToLinear(rawB);
+    if (outA < 0.004) discard;
+    tex = (colB * aB + colA * aA * (1.0 - aB)) / max(outA, 1.0e-4);
+    presence = clamp(outA, 0.0, 1.0);
+  }
   float luma = dot(tex, vec3(0.2126, 0.7152, 0.0722));
   // Dark cloth only. Same hue as the cell; trim and skin stay near 1.
   float shadow = 1.0 - smoothstep(0.004, 0.08, luma);
@@ -159,7 +191,7 @@ void main() {
   float fog = 1.0 - exp(-0.000324 * dist * dist * 12.0);
   col = mix(col, vec3(0.020, 0.024, 0.039), clamp(fog, 0.0, 0.22));
 
-  gl_FragColor = vec4(col, clamp(presence, 0.0, 1.0));
+  gl_FragColor = vec4(col, clamp(presence, 0.0, 1.0) * uAlpha);
 }
 `;
 
@@ -468,30 +500,51 @@ export function mountStreetWalker(opts) {
     uMap: { value: map },
     uGrid: { value: new THREE.Vector2(4, 4) },
     uFrames: { value: FRAMES },
+    uAlpha: { value: 1 },
+    uFlip: { value: 0 },
   };
-  const material = new THREE.ShaderMaterial({
-    name: 'StreetWalker',
-    uniforms,
-    vertexShader: VERT,
-    fragmentShader: FRAG,
-    transparent: true,
-    depthWrite: false,
-    depthTest: true,
-    side: THREE.DoubleSide,
-    blending: THREE.NormalBlending,
-    toneMapped: false,
-  });
+  // The about-face ghost shares the walk frame. Only its fade differs,
+  // so the two cells stay on the same boot.
+  const ghostUniforms = { ...uniforms, uAlpha: { value: 0 } };
+  function walkerMaterial(name, matsUniforms) {
+    return new THREE.ShaderMaterial({
+      name,
+      uniforms: matsUniforms,
+      vertexShader: VERT,
+      fragmentShader: FRAG,
+      transparent: true,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      blending: THREE.NormalBlending,
+      toneMapped: false,
+    });
+  }
+  const material = walkerMaterial('StreetWalker', uniforms);
+  const ghostMat = walkerMaterial('StreetWalkerTurn', ghostUniforms);
 
   const root = new THREE.Group();
   root.name = 'street-walker';
 
-  const figure = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH, HEIGHT), material);
+  const cardGeo = new THREE.PlaneGeometry(WIDTH, HEIGHT);
+  const figure = new THREE.Mesh(cardGeo, material);
   figure.name = 'street-walker-figure';
   figure.renderOrder = 4;
   figure.userData.streetWalker = true;
   // Bright trim clears the bloom threshold. The coat does not.
   if (opts.bloomLayer != null) figure.layers.enable(opts.bloomLayer);
   root.add(figure);
+
+  // Second cell for a thin yaw sweep. Hidden while he walks. Drawn after
+  // the figure so the fade composites over the start pose. depthWrite stays
+  // off, so the two cards do not fight when a half-turn puts them on one plane.
+  const ghost = new THREE.Mesh(cardGeo, ghostMat);
+  ghost.name = 'street-walker-turn';
+  ghost.renderOrder = 5;
+  ghost.visible = false;
+  ghost.raycast = () => {};
+  if (opts.bloomLayer != null) ghost.layers.enable(opts.bloomLayer);
+  root.add(ghost);
 
   // A thicker volume than the card, so a crate-style grab can catch him
   // when the plane is nearly edge-on. Not drawn.
@@ -550,6 +603,10 @@ export function mountStreetWalker(opts) {
   let settleDuringTurn = false;
   const footAnchor = new THREE.Vector3();
   let pivotLx = 0;
+  let turnPlan = null;
+  let turnFade = 0;
+  let turnHeld = false;
+  const turnHold = { x: 0, z: 0 };
 
   let dragging = false;
   let dragMoved = 0;
@@ -563,10 +620,61 @@ export function mountStreetWalker(opts) {
   const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   const rayHit = new THREE.Vector3();
 
+  function viewXZ() {
+    if (!camera) return { vx: 0, vz: 0 };
+    return {
+      vx: camera.position.x - root.position.x,
+      vz: camera.position.z - root.position.z,
+    };
+  }
+
+  function clearTurn() {
+    turnPlan = null;
+    turnFade = 0;
+    turnHeld = false;
+    uniforms.uAlpha.value = 1;
+    uniforms.uFlip.value = 0;
+    ghostUniforms.uAlpha.value = 0;
+    ghost.visible = false;
+  }
+
+  function armTurn() {
+    const v = viewXZ();
+    turnPlan = planCardTurn(yaw0, turnDelta, v.vx, v.vz);
+    if (turnPlan.kind === 'cross') {
+      turnPlan.style = crossStyle(turnPlan.startShown, turnPlan.endShown);
+    }
+    turnFade = 0;
+    turnHeld = false;
+  }
+
   function commit(x, z, lift) {
     const g = groundY(x, z);
     root.position.set(x, g + BODY_LIFT + (lift || 0), z);
-    figure.rotation.y = yaw;
+    const cross = !dragging && mode === 'turn' && turnPlan && turnPlan.kind === 'cross';
+    if (cross && turnPlan.style === 'flip') {
+      // Same plane, opposite nose. Mirror the cell; do not yaw the card.
+      figure.rotation.y = turnPlan.startShown;
+      uniforms.uAlpha.value = 1;
+      uniforms.uFlip.value = turnFade;
+      ghostUniforms.uAlpha.value = 0;
+      ghost.visible = false;
+    } else if (cross) {
+      // Two headings. Each card stays put, so neither passes the edge.
+      uniforms.uFlip.value = 0;
+      figure.rotation.y = turnPlan.startShown;
+      uniforms.uAlpha.value = 1 - turnFade;
+      ghost.rotation.y = turnPlan.endShown;
+      ghostUniforms.uAlpha.value = turnFade;
+      ghost.visible = turnFade > 0.004;
+    } else {
+      const v = viewXZ();
+      figure.rotation.y = presentYaw(yaw, v.vx, v.vz);
+      uniforms.uAlpha.value = 1;
+      uniforms.uFlip.value = 0;
+      ghostUniforms.uAlpha.value = 0;
+      ghost.visible = false;
+    }
     shadow.position.y = (g + 0.012) - root.position.y;
     const held = (lift || 0) > 0;
     shadow.scale.set(held ? 0.82 : 1.15, held ? 0.46 : 0.62, 1);
@@ -620,6 +728,7 @@ export function mountStreetWalker(opts) {
       const mid = (sampleTrack(FOOT_A, phase) + sampleTrack(FOOT_B, phase)) * 0.5;
       captureFootPx(mid);
     }
+    armTurn();
   }
 
   function beginYawToward(target) {
@@ -635,6 +744,7 @@ export function mountStreetWalker(opts) {
     yaw0 = yaw;
     const mid = (sampleTrack(FOOT_A, phase) + sampleTrack(FOOT_B, phase)) * 0.5;
     captureFootPx(mid);
+    armTurn();
   }
 
   function beginArrive() {
@@ -685,6 +795,7 @@ export function mountStreetWalker(opts) {
     mode = 'walk';
     if (turnFlip) dir *= -1;
     settleDuringTurn = false;
+    clearTurn();
     yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
     placeOnPath();
   }
@@ -703,6 +814,7 @@ export function mountStreetWalker(opts) {
     dir = 1;
     blendT = 1;
     settleDuringTurn = false;
+    clearTurn();
     api.length = route.total;
     commit(c.x, c.z, 0);
     const heading = yawFor(1, sampleRoute(route, 0).t);
@@ -873,6 +985,7 @@ export function mountStreetWalker(opts) {
       mode = 'walk';
       blendT = 1;
       settleDuringTurn = false;
+      clearTurn();
       phase = 0;
       const cycles = s / STRIDE;
       const frac = cycles - Math.floor(cycles);
@@ -890,6 +1003,16 @@ export function mountStreetWalker(opts) {
       cam.position.set(5.85, 1.72, 4.35);
       ctrl.target.set(1.85, 0.38, 1.55);
       if (ctrl.update) ctrl.update();
+    },
+    focus() {
+      if (!camera || !controls) return null;
+      const x = root.position.x;
+      const y = root.position.y;
+      const z = root.position.z;
+      camera.position.set(x + 3.05, y + 0.85, z + 2.2);
+      controls.target.set(x, y * 0.42, z);
+      if (controls.update) controls.update();
+      return { x, y, z };
     },
     update(dt, pulse, live) {
       if (!api.enabled) return;
@@ -929,10 +1052,27 @@ export function mountStreetWalker(opts) {
         }
         const spinStart = turnFlip ? 0.28 : 0.08;
         const spinU = u <= spinStart ? 0 : smootherstep((u - spinStart) / (1 - spinStart));
-        yaw = yaw0 + turnDelta * spinU;
-        if (settleDuringTurn) placeOnPath();
-        else placePivot();
-        if (u >= 1) finishTurn();
+        if (u >= 1) {
+          finishTurn();
+          return;
+        }
+        if (turnPlan && turnPlan.kind === 'cross') {
+          if (!turnHeld) {
+            turnHold.x = root.position.x;
+            turnHold.z = root.position.z;
+            turnHeld = true;
+          }
+          turnFade = spinU;
+          // Stay on the planted spot. Orbiting the boot while the card is
+          // held would skate the sprite sideways through the fade.
+          if (settleDuringTurn) placeOnPath();
+          else commit(turnHold.x, turnHold.z, 0);
+        } else {
+          const direct = turnPlan ? turnPlan.direct : turnDelta;
+          yaw = yaw0 + direct * spinU;
+          if (settleDuringTurn) placeOnPath();
+          else placePivot();
+        }
         return;
       }
       if (blendT < 1) blendT = Math.min(1, blendT + dt / 0.22);
@@ -972,6 +1112,10 @@ export function mountStreetWalker(opts) {
         y: root.position.y,
         z: root.position.z,
         yaw,
+        shown: figure.rotation.y,
+        plan: turnPlan ? turnPlan.kind : null,
+        style: turnPlan && turnPlan.style ? turnPlan.style : null,
+        fade: turnFade,
         dragging,
         route: route.total,
       };
