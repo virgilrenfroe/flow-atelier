@@ -752,8 +752,18 @@ function physPick(e) {
 }
 
 function physBeginGrab(e) {
-  if (physFreeze || live.walkMode || live.tourMode) return false;
+  if (physFreeze || live.walkMode || live.tourMode) {
+    window.__harborPropDist = null;
+    return false;
+  }
   const hit = physPick(e);
+  window.__harborPropDist = hit ? hit.distance : null;
+  // The street passer is not a crate. If he is the nearer surface, leave the
+  // pointer for his drag. A closer crate or lantern still grabs as before.
+  if (typeof live.walkerHitDistance === 'function') {
+    const walkerDist = live.walkerHitDistance(e);
+    if (walkerDist != null && (!hit || walkerDist < hit.distance - 1e-3)) return false;
+  }
   if (!hit) return false;
   const entry = hit.object.userData.physEntry;
   if (!entry || entry.mass <= 0) return false;
