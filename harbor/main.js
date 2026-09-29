@@ -4047,8 +4047,14 @@ const streetWalker = mountStreetWalker({
   enabled: walkerParam !== '0' && walkerParam !== 'off',
   anisotropy: renderer.capabilities.getMaxAnisotropy(),
   bloomLayer: BLOOM_LAYER,
+  camera,
+  controls,
+  domElement: renderer.domElement,
+  input,
+  allowDrag: () => !live.walkMode && !live.tourMode,
 });
 window.__streetWalker = streetWalker;
+live.walkerHitDistance = (e) => (streetWalker ? streetWalker.hitDistance(e) : null);
 
 // ——— A03 · Signal volume air ———
 // Raymarched umber shafts on the beacon. Separate pass: does not rewrite
