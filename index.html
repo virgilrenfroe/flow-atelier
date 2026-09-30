@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <title>Flow · A Song with a Hole in It</title>
-<link rel="preload" href="./demo-assets/audio/corridor-song.mp3" as="audio" crossorigin="anonymous" />
 <meta name="description" content="Flow fields for the corridor song — A Song with a Hole in It. Bass, volume, and beats drive the field." />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://flow-atelier.up.railway.app/" />
@@ -448,7 +447,7 @@ let songUrl = './demo-assets/audio/corridor-song.mp3';
 let songLabelText = 'A Song with a Hole in It';
 let customTrack = false; // user upload → flow field only (no locked lyrics)
 let objectUrl = null;
-let audioUseCapture = false; // HTMLAudio audible + captureStream → analyser (fallback: MediaElementSource)
+let audioUseCapture = false; // kept for HUD/debug; playback uses MediaElementSource everywhere (Safari-safe)
 const audioFx = { scale: true, vel: true, color: true, beat: true, steer: true };
 const bands = { bass: 0, mid: 0, high: 0, vol: 0, onset: 0 };
 const bandFloor = { bass: 0.08, mid: 0.08, high: 0.08, vol: 0.08 };
@@ -467,6 +466,9 @@ let bendKick = 0;
 let steerAngle = 0;
 let steerHeld = 0;
 let noiseZoom = 1;
+let maskTopoFlash = 0; // seconds of forced topo vectors on bass stutter
+/** play() promise started inside the user-gesture stack (must not await before calling play). */
+let gesturePlayPromise = null;
 
 function setMeter(id, v) {
   const pct = Math.max(0, Math.min(100, (v * 100) | 0));
@@ -509,74 +511,98 @@ function primeAudioGesture() {
   return audioCtx;
 }
 
-async function ensureAudio() {
-  if (audioReady && mediaEl) return true;
+/**
+ * Build AudioContext + in-DOM HTMLAudio + MediaElementSource graph.
+ * Fully synchronous — safe to call from a tap before any await (iOS Safari).
+ * Eager page-load call warms the ~11MB corridor mp3 via preload=auto.
+ */
+function ensureAudioSync() {
+  if (audioReady && mediaEl) {
+    primeAudioGesture();
+    return true;
+  }
   try {
     primeAudioGesture();
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
     if (!analyser) {
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.45;
       audioData = new Uint8Array(analyser.frequencyBinCount);
     }
-    mediaEl = new Audio();
-    mediaEl.crossOrigin = 'anonymous';
-    mediaEl.loop = true;
-    mediaEl.preload = 'auto';
-    mediaEl.playsInline = true;
-    mediaEl.setAttribute('playsinline', '');
-    mediaEl.setAttribute('webkit-playsinline', '');
-    mediaEl.src = absoluteSongUrl();
-    // Keep in DOM — iOS is unreliable with detached Audio elements.
-    mediaEl.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1';
-    document.body.appendChild(mediaEl);
-
-    const canCapture = typeof mediaEl.captureStream === 'function'
-      || typeof mediaEl.mozCaptureStream === 'function';
-    if (canCapture) {
-      // Element stays the audible path; wire analyser after play() via captureStream.
-      audioUseCapture = true;
-    } else {
+    if (!mediaEl) {
+      mediaEl = new Audio();
+      mediaEl.crossOrigin = 'anonymous';
+      mediaEl.loop = true;
+      mediaEl.preload = 'auto';
+      mediaEl.playsInline = true;
+      mediaEl.setAttribute('playsinline', '');
+      mediaEl.setAttribute('webkit-playsinline', '');
+      mediaEl.muted = false;
+      mediaEl.defaultMuted = false;
+      mediaEl.volume = 1;
+      mediaEl.src = absoluteSongUrl();
+      // Keep in DOM — iOS is unreliable with detached Audio elements.
+      mediaEl.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1';
+      document.body.appendChild(mediaEl);
+      wireMediaEnded();
+    }
+    if (!audioSrc) {
+      // One Web Audio path for all browsers (incl. iOS Safari — no captureStream).
+      // HTMLAudio is routed through MES → analyser → destination (audible + reactive).
       audioUseCapture = false;
       audioSrc = audioCtx.createMediaElementSource(mediaEl);
       audioSrc.connect(analyser);
       analyser.connect(audioCtx.destination);
     }
     audioReady = true;
-    wireMediaEnded();
-    document.getElementById('h-audio').textContent = 'ready';
+    const ha = document.getElementById('h-audio');
+    if (ha && ha.textContent === 'idle') ha.textContent = 'ready';
     updateSongChrome();
     return true;
   } catch (err) {
     console.warn('audio init failed', err);
-    document.getElementById('h-audio').textContent = 'fail';
+    const ha = document.getElementById('h-audio');
+    if (ha) ha.textContent = 'fail';
     return false;
   }
 }
 
-function wireCaptureAnalyser() {
-  if (!audioUseCapture || !mediaEl || !audioCtx || !analyser) return;
-  if (audioSrc) return;
-  try {
-    const capture = (mediaEl.captureStream || mediaEl.mozCaptureStream).bind(mediaEl);
-    const stream = capture();
-    audioSrc = audioCtx.createMediaStreamSource(stream);
-    audioSrc.connect(analyser);
-    // Do not connect analyser → destination: HTMLAudioElement is already audible.
-  } catch (err) {
-    console.warn('captureStream analyser failed; falling back', err);
-    try {
-      if (audioSrc) { try { audioSrc.disconnect(); } catch (_) {} }
-      audioUseCapture = false;
-      audioSrc = audioCtx.createMediaElementSource(mediaEl);
-      audioSrc.connect(analyser);
-      analyser.connect(audioCtx.destination);
-    } catch (err2) {
-      console.warn('media element source fallback failed', err2);
-    }
+async function ensureAudio() {
+  return ensureAudioSync();
+}
+
+/** No-op stub — captureStream path removed (broke analyser on some engines; absent on iOS). */
+function wireCaptureAnalyser() {}
+
+/**
+ * Kick playback INSIDE the user-gesture call stack.
+ * iOS Safari voids the gesture token across any await — so play() must be sync here.
+ * Returns the play() promise (or null).
+ */
+function kickSongFromGesture() {
+  if (!ensureAudioSync()) return null;
+  primeAudioGesture();
+  mediaEl.muted = false;
+  mediaEl.defaultMuted = false;
+  mediaEl.volume = 1;
+  const hint = document.getElementById('gestureHint');
+  if (hint) hint.classList.add('hidden');
+  if (audioPlaying && mediaEl && !mediaEl.paused) {
+    gesturePlayPromise = gesturePlayPromise || Promise.resolve();
+    return gesturePlayPromise;
   }
+  // Reuse in-flight gesture play() — beginFlowWithSong + unlockAndPlaySong both call kick.
+  if (gesturePlayPromise && mediaEl && !mediaEl.paused) return gesturePlayPromise;
+  const ha = document.getElementById('h-audio');
+  if (ha) ha.textContent = 'loading';
+  // Do NOT call mediaEl.load() here — it aborts preload buffering and can drop the iOS gesture.
+  try {
+    gesturePlayPromise = mediaEl.play();
+  } catch (err) {
+    gesturePlayPromise = Promise.reject(err);
+  }
+  return gesturePlayPromise;
 }
 
 async function loadUserFile(file) {
@@ -594,6 +620,7 @@ async function loadUserFile(file) {
     audioReady = false;
     audioPlaying = false;
     audioUseCapture = false;
+    gesturePlayPromise = null;
     if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
     objectUrl = URL.createObjectURL(file);
     songUrl = objectUrl;
@@ -606,6 +633,7 @@ async function loadUserFile(file) {
     if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
     updateSongChrome();
     beginFlow();
+    // File-picker change events still count as a user gesture on iOS — kick play sync.
     const played = await unlockAndPlaySong();
     if (!played) return;
   } catch (err) {
@@ -621,23 +649,20 @@ function notifyCorridorSong(playing) {
 
 /** Unlock AudioContext + play the corridor song (same path as Play / music hint). */
 async function unlockAndPlaySong() {
-  primeAudioGesture();
-  const ok = await ensureAudio();
-  if (!ok) return false;
-  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  // Prefer play() already kicked synchronously in the gesture stack (beginFlowWithSong).
+  const playPromise = gesturePlayPromise || kickSongFromGesture();
+  if (!playPromise && !mediaEl) return false;
   const hint = document.getElementById('gestureHint');
-  if (hint) hint.classList.add('hidden');
-  if (audioPlaying && mediaEl && !mediaEl.paused) {
-    wireCaptureAnalyser();
-    return true;
-  }
   try {
-    document.getElementById('h-audio').textContent = 'loading';
-    // Nudge network for the ~11MB corridor track before play on cold cache.
-    try { mediaEl.load(); } catch (_) {}
-    await mediaEl.play();
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-    wireCaptureAnalyser();
+    if (playPromise) await playPromise;
+    if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume();
+    // Re-assert unmuted after resume — iOS can flip muted when ctx was suspended.
+    if (mediaEl) {
+      mediaEl.muted = false;
+      mediaEl.defaultMuted = false;
+      mediaEl.volume = 1;
+      if (mediaEl.paused) await mediaEl.play().catch(() => {});
+    }
     audioPlaying = true;
     if (paused) setPaused(false);
     const sb = document.getElementById('btn-song');
@@ -647,7 +672,7 @@ async function unlockAndPlaySong() {
     // Arm music fx but stay on the current mode — never auto-switch when audio unlocks
     Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
     syncAudioChips();
-    // Watchdog: playing but silent analyser → resume ctx / re-wire capture.
+    // Watchdog: playing but silent analyser → resume ctx (MES path needs running context).
     setTimeout(() => {
       if (!audioPlaying || !analyser || !audioData) return;
       analyser.getByteFrequencyData(audioData);
@@ -656,8 +681,11 @@ async function unlockAndPlaySong() {
       if (peak < 2) {
         primeAudioGesture();
         if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        wireCaptureAnalyser();
-        if (mediaEl && mediaEl.paused) mediaEl.play().catch(() => {});
+        if (mediaEl) {
+          mediaEl.muted = false;
+          mediaEl.volume = 1;
+          if (mediaEl.paused) mediaEl.play().catch(() => {});
+        }
       }
     }, 1200);
     return true;
@@ -737,6 +765,10 @@ function sampleAudio(dt) {
     bands.onset = 1;
     beatCooldown = 0.12;
     bendKick = 1;
+    // Mask Swarm stutter: briefly show topo vectors as particles shatter off the ring.
+    if (MODES[modeIdx] && MODES[modeIdx].id === 'mask' && audioFx.beat) {
+      maskTopoFlash = 0.55;
+    }
   }
   bendKick = Math.max(0, bendKick - dt * 1.6);
 
@@ -822,7 +854,7 @@ const maskCtx = maskCanvas.getContext('2d', { willReadFrequently: true });
 let maskData = null;
 let W = 0, H = 0, dpr = 1;
 
-const COUNT = 3200;
+const COUNT = 4200; // denser Mask Swarm / face-window fill
 const particles = [];
 let trailAlpha = 0.055;
 let t = 0;
@@ -1191,6 +1223,24 @@ function flowAt(x, y, time) {
   const id = MODES[modeIdx].id;
   if (id === 'listen') return listenFlow(x, y, time);
   let f = curlField(x, y, time);
+  // Mask Swarm: mid/vol → thick liquid curls; bass onset → shatter flare off the ring.
+  if (id === 'mask' && audioPlaying && !reduceMotion) {
+    const midVol = bands.mid * 0.55 + bands.vol * 0.85;
+    const liquid = 0.35 + midVol * 2.4;
+    const k = 0.0042 + bands.mid * 0.018 + bands.vol * 0.01;
+    const wave = Math.sin(x * k + y * k * 0.68 + time * (0.5 + bands.vol * 1.6 + bands.mid * 0.9));
+    const dAng = wave * Math.min(1.55, 0.18 + liquid * 0.7);
+    const cs = Math.cos(dAng), sn = Math.sin(dAng);
+    f = { x: (f.x * cs - f.y * sn) * (1 + midVol * 0.85), y: (f.x * sn + f.y * cs) * (1 + midVol * 0.85) };
+    if (bands.onset > 0.5 || bendKick > 0.45) {
+      const cx = W * MASK_RING.cx, cy = H * MASK_RING.cy;
+      const dx = x - cx, dy = y - cy;
+      const r = Math.hypot(dx, dy) + 1e-3;
+      const blast = (1.8 + bands.bass * 4.5 + bendKick * 3.2) * Math.min(W, H) * 0.02;
+      f = { x: f.x + (dx / r) * blast, y: f.y + (dy / r) * blast };
+    }
+    return f;
+  }
   if (id !== 'mirror') return f;
   const s = cornerSwirl(x, y);
   f = { x: f.x + s.x, y: f.y + s.y };
@@ -1577,6 +1627,7 @@ function setMode(idx) {
     : m.id === 'mirror' ? 0.046
     : m.id === 'attrib' ? 0.06
     : m.id === 'listen' ? (0.052 + Math.min(0.035, pulseDrive.turb * 0.028))
+    : m.id === 'mask' ? 0.038 // denser liquid trails for face-window fill
     : 0.055;
   const hint = document.getElementById('gestureHint');
   document.body.classList.toggle('mode-listen', m.id === 'listen');
@@ -1650,10 +1701,10 @@ function beginFlow() {
 }
 /** First public gesture: start Mask Swarm motion AND the corridor song. */
 function beginFlowWithSong() {
-  const first = beginFlow();
-  // Resume AudioContext synchronously in the gesture stack before any await.
-  primeAudioGesture();
-  if (first) unlockAndPlaySong();
+  beginFlow();
+  // CRITICAL (iOS Safari): call play() synchronously in this stack — no await before it.
+  kickSongFromGesture();
+  unlockAndPlaySong();
 }
 function installFlowGate() {
   if (reduceMotion) {
@@ -1678,6 +1729,7 @@ function installFlowGate() {
     beginFlowWithSong();
   };
   window.addEventListener('pointerdown', onPointer, { capture: true });
+  window.addEventListener('touchstart', onPointer, { capture: true, passive: true });
   window.addEventListener('click', onPointer, { capture: true });
 }
 function setPaused(on) {
@@ -1921,6 +1973,7 @@ function colorFor(p, ang, speed) {
 function step(dt) {
   if (reduceMotion || paused || !flowLive) return;
   t += dt;
+  if (maskTopoFlash > 0) maskTopoFlash = Math.max(0, maskTopoFlash - dt);
   const mode = MODES[modeIdx].id;
   const baseSpeed = Math.min(W, H) * (mode === 'curl' ? 0.55 : mode === 'mirror' ? 0.32 : mode === 'listen' ? 0.4 : 0.48);
 
@@ -1988,13 +2041,22 @@ function step(dt) {
       p.size = 0.4 + (1.8 * (p.life / p.maxLife)) + Math.min(mag * 0.002, 1.2);
     } else if (mode === 'mask') {
       const bright = sampleMaskBright(p.x, p.y);
-      // Slow outside ink; cling to letterforms
-      spd *= 0.35 + bright * 1.1;
-      if (bright < 0.12) {
-        // Soft pull back toward ink via random reseed occasionally
-        if (Math.random() < 0.02) {
-          Object.assign(p, spawnOne());
-          continue;
+      const midVol = audioPlaying ? (bands.mid * 0.5 + bands.vol * 0.9) : 0;
+      const shatter = audioPlaying && (bands.onset > 0.5 || bendKick > 0.55 || bands.bass > 0.72);
+      // Mid/vol soar → thick liquid cling on the ring; bass stutter → break free.
+      if (shatter) {
+        spd *= 1.15 + bands.bass * 2.4 + bendKick * 1.8;
+        p.size = Math.min(3.2, p.size * (1.15 + bands.bass * 0.6));
+        // Escape the ring — do not reseed back onto ink this frame.
+      } else {
+        spd *= (0.35 + bright * 1.1) * (0.85 + midVol * 1.35);
+        p.size = Math.max(p.size, 0.55 + midVol * 1.65);
+        if (bright < 0.12) {
+          // Soft pull back toward ink via random reseed occasionally
+          if (Math.random() < 0.02) {
+            Object.assign(p, spawnOne());
+            continue;
+          }
         }
       }
     } else if (mode === 'pack') {
@@ -2101,9 +2163,18 @@ function render() {
         } else {
           ctx.globalCompositeOperation = 'source-over';
           ctx.strokeStyle = col;
-          ctx.lineWidth = Math.max(0.6, sz * (mirrorDraw ? 0.48 : 0.55));
-          ctx.globalAlpha = (reduceMotion ? 0.85 : (mirrorDraw ? 0.58 : 0.7)) * aMul;
+          const maskDraw = modeId === 'mask';
+          const liquid = maskDraw && audioPlaying ? Math.min(1, bands.mid * 0.45 + bands.vol * 0.85) : 0;
+          const shatter = maskDraw && audioPlaying && (bands.onset > 0.5 || bendKick > 0.5);
+          ctx.lineWidth = Math.max(0.6, sz * (mirrorDraw ? 0.48 : maskDraw ? (0.62 + liquid * 1.15) : 0.55));
+          ctx.globalAlpha = (reduceMotion ? 0.85 : (mirrorDraw ? 0.58 : maskDraw ? (0.72 + liquid * 0.18) : 0.7)) * aMul;
+          if (shatter) {
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = Math.min(0.85, 0.35 + bands.bass * 0.45) * aMul;
+            ctx.lineWidth = Math.max(1.1, sz * (1.1 + bands.bass));
+          }
           ctx.stroke();
+          if (shatter) ctx.globalCompositeOperation = 'source-over';
         }
       }
     } else {
@@ -2134,7 +2205,7 @@ function render() {
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
 
-  if (showVectors) drawVectors();
+  if (showVectors || maskTopoFlash > 0) drawVectors();
 
   // Still compose: freeze with vectors
   if (reduceMotion && showVectors) drawVectors();
@@ -2308,6 +2379,8 @@ function initialModeIndex() {
 resize();
 loadPulse();
 setMode(initialModeIndex());
+// Warm corridor mp3 + Audio graph before first tap (sync; ctx stays suspended until gesture).
+if (!reduceMotion) ensureAudioSync();
 installFlowGate();
 if (params.has('still') || reduceMotion) {
   stillCompose();
