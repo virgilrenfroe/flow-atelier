@@ -369,7 +369,7 @@
     <strong>Click to play · or drop your song</strong>
     Play the default track, or use Your song / drag in an mp3. Four mirrored corners bleed across the center and bend with volume and frequency.
   </div>
-  <div class="begin-hint gone" id="beginHint" aria-hidden="true">Tap to begin</div>
+  <div class="begin-hint gone" id="beginHint" aria-hidden="true">Tap to begin · song plays</div>
 
 <script>
 (() => {
@@ -545,20 +545,9 @@ async function loadUserFile(file) {
     const sb = document.getElementById('btn-song');
     if (sb) { sb.classList.remove('on'); sb.innerHTML = 'Play <kbd>A</kbd>'; }
     updateSongChrome();
-    const ok = await ensureAudio();
-    if (!ok) return;
-    if (audioCtx.state === 'suspended') await audioCtx.resume();
-    const hint = document.getElementById('gestureHint');
-    if (hint) hint.classList.add('hidden');
     beginFlow();
-    await mediaEl.play();
-    audioPlaying = true;
-    if (paused) setPaused(false);
-    if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
-    document.getElementById('h-audio').textContent = 'live';
-    notifyCorridorSong(true);
-    Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
-    syncAudioChips();
+    const played = await unlockAndPlaySong();
+    if (!played) return;
   } catch (err) {
     console.warn(err);
     document.getElementById('h-audio').textContent = 'blocked';
@@ -570,14 +559,38 @@ function notifyCorridorSong(playing) {
   try { parent.postMessage({ type: 'corridor-song', playing: !!playing }, '*'); } catch (_) {}
 }
 
-async function toggleSong() {
-  beginFlow();
+/** Unlock AudioContext + play the corridor song (same path as Play / music hint). */
+async function unlockAndPlaySong() {
   const ok = await ensureAudio();
-  if (!ok) return;
+  if (!ok) return false;
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   const hint = document.getElementById('gestureHint');
   if (hint) hint.classList.add('hidden');
+  if (audioPlaying && mediaEl && !mediaEl.paused) return true;
+  try {
+    await mediaEl.play();
+    audioPlaying = true;
+    if (paused) setPaused(false);
+    const sb = document.getElementById('btn-song');
+    if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
+    document.getElementById('h-audio').textContent = 'live';
+    notifyCorridorSong(true);
+    // Arm music fx but stay on the current mode — never auto-switch when audio unlocks
+    Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
+    syncAudioChips();
+    return true;
+  } catch (err) {
+    document.getElementById('h-audio').textContent = 'blocked';
+    if (hint) hint.classList.remove('hidden');
+    return false;
+  }
+}
+
+async function toggleSong() {
+  beginFlow();
   if (audioPlaying) {
+    const ok = await ensureAudio();
+    if (!ok) return;
     mediaEl.pause();
     audioPlaying = false;
     const sb = document.getElementById('btn-song');
@@ -585,21 +598,7 @@ async function toggleSong() {
     document.getElementById('h-audio').textContent = 'paused';
     notifyCorridorSong(false);
   } else {
-    try {
-      await mediaEl.play();
-      audioPlaying = true;
-      if (paused) setPaused(false);
-      const sb = document.getElementById('btn-song');
-      if (sb) { sb.classList.add('on'); sb.innerHTML = 'Pause <kbd>A</kbd>'; }
-      document.getElementById('h-audio').textContent = 'live';
-      notifyCorridorSong(true);
-      // Arm music fx but stay on the current mode — never auto-switch when audio unlocks
-      Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
-      syncAudioChips();
-    } catch (err) {
-      document.getElementById('h-audio').textContent = 'blocked';
-      if (hint) hint.classList.remove('hidden');
-    }
+    await unlockAndPlaySong();
   }
 }
 
@@ -1555,7 +1554,7 @@ function syncBeginHint() {
   hint.setAttribute('aria-hidden', show ? 'false' : 'true');
 }
 function beginFlow() {
-  if (flowLive || reduceMotion) return;
+  if (flowLive || reduceMotion) return false;
   flowLive = true;
   const hm = document.getElementById('h-m');
   if (hm) hm.textContent = 'live';
@@ -1564,6 +1563,12 @@ function beginFlow() {
   if (audioCtx && audioCtx.state === 'suspended') {
     audioCtx.resume().catch(() => {});
   }
+  return true;
+}
+/** First public gesture: start Mask Swarm motion AND the corridor song. */
+function beginFlowWithSong() {
+  const first = beginFlow();
+  if (first) unlockAndPlaySong();
 }
 function installFlowGate() {
   if (reduceMotion) {
@@ -1571,6 +1576,7 @@ function installFlowGate() {
     return;
   }
   if (flowAutoplays()) {
+    // Embed / ?autoplay=1: field runs for capture; do not force song (autoplay policy + silent capture).
     flowLive = true;
     syncBeginHint();
     return;
@@ -1582,8 +1588,9 @@ function installFlowGate() {
   const onPointer = (e) => {
     if (flowLive) return;
     const t = e.target;
-    if (t && t.closest && t.closest('#btn-pause')) return;
-    beginFlow();
+    // Let Play / Pause / load / music-hint own their click (avoid double-toggle).
+    if (t && t.closest && t.closest('#btn-pause, #btn-song, #gestureHint, #btn-load, #file-audio')) return;
+    beginFlowWithSong();
   };
   window.addEventListener('pointerdown', onPointer, { capture: true });
   window.addEventListener('click', onPointer, { capture: true });
@@ -1633,7 +1640,7 @@ document.getElementById('btn-vec').addEventListener('click', () => setVectors(!s
 document.getElementById('btn-mask').addEventListener('click', cycleMask);
 document.getElementById('btn-reset').addEventListener('click', () => resetParticles());
 document.getElementById('btn-pause').addEventListener('click', () => {
-  if (!flowLive && !reduceMotion) { beginFlow(); return; }
+  if (!flowLive && !reduceMotion) { beginFlowWithSong(); return; }
   setPaused(!paused);
 });
 document.getElementById('btn-export').addEventListener('click', exportSVG);
@@ -1656,7 +1663,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
   }
   else if (k === ' ' || e.code === 'Space') {
-    if (!flowLive && !reduceMotion) { beginFlow(); e.preventDefault(); return; }
+    if (!flowLive && !reduceMotion) { beginFlowWithSong(); e.preventDefault(); return; }
     setPaused(!paused); e.preventDefault();
   }
   else if (k >= '1' && k <= '9') {
