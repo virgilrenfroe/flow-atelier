@@ -308,7 +308,7 @@
       </div>
     </div>
     <div class="hud">
-      <div class="r"><span>mode</span><strong id="h-mode">quad</strong></div>
+      <div class="r"><span>mode</span><strong id="h-mode">mask</strong></div>
       <div class="r"><span>particles</span><strong id="h-n">—</strong></div>
       <div class="r"><span>fps</span><strong id="h-fps">—</strong></div>
       <div class="r"><span>mask</span><strong id="h-mask">text</strong></div>
@@ -708,7 +708,7 @@ function setupMidi() {
 }
 
 
-let modeIdx = 0;
+let modeIdx = 1; // default Mask swarm
 let showVectors = false;
 let paused = false;
 let maskKind = 0; // 0 text/ring swarm, 1 rings, 2 blot
@@ -1993,8 +1993,8 @@ window.addEventListener('resize', resize);
 /* ── Still seed ────────────────────────────────────────────────────── */
 function stillCompose() {
   if (!params.get('mode')) {
-    const mi = MODES.findIndex((m) => m.id === 'mirror');
-    setMode(mi >= 0 ? mi : 0);
+    const mi = MODES.findIndex((m) => m.id === 'mask');
+    setMode(mi >= 0 ? mi : 1);
   }
   setVectors(false);
   document.getElementById('h-n').textContent = String(particles.length);
@@ -2126,9 +2126,10 @@ if (reduceMotion) {
 
 function initialModeIndex() {
   const want = (params.get('mode') || '').toLowerCase();
-  if (!want) return 0;
+  const maskDefault = Math.max(0, MODES.findIndex((m) => m.id === 'mask'));
+  if (!want) return maskDefault;
   const i = MODES.findIndex((m) => m.id === want || m.short === want);
-  return i >= 0 ? i : 0;
+  return i >= 0 ? i : maskDefault;
 }
 
 resize();
