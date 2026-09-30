@@ -161,6 +161,18 @@
   .gesture-hint strong { display: block; color: var(--accent); font-size: 11px;
     letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 6px; }
   .gesture-hint.hidden { display: none; }
+  .begin-hint {
+    position: absolute; left: 50%; top: 64%;
+    transform: translateX(-50%);
+    z-index: 6; pointer-events: none;
+    font-family: var(--font-mono); font-size: 11px;
+    letter-spacing: 0.28em; text-transform: uppercase;
+    color: rgba(242,235,224,0.66);
+    text-shadow: 0 2px 18px rgba(5,6,10,0.9);
+    transition: opacity 0.7s ease;
+    white-space: nowrap;
+  }
+  .begin-hint.gone { opacity: 0; }
 
   /* Anchor matches Mask Swarm ring center (canvas H*0.48, R=0.22*min) */
   .mask-hint { display: none !important; /* lyrics removed */
@@ -274,6 +286,7 @@
   body.embed .modes { bottom: 8px; right: 8px; max-width: 48vw; }
   body.embed .audio-rail { top: 40px; right: 6px; transform: scale(0.72); transform-origin: top right; }
   body.embed .gesture-hint { font-size: 12px; padding: 12px 14px; }
+  body.embed .begin-hint { font-size: 10px; letter-spacing: 0.2em; top: 68%; }
   body.embed .mask-hint { width: min(36vmin, 48%); max-width: min(36vmin, 48%); }
   body.embed .mask-hint.lyrics.short { font-size: clamp(1.2rem, 6.5vmin, 2.4rem); }
   body.embed .mask-hint.lyrics.mid { font-size: clamp(1rem, 4.5vmin, 1.7rem); }
@@ -352,10 +365,11 @@
     <p class="note"><a href="archive/flow-pre-corners.html">Previous build</a></p>
     
   </div>
-  <div class="gesture-hint" id="gestureHint" role="button" tabindex="0">
+  <div class="gesture-hint hidden" id="gestureHint" role="button" tabindex="0">
     <strong>Click to play · or drop your song</strong>
     Play the default track, or use Your song / drag in an mp3. Four mirrored corners bleed across the center and bend with volume and frequency.
   </div>
+  <div class="begin-hint gone" id="beginHint" aria-hidden="true">Tap to begin</div>
 
 <script>
 (() => {
@@ -536,6 +550,7 @@ async function loadUserFile(file) {
     if (audioCtx.state === 'suspended') await audioCtx.resume();
     const hint = document.getElementById('gestureHint');
     if (hint) hint.classList.add('hidden');
+    beginFlow();
     await mediaEl.play();
     audioPlaying = true;
     if (paused) setPaused(false);
@@ -556,6 +571,7 @@ function notifyCorridorSong(playing) {
 }
 
 async function toggleSong() {
+  beginFlow();
   const ok = await ensureAudio();
   if (!ok) return;
   if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -711,6 +727,7 @@ function setupMidi() {
 let modeIdx = 1; // default Mask swarm
 let showVectors = false;
 let paused = false;
+let flowLive = false; // public start waits for a tap; embed / ?autoplay runs immediately
 let maskKind = 0; // 0 text/ring swarm, 1 rings, 2 blot
 /** Mask Swarm circle — keep lyrics locked to this center */
 const MASK_RING = { cx: 0.5, cy: 0.48, r: 0.22 };
@@ -1488,6 +1505,8 @@ function setMode(idx) {
     layoutListenStar();
   } else if ((m.id === 'music' || m.id === 'mirror') && !audioPlaying && !reduceMotion) {
     if (hint) hint.classList.remove('hidden');
+  } else if (hint) {
+    hint.classList.add('hidden');
   }
   resetParticles();
 }
@@ -1519,6 +1538,55 @@ function setVectors(on) {
   showVectors = on;
   document.getElementById('h-vec').textContent = on ? 'on' : 'off';
   document.getElementById('btn-vec').classList.toggle('on', on);
+}
+function flowAutoplays() {
+  if (reduceMotion) return false;
+  if (params.has('autoplay')) {
+    const v = (params.get('autoplay') || '1').toLowerCase();
+    return v !== '0' && v !== 'false' && v !== 'off';
+  }
+  return params.has('embed');
+}
+function syncBeginHint() {
+  const hint = document.getElementById('beginHint');
+  if (!hint) return;
+  const show = !flowLive && !reduceMotion;
+  hint.classList.toggle('gone', !show);
+  hint.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+function beginFlow() {
+  if (flowLive || reduceMotion) return;
+  flowLive = true;
+  const hm = document.getElementById('h-m');
+  if (hm) hm.textContent = 'live';
+  syncBeginHint();
+  // Same first gesture that starts the field also unlocks a suspended context.
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume().catch(() => {});
+  }
+}
+function installFlowGate() {
+  if (reduceMotion) {
+    syncBeginHint();
+    return;
+  }
+  if (flowAutoplays()) {
+    flowLive = true;
+    syncBeginHint();
+    return;
+  }
+  flowLive = false;
+  const hm = document.getElementById('h-m');
+  if (hm) hm.textContent = 'tap';
+  syncBeginHint();
+  const onPointer = (e) => {
+    if (flowLive) return;
+    const t = e.target;
+    if (t && t.closest && t.closest('#btn-pause')) return;
+    beginFlow();
+  };
+  window.addEventListener('pointerdown', onPointer, { capture: true });
+  window.addEventListener('click', onPointer, { capture: true });
 }
 function setPaused(on) {
   paused = !!on;
@@ -1564,7 +1632,10 @@ document.getElementById('btn-mode').addEventListener('click', () => setMode(mode
 document.getElementById('btn-vec').addEventListener('click', () => setVectors(!showVectors));
 document.getElementById('btn-mask').addEventListener('click', cycleMask);
 document.getElementById('btn-reset').addEventListener('click', () => resetParticles());
-document.getElementById('btn-pause').addEventListener('click', () => setPaused(!paused));
+document.getElementById('btn-pause').addEventListener('click', () => {
+  if (!flowLive && !reduceMotion) { beginFlow(); return; }
+  setPaused(!paused);
+});
 document.getElementById('btn-export').addEventListener('click', exportSVG);
 
 window.addEventListener('keydown', (e) => {
@@ -1584,7 +1655,10 @@ window.addEventListener('keydown', (e) => {
     location.href = 'harbor.html?v=rube127';
     e.preventDefault();
   }
-  else if (k === ' ' || e.code === 'Space') { setPaused(!paused); e.preventDefault(); }
+  else if (k === ' ' || e.code === 'Space') {
+    if (!flowLive && !reduceMotion) { beginFlow(); e.preventDefault(); return; }
+    setPaused(!paused); e.preventDefault();
+  }
   else if (k >= '1' && k <= '9') {
     const n = Number(k) - 1;
     if (n < MODES.length) { setMode(n); e.preventDefault(); }
@@ -1753,7 +1827,7 @@ function colorFor(p, ang, speed) {
 }
 
 function step(dt) {
-  if (reduceMotion || paused) return;
+  if (reduceMotion || paused || !flowLive) return;
   t += dt;
   const mode = MODES[modeIdx].id;
   const baseSpeed = Math.min(W, H) * (mode === 'curl' ? 0.55 : mode === 'mirror' ? 0.32 : mode === 'listen' ? 0.4 : 0.48);
@@ -1865,12 +1939,16 @@ function step(dt) {
 let stillBaked = false;
 
 function render() {
+  const holdStill = !flowLive && !reduceMotion;
   // Trail fade
   if (reduceMotion) {
     if (stillBaked) {
       if (showVectors) drawVectors();
       return; // keep baked compose
     }
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, 0, W, H);
+  } else if (holdStill) {
     ctx.fillStyle = INK;
     ctx.fillRect(0, 0, W, H);
   } else {
@@ -1902,7 +1980,7 @@ function render() {
     const col = colorFor(p, p._ang || 0, p._spd || 0.4);
     const sz = p.size * dpr * (mirrorDraw ? 0.72 : listenDraw ? 0.84 : 0.9);
     const jump = Math.hypot(p.x - p.px, p.y - p.py);
-    if (jump < Math.min(W, H) * 0.2) {
+    if (!holdStill && jump < Math.min(W, H) * 0.2) {
       const segs = fieldSegs(p.px, p.py, p.x, p.y);
       for (let s = 0; s < segs.length; s++) {
         const seg = segs[s];
@@ -2053,8 +2131,10 @@ function frame(now) {
     fpsT = now; fpsN = 0;
   }
   if (!reduceMotion) {
-    sampleAudio(dt);
-    step(dt);
+    if (flowLive) {
+      sampleAudio(dt);
+      step(dt);
+    }
     render();
     updateLyrics();
   } else {
@@ -2135,6 +2215,7 @@ function initialModeIndex() {
 resize();
 loadPulse();
 setMode(initialModeIndex());
+installFlowGate();
 if (params.has('still') || reduceMotion) {
   stillCompose();
 }
