@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 <title>Flow · A Song with a Hole in It</title>
+<link rel="preload" href="./demo-assets/audio/corridor-song.mp3" as="audio" crossorigin="anonymous" />
 <meta name="description" content="Flow fields for the corridor song — A Song with a Hole in It. Bass, volume, and beats drive the field." />
 <meta property="og:type" content="website" />
 <meta property="og:url" content="https://flow-atelier.up.railway.app/" />
@@ -447,6 +448,7 @@ let songUrl = './demo-assets/audio/corridor-song.mp3';
 let songLabelText = 'A Song with a Hole in It';
 let customTrack = false; // user upload → flow field only (no locked lyrics)
 let objectUrl = null;
+let audioUseCapture = false; // HTMLAudio audible + captureStream → analyser (fallback: MediaElementSource)
 const audioFx = { scale: true, vel: true, color: true, beat: true, steer: true };
 const bands = { bass: 0, mid: 0, high: 0, vol: 0, onset: 0 };
 const bandFloor = { bass: 0.08, mid: 0.08, high: 0.08, vol: 0.08 };
@@ -492,23 +494,56 @@ function wireMediaEnded() {
   });
 }
 
+function absoluteSongUrl() {
+  try { return new URL(songUrl, location.href).href; } catch (_) { return songUrl; }
+}
+
+/** Create / resume AudioContext inside the user-gesture stack (Safari / Chrome autoplay). */
+function primeAudioGesture() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  } catch (err) {
+    console.warn('audio ctx prime failed', err);
+  }
+  return audioCtx;
+}
+
 async function ensureAudio() {
   if (audioReady && mediaEl) return true;
   try {
+    primeAudioGesture();
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
     if (!analyser) {
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.45;
       audioData = new Uint8Array(analyser.frequencyBinCount);
-      analyser.connect(audioCtx.destination);
     }
-    mediaEl = new Audio(songUrl);
+    mediaEl = new Audio();
     mediaEl.crossOrigin = 'anonymous';
     mediaEl.loop = true;
     mediaEl.preload = 'auto';
-    audioSrc = audioCtx.createMediaElementSource(mediaEl);
-    audioSrc.connect(analyser);
+    mediaEl.playsInline = true;
+    mediaEl.setAttribute('playsinline', '');
+    mediaEl.setAttribute('webkit-playsinline', '');
+    mediaEl.src = absoluteSongUrl();
+    // Keep in DOM — iOS is unreliable with detached Audio elements.
+    mediaEl.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;z-index:-1';
+    document.body.appendChild(mediaEl);
+
+    const canCapture = typeof mediaEl.captureStream === 'function'
+      || typeof mediaEl.mozCaptureStream === 'function';
+    if (canCapture) {
+      // Element stays the audible path; wire analyser after play() via captureStream.
+      audioUseCapture = true;
+    } else {
+      audioUseCapture = false;
+      audioSrc = audioCtx.createMediaElementSource(mediaEl);
+      audioSrc.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
     audioReady = true;
     wireMediaEnded();
     document.getElementById('h-audio').textContent = 'ready';
@@ -518,6 +553,29 @@ async function ensureAudio() {
     console.warn('audio init failed', err);
     document.getElementById('h-audio').textContent = 'fail';
     return false;
+  }
+}
+
+function wireCaptureAnalyser() {
+  if (!audioUseCapture || !mediaEl || !audioCtx || !analyser) return;
+  if (audioSrc) return;
+  try {
+    const capture = (mediaEl.captureStream || mediaEl.mozCaptureStream).bind(mediaEl);
+    const stream = capture();
+    audioSrc = audioCtx.createMediaStreamSource(stream);
+    audioSrc.connect(analyser);
+    // Do not connect analyser → destination: HTMLAudioElement is already audible.
+  } catch (err) {
+    console.warn('captureStream analyser failed; falling back', err);
+    try {
+      if (audioSrc) { try { audioSrc.disconnect(); } catch (_) {} }
+      audioUseCapture = false;
+      audioSrc = audioCtx.createMediaElementSource(mediaEl);
+      audioSrc.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    } catch (err2) {
+      console.warn('media element source fallback failed', err2);
+    }
   }
 }
 
@@ -531,9 +589,11 @@ async function loadUserFile(file) {
     if (mediaEl) { try { mediaEl.pause(); } catch (_) {} }
     if (audioSrc) { try { audioSrc.disconnect(); } catch (_) {} }
     audioSrc = null;
+    if (mediaEl && mediaEl.parentNode) { try { mediaEl.parentNode.removeChild(mediaEl); } catch (_) {} }
     mediaEl = null;
     audioReady = false;
     audioPlaying = false;
+    audioUseCapture = false;
     if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
     objectUrl = URL.createObjectURL(file);
     songUrl = objectUrl;
@@ -561,14 +621,23 @@ function notifyCorridorSong(playing) {
 
 /** Unlock AudioContext + play the corridor song (same path as Play / music hint). */
 async function unlockAndPlaySong() {
+  primeAudioGesture();
   const ok = await ensureAudio();
   if (!ok) return false;
   if (audioCtx.state === 'suspended') await audioCtx.resume();
   const hint = document.getElementById('gestureHint');
   if (hint) hint.classList.add('hidden');
-  if (audioPlaying && mediaEl && !mediaEl.paused) return true;
+  if (audioPlaying && mediaEl && !mediaEl.paused) {
+    wireCaptureAnalyser();
+    return true;
+  }
   try {
+    document.getElementById('h-audio').textContent = 'loading';
+    // Nudge network for the ~11MB corridor track before play on cold cache.
+    try { mediaEl.load(); } catch (_) {}
     await mediaEl.play();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    wireCaptureAnalyser();
     audioPlaying = true;
     if (paused) setPaused(false);
     const sb = document.getElementById('btn-song');
@@ -578,8 +647,22 @@ async function unlockAndPlaySong() {
     // Arm music fx but stay on the current mode — never auto-switch when audio unlocks
     Object.keys(audioFx).forEach((k) => { audioFx[k] = true; });
     syncAudioChips();
+    // Watchdog: playing but silent analyser → resume ctx / re-wire capture.
+    setTimeout(() => {
+      if (!audioPlaying || !analyser || !audioData) return;
+      analyser.getByteFrequencyData(audioData);
+      let peak = 0;
+      for (let i = 0; i < audioData.length; i++) peak = Math.max(peak, audioData[i]);
+      if (peak < 2) {
+        primeAudioGesture();
+        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        wireCaptureAnalyser();
+        if (mediaEl && mediaEl.paused) mediaEl.play().catch(() => {});
+      }
+    }, 1200);
     return true;
   } catch (err) {
+    console.warn('song play blocked', err);
     document.getElementById('h-audio').textContent = 'blocked';
     if (hint) hint.classList.remove('hidden');
     return false;
@@ -1568,6 +1651,8 @@ function beginFlow() {
 /** First public gesture: start Mask Swarm motion AND the corridor song. */
 function beginFlowWithSong() {
   const first = beginFlow();
+  // Resume AudioContext synchronously in the gesture stack before any await.
+  primeAudioGesture();
   if (first) unlockAndPlaySong();
 }
 function installFlowGate() {
@@ -1886,8 +1971,9 @@ function step(dt) {
     let spd = (baseSpeed * p.speedMul);
 
     if (audioPlaying && !reduceMotion && audioFx.vel) {
-      // Quiet = lazy drift; loud = race the field
-      spd *= 0.18 + bands.vol * 3.1;
+      // Quiet = lazy drift; loud = race the field.
+      // Floor keeps Mask Swarm alive while the mp3 buffers / analyser warms up.
+      spd *= Math.max(0.55, 0.18 + bands.vol * 3.1);
     }
 
     if (mode === 'listen') {
