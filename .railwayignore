@@ -1,5 +1,4 @@
 .git
-.git
 demo-assets/captures
 *.webm
-.DS_Store
+node_modules
