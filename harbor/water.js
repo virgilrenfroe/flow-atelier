@@ -29,12 +29,26 @@ const waterMat = new THREE.ShaderMaterial({
     uCamPos: { value: new THREE.Vector3() },
     // Boat footprints: xyz = world x, world z, yaw; w = enabled.
     // ext = half length, half beam, transom blend, outward margin.
+    // uBowN is the bow-pinch exponent (0.8 is the original skiff curve).
+    // Slots 0–5 cover the quay line. Gerstner / Beer-Lambert stay as they are.
     uHull0: { value: new THREE.Vector4(0, 0, 0, 0) },
     uHull1: { value: new THREE.Vector4(0, 0, 0, 0) },
     uHull2: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uHull3: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uHull4: { value: new THREE.Vector4(0, 0, 0, 0) },
+    uHull5: { value: new THREE.Vector4(0, 0, 0, 0) },
     uHullExt0: { value: new THREE.Vector4(1, 0.4, 0.8, 0.02) },
     uHullExt1: { value: new THREE.Vector4(1, 0.4, 0.8, 0.02) },
     uHullExt2: { value: new THREE.Vector4(1, 0.4, 0.8, 0.02) },
+    uHullExt3: { value: new THREE.Vector4(1, 0.4, 0.8, 0.02) },
+    uHullExt4: { value: new THREE.Vector4(1, 0.4, 0.8, 0.02) },
+    uHullExt5: { value: new THREE.Vector4(1, 0.4, 0.8, 0.02) },
+    uBow0: { value: 0.8 },
+    uBow1: { value: 0.8 },
+    uBow2: { value: 0.8 },
+    uBow3: { value: 0.8 },
+    uBow4: { value: 0.8 },
+    uBow5: { value: 0.8 },
   },
   vertexShader: /* glsl */`
     uniform float uTime;
@@ -104,8 +118,9 @@ const waterMat = new THREE.ShaderMaterial({
   fragmentShader: /* glsl */`
     uniform float uDepth, uFresnel, uFoam, uReflect, uWallZ, uWaterY, uTime, uAmp;
     uniform vec3 uLampA, uLampB, uKeyDir, uCamPos;
-    uniform vec4 uHull0, uHull1, uHull2;
-    uniform vec4 uHullExt0, uHullExt1, uHullExt2;
+    uniform vec4 uHull0, uHull1, uHull2, uHull3, uHull4, uHull5;
+    uniform vec4 uHullExt0, uHullExt1, uHullExt2, uHullExt3, uHullExt4, uHullExt5;
+    uniform float uBow0, uBow1, uBow2, uBow3, uBow4, uBow5;
     varying vec2 vUv;
     varying vec3 vWorldPos;
     varying vec3 vWorldN;
@@ -133,12 +148,13 @@ const waterMat = new THREE.ShaderMaterial({
       return F0 + (1.0 - F0) * pow(1.0 - clamp(cosTheta, 0.0, 1.0), 5.0);
     }
     // Same station curve as harborHull: transom, midship, bow pinch.
-    float harborBeamK(float t, float transom){
+    // bowPow 0.8 matches the original skiff. Lower is a fuller bow.
+    float harborBeamK(float t, float transom, float bowPow){
       if (t < 0.14) return transom * 0.82 + (0.94 - transom * 0.82) * (t / 0.14);
       if (t < 0.56) return 0.94 + 0.06 * sin(((t - 0.14) / 0.42) * 3.14159265);
-      return max(0.04, pow(max(1.0 - (t - 0.56) / 0.44, 0.0), 0.8));
+      return max(0.04, pow(max(1.0 - (t - 0.56) / 0.44, 0.0), max(bowPow, 0.05)));
     }
-    bool harborInHull(vec2 xz, vec4 pose, vec4 ext){
+    bool harborInHull(vec2 xz, vec4 pose, vec4 ext, float bowPow){
       if (pose.w < 0.5) return false;
       float dx = xz.x - pose.x;
       float dz = xz.y - pose.y;
@@ -153,7 +169,7 @@ const waterMat = new THREE.ShaderMaterial({
       float zStem = halfL + halfL * 0.056 + margin;
       if (lz < zStern || lz > zStem) return false;
       float t = clamp((lz + halfL) / max(halfL * 2.0, 0.001), 0.0, 1.0);
-      float bk = harborBeamK(t, ext.z);
+      float bk = harborBeamK(t, ext.z, bowPow);
       if (lz > zBow) bk *= 1.0 - clamp((lz - zBow) / max(zStem - zBow, 0.001), 0.0, 1.0);
       return abs(lx) <= ext.y * bk + margin;
     }
@@ -163,9 +179,12 @@ const waterMat = new THREE.ShaderMaterial({
       if (vWorldPos.z < uWallZ + 0.20) discard;
       if (abs(vWorldPos.x) > 11.05) discard;
       // Closed boats: the sheet does not draw inside the sheer planform.
-      if (harborInHull(vWorldPos.xz, uHull0, uHullExt0)) discard;
-      if (harborInHull(vWorldPos.xz, uHull1, uHullExt1)) discard;
-      if (harborInHull(vWorldPos.xz, uHull2, uHullExt2)) discard;
+      if (harborInHull(vWorldPos.xz, uHull0, uHullExt0, uBow0)) discard;
+      if (harborInHull(vWorldPos.xz, uHull1, uHullExt1, uBow1)) discard;
+      if (harborInHull(vWorldPos.xz, uHull2, uHullExt2, uBow2)) discard;
+      if (harborInHull(vWorldPos.xz, uHull3, uHullExt3, uBow3)) discard;
+      if (harborInHull(vWorldPos.xz, uHull4, uHullExt4, uBow4)) discard;
+      if (harborInHull(vWorldPos.xz, uHull5, uHullExt5, uBow5)) discard;
       vec3 N = normalize(vWorldN);
       float ampK = clamp(uAmp / 0.045, 0.0, 1.0);
       N = normalize(mix(vec3(0.0, 1.0, 0.0), N, ampK));

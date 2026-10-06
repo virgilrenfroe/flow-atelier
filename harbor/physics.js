@@ -674,6 +674,7 @@ function applyDedicatedPropWear() {
     window.__harborCrates.extends = 'street-atlas row2 col1';
   }
   if (live.syncBasinBatchWear) live.syncBasinBatchWear();
+  if (live.syncBoatWear) live.syncBoatWear();
   if (stillMode && (iron || crate)) live.tick();
 }
 live.onStreetPropWear = applyDedicatedPropWear;
