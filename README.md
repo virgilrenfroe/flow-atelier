@@ -1,8 +1,8 @@
 # Flow atelier
 
-Music-driven flow field — *A Song with a Hole in It* (Virgil Renfroe).
+Music-driven flow field — *A Song with a Hole in It* .
 
-Live: https://virgilrenfroe.github.io/flow-atelier/
+Live: https://seethesystems.com/flow-atelier/
 
 Click **Song** (or `A`) to unlock audio. SVG export with `E`.
 

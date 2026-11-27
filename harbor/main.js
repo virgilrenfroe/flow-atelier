@@ -49,7 +49,7 @@ try { localStorage.setItem(FACES_KEY, facesMode ? 'on' : 'off'); } catch (_) {}
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const freezeMotion = reduceMotion || stillMode;
 
-// Clean exhibit mode (Virgil): no on-screen instructional text by default.
+// Clean exhibit mode: no on-screen instructional text by default.
 // Persist: localStorage noctuary-harbor-hud = 'off' | 'on'
 // Override: ?hud=1 show chrome · ?hud=0 force exhibit
 const HUD_KEY = 'noctuary-harbor-hud';
@@ -946,7 +946,7 @@ const buildingMat = new THREE.ShaderMaterial({
       }
     }
 
-    // Atlas path — FLAT orthographic back-wall sample (Virgil 2026-09-26).
+    // Atlas path — FLAT orthographic back-wall sample (2026-09-26).
     // Deep ray-box parallax bowed mullions/furniture into curves at glancing angles.
     // UV center-crop via cropAtlasUV (ATLAS_UV_CROP): same factor for room + shop.
     // Extremely shallow depth cue only via mild vignette, not ray hit.
@@ -979,7 +979,7 @@ const buildingMat = new THREE.ShaderMaterial({
       // Local metres on façade (instance scale) — NEVER world-position UV
       vec3 lpM = vLocalPos * vScale;
 
-      // Concrete façade body (Virgil 2026-09-26) — architectural grain on opaque
+      // Concrete façade body (2026-09-26) — architectural grain on opaque
       // wall / pier / frameBand only. Panes keep atlas interiors unchanged.
       // When the sheath sheets load, vertical faces replace this grain with
       // moss over a circuit underlayer; this color remains the roof/floor
@@ -1008,7 +1008,7 @@ const buildingMat = new THREE.ShaderMaterial({
       wallCol += vec3(0.008, 0.009, 0.011) * (blotch - 0.42) * isVert;
       // Slightly cooler shadow side — reads as matte concrete, not plastic
       wallCol = mix(wallCol, wallCol * vec3(0.92, 0.94, 1.02), (1.0 - ndl) * 0.35 * isVert);
-      // Cell size CONSTANT in metres (Virgil 2026-09-26).
+      // Cell size CONSTANT in metres (2026-09-26).
       // cellW/cellH that vary with height bend vertical mullions into curves.
       // Same square pitch every floor. Shop atlas is floor index 0 only —
       // a metre band (the old 2.55 m shopBand) covered several rows and
@@ -1041,7 +1041,7 @@ const buildingMat = new THREE.ShaderMaterial({
       vec2 cell = floor(roomUV);
       vec2 f = fract(roomUV);
 
-      // Mullions / frames — thin dark bands; window = hole (Virgil 2026-09-26).
+      // Mullions / frames — thin dark bands; window = hole (2026-09-26).
       // Old 0.14/0.16 left ~49% glass + beige wallCol rings (frameBand only covered
       // inner 55% of the margin). Shrink margins and paint the whole leftover as mullion.
       float mullU = mix(0.05, 0.04, isShop);
@@ -1054,8 +1054,7 @@ const buildingMat = new THREE.ShaderMaterial({
       // Corner conflict: façade-local rooms reorient on adjacent faces (face-map/proc).
       // Kill ~0.4 bay at each vertical edge (hard), then soft-fade another ~0.2 bay.
       // Atlas flat-ortho must NOT hard-kill: inPane=0 fills the mullion hole with
-      // wallCol, which reads as warm tan/brown "side wall" opaque panes (Virgil
-      // 2026-09-27 after cool127). Fenestra stays lit to the corner; face-map keeps
+      // wallCol, which reads as warm tan/brown "side wall" opaque panes (2026-09-27 after cool127). Fenestra stays lit to the corner; face-map keeps
       // the pier. edgeFade=1 on atlas so mix(body, interior) never bleeds façade.
       float halfAlong = (abs(Ln.x) >= abs(Ln.z)) ? (0.5 * vScale.z) : (0.5 * vScale.x);
       float edgeDistM = halfAlong - abs(faceAlong);
@@ -1115,7 +1114,7 @@ const buildingMat = new THREE.ShaderMaterial({
       ));
       frameBand *= (1.0 - inDoorCol);
       inPane *= (1.0 - inDoorCol);
-      // Dual sheath on vertical concrete only (Virgil: circuit under, living cover).
+      // Dual sheath on vertical concrete only (circuit under, living cover).
       // Samples stay outside the branch — WebGL1 derivatives need a uniform flow.
       // Tile is façade-local metres (concUV), not world XZ.
       // Growth alpha is mostly shut. Openings are the atlas cracks/flakes plus
@@ -1804,7 +1803,7 @@ const gold = new THREE.Color(0xf0c24b);
 const teal = new THREE.Color(0x3a6e78);
 const tmpC = new THREE.Color();
 
-// Rectilinear district massing only (Virgil 2026-09-26): unit BoxGeometry × scale.
+// Rectilinear district massing only (2026-09-26): unit BoxGeometry × scale.
 // No yaw / chamfer / cylinder silhouettes — planar façades so local UV + room/shop atlas stay square.
 const harborBoxes = [];
 function placeBuilding(x, z, w, h, d, color, _yawIgnored) {
